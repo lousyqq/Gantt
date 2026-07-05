@@ -25,6 +25,7 @@ IF OBJECT_ID('dbo.usp_DeleteProject','P')     IS NOT NULL DROP PROCEDURE dbo.usp
 IF OBJECT_ID('dbo.usp_ReorderProjects','P')   IS NOT NULL DROP PROCEDURE dbo.usp_ReorderProjects;
 IF OBJECT_ID('dbo.usp_InsertTask','P')        IS NOT NULL DROP PROCEDURE dbo.usp_InsertTask;
 IF OBJECT_ID('dbo.usp_DeleteTask','P')        IS NOT NULL DROP PROCEDURE dbo.usp_DeleteTask;
+IF OBJECT_ID('dbo.usp_EnsureScheduleYear','P') IS NOT NULL DROP PROCEDURE dbo.usp_EnsureScheduleYear;
 
 IF OBJECT_ID('dbo.vw_WeeklyReport','V') IS NOT NULL DROP VIEW dbo.vw_WeeklyReport;
 IF OBJECT_ID('dbo.vw_ProjectTasks','V') IS NOT NULL DROP VIEW dbo.vw_ProjectTasks;
@@ -413,6 +414,32 @@ BEGIN
 
     INSERT dbo.AuditLog(ActorName,ActorRole,Action,EntityType,EntityId,NewValue)
     VALUES(@Actor,@ActorRole,'REORDER','Project',NULL,@OrderedIdsJson);
+END
+GO
+
+-- 8.x 產生指定年度的 ScheduleWeeks 週資料(若尚未存在) ------------------
+-- 用法:EXEC dbo.usp_EnsureScheduleYear 2027;  之後前端年度下拉即可選到該年
+CREATE PROCEDURE dbo.usp_EnsureScheduleYear
+    @Year INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF EXISTS (SELECT 1 FROM dbo.ScheduleWeeks WHERE ScheduleYear = @Year) RETURN;
+
+    -- ISO 8601:第 1 週=含 1/4 的那一週(週一起始);每週所屬月份取該週「週四」的月份
+    DECLARE @jan4     DATE = DATEFROMPARTS(@Year, 1, 4);
+    DECLARE @dowMon   INT  = (DATEPART(WEEKDAY, @jan4) + @@DATEFIRST - 2) % 7;      -- 0=週一
+    DECLARE @week1Mon DATE = DATEADD(DAY, -@dowMon, @jan4);                          -- 第 1 週的週一
+    DECLARE @maxWeek  INT  = DATEPART(ISO_WEEK, DATEFROMPARTS(@Year, 12, 28));       -- 該年 ISO 週數(52 或 53)
+
+    DECLARE @w INT = 1;
+    WHILE @w <= @maxWeek
+    BEGIN
+        DECLARE @thu DATE = DATEADD(DAY, (@w - 1) * 7 + 3, @week1Mon);               -- 該週週四
+        INSERT dbo.ScheduleWeeks(ScheduleYear, WeekNo, MonthName, MonthLabel)
+        VALUES(@Year, @w, FORMAT(@thu, 'yyyyMM'), FORMAT(@thu, 'yyyy/MM'));
+        SET @w += 1;
+    END
 END
 GO
 

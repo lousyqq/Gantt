@@ -13,6 +13,16 @@ string connStr = builder.Configuration.GetConnectionString("Gantt")
 
 const int DefaultYear = 2026;
 
+// 統一錯誤處理:內部例外只寫入伺服器 log、對外回一般化訊息(避免洩漏連線字串/資料表結構等細節);
+// 預存程序以 RAISERROR 拋出的商業邏輯錯誤(Number=50000,自己撰寫的安全文字)則照原文回給前端。
+IResult Fail(Exception ex)
+{
+    if (ex is SqlException sql && sql.Number == 50000)
+        return Results.Problem(sql.Message, statusCode: 400);
+    app.Logger.LogError(ex, "API 處理失敗");
+    return Results.Problem("伺服器處理失敗，請稍後再試或聯絡系統管理員。");
+}
+
 // 1) 一次載入前端所需的全部資料：使用者、專案(含任務)、每週打卡、非專案事項
 app.MapGet("/api/bootstrap", async (int? year) =>
 {
@@ -29,6 +39,23 @@ app.MapGet("/api/bootstrap", async (int? year) =>
             while (await r.ReadAsync())
                 users.Add(new { name = r.GetString(0), role = r.GetString(1) });
 
+        // 可切換的年度清單 + 該年度的週→月對照(供前端月份表頭與年度下拉)
+        var years = new List<int>();
+        using (var cmd = new SqlCommand(
+            "SELECT DISTINCT ScheduleYear FROM dbo.ScheduleWeeks ORDER BY ScheduleYear", conn))
+        using (var r = await cmd.ExecuteReaderAsync())
+            while (await r.ReadAsync()) years.Add(r.GetInt32(0));
+
+        var weeks = new List<object>();
+        using (var cmd = new SqlCommand(
+            "SELECT WeekNo, MonthName, MonthLabel FROM dbo.ScheduleWeeks WHERE ScheduleYear = @y ORDER BY WeekNo", conn))
+        {
+            cmd.Parameters.AddWithValue("@y", y);
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                weeks.Add(new { week = r.GetInt32(0), monthName = r.GetString(1), monthLabel = r.GetString(2) });
+        }
+
         var projMap = new Dictionary<int, ProjectDto>();
         var projOrder = new List<int>();
         using (var cmd = new SqlCommand(@"
@@ -37,9 +64,11 @@ app.MapGet("/api/bootstrap", async (int? year) =>
             FROM dbo.Projects p
             JOIN dbo.Users u ON u.UserId = p.OwnerUserId
             LEFT JOIN dbo.Tasks t ON t.ProjectId = p.ProjectId AND t.IsDeleted = 0
-            WHERE p.IsDeleted = 0
+            WHERE p.IsDeleted = 0 AND p.ScheduleYear = @y
             ORDER BY p.OwnerUserId, p.SortOrder, p.ProjectId, t.SortOrder", conn))
-        using (var r = await cmd.ExecuteReaderAsync())
+        {
+            cmd.Parameters.AddWithValue("@y", y);
+            using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
             {
                 int pid = r.GetInt32(0);
@@ -66,6 +95,7 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                         End = r.GetInt32(8)
                     });
             }
+        }
         var projects = projOrder.Select(id => projMap[id]).ToList();
 
         // taskLogs[taskCode][week] = { status, note, isExecuting }
@@ -109,12 +139,9 @@ app.MapGet("/api/bootstrap", async (int? year) =>
             }
         }
 
-        return Results.Ok(new { year = y, users, projects, taskLogs, extraNotes });
+        return Results.Ok(new { year = y, years, weeks, users, projects, taskLogs, extraNotes });
     }
-    catch (Exception ex)
-    {
-        return Results.Problem("讀取資料庫失敗：" + ex.Message);
-    }
+    catch (Exception ex) { return Fail(ex); }
 });
 
 // 2) 打卡 (每週任務執行回報) — usp_UpsertWeeklyLog
@@ -135,7 +162,7 @@ app.MapPost("/api/weekly-log", async (WeeklyLogReq req) =>
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
-    catch (Exception ex) { return Results.Problem(ex.Message); }
+    catch (Exception ex) { return Fail(ex); }
 });
 
 // 3) 非專案事項 — usp_UpsertExtraNote
@@ -155,7 +182,7 @@ app.MapPost("/api/extra-note", async (ExtraNoteReq req) =>
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
-    catch (Exception ex) { return Results.Problem(ex.Message); }
+    catch (Exception ex) { return Fail(ex); }
 });
 
 // 4) 主管修改任務排程 (名稱/起訖週) — usp_UpdateTaskSchedule
@@ -175,7 +202,7 @@ app.MapPost("/api/task-schedule", async (TaskScheduleReq req) =>
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
-    catch (Exception ex) { return Results.Problem(ex.Message); }
+    catch (Exception ex) { return Fail(ex); }
 });
 
 // 5) 主管新增專案 — usp_InsertProject
@@ -198,7 +225,7 @@ app.MapPost("/api/project", async (ProjectCreateReq req) =>
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true, projectId = (int)outId.Value });
     }
-    catch (Exception ex) { return Results.Problem(ex.Message); }
+    catch (Exception ex) { return Fail(ex); }
 });
 
 // 6) 主管修改專案 (名稱/分類/類型) — usp_UpdateProject
@@ -219,7 +246,7 @@ app.MapPost("/api/project/update", async (ProjectUpdateReq req) =>
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
-    catch (Exception ex) { return Results.Problem(ex.Message); }
+    catch (Exception ex) { return Fail(ex); }
 });
 
 // 7) 主管刪除專案 (軟刪除，含任務) — usp_DeleteProject
@@ -236,7 +263,7 @@ app.MapPost("/api/project/delete", async (ProjectDeleteReq req) =>
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
-    catch (Exception ex) { return Results.Problem(ex.Message); }
+    catch (Exception ex) { return Fail(ex); }
 });
 
 // 8) 主管拖曳重新排序 — usp_ReorderProjects
@@ -253,7 +280,7 @@ app.MapPost("/api/project/reorder", async (ProjectReorderReq req) =>
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
-    catch (Exception ex) { return Results.Problem(ex.Message); }
+    catch (Exception ex) { return Fail(ex); }
 });
 
 // 9) 主管新增任務/計畫區間 — usp_InsertTask
@@ -275,7 +302,7 @@ app.MapPost("/api/task", async (TaskCreateReq req) =>
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true, taskCode = outCode.Value as string });
     }
-    catch (Exception ex) { return Results.Problem(ex.Message); }
+    catch (Exception ex) { return Fail(ex); }
 });
 
 // 10) 主管刪除任務/區間 (軟刪除) — usp_DeleteTask
@@ -292,7 +319,162 @@ app.MapPost("/api/task/delete", async (TaskDeleteReq req) =>
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
-    catch (Exception ex) { return Results.Problem(ex.Message); }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 11) 稽核紀錄查詢(主管「異動紀錄」面板) — 讀 AuditLog 最近 N 筆
+app.MapGet("/api/audit-log", async (int? top) =>
+{
+    int n = Math.Clamp(top ?? 200, 1, 1000);
+    try
+    {
+        using var conn = new SqlConnection(connStr);
+        await conn.OpenAsync();
+        var logs = new List<object>();
+        using var cmd = new SqlCommand(@"
+            SELECT TOP (@n) AuditId, ActorName, ActorRole, Action, EntityType, EntityId, NewValue, Detail, CreatedAt
+            FROM dbo.AuditLog
+            ORDER BY AuditId DESC", conn);
+        cmd.Parameters.AddWithValue("@n", n);
+        using var r = await cmd.ExecuteReaderAsync();
+        while (await r.ReadAsync())
+            logs.Add(new
+            {
+                id = r.GetInt64(0),
+                actor = r.GetString(1),
+                role = r.IsDBNull(2) ? null : r.GetString(2),
+                action = r.GetString(3),
+                entityType = r.GetString(4),
+                entityId = r.IsDBNull(5) ? null : r.GetString(5),
+                newValue = r.IsDBNull(6) ? null : r.GetString(6),
+                detail = r.IsDBNull(7) ? null : r.GetString(7),
+                at = r.GetDateTime(8).ToString("yyyy-MM-dd HH:mm:ss")
+            });
+        return Results.Ok(new { logs });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 12) 匯出週報 Excel(主管「團隊總結」面板的下載按鈕) — ClosedXML 產生 .xlsx
+app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
+{
+    int y = year ?? DefaultYear;
+    int w = week ?? 1;
+    try
+    {
+        // --- 撈本週排定任務(含未回報)與非專案事項 ---
+        var rows = new List<(string Owner, string Category, string Type, string Project, string Task, int Start, int End, string? Status, string? Note)>();
+        var notes = new List<(string Owner, string Note)>();
+        using (var conn = new SqlConnection(connStr))
+        {
+            await conn.OpenAsync();
+            using (var cmd = new SqlCommand(@"
+                SELECT u.UserName, p.Category, p.TypeCode, p.Name, t.TaskName, t.StartWeek, t.EndWeek, w.Status, w.Note
+                FROM dbo.Tasks t
+                JOIN dbo.Projects p ON p.ProjectId = t.ProjectId AND p.IsDeleted = 0 AND p.ScheduleYear = @y
+                JOIN dbo.Users u    ON u.UserId = p.OwnerUserId
+                LEFT JOIN dbo.WeeklyLogs w ON w.TaskId = t.TaskId AND w.ScheduleYear = @y AND w.WeekNo = @w
+                WHERE t.IsDeleted = 0 AND t.StartWeek <= @w AND t.EndWeek >= @w
+                ORDER BY u.SortOrder, p.SortOrder, p.ProjectId, t.SortOrder", conn))
+            {
+                cmd.Parameters.AddWithValue("@y", y);
+                cmd.Parameters.AddWithValue("@w", w);
+                using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                    rows.Add((r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4),
+                              r.GetInt32(5), r.GetInt32(6),
+                              r.IsDBNull(7) ? null : r.GetString(7),
+                              r.IsDBNull(8) ? null : r.GetString(8)));
+            }
+            using (var cmd = new SqlCommand(@"
+                SELECT u.UserName, e.Note
+                FROM dbo.ExtraNotes e
+                JOIN dbo.Users u ON u.UserId = e.UserId
+                WHERE e.ScheduleYear = @y AND e.WeekNo = @w
+                ORDER BY u.SortOrder", conn))
+            {
+                cmd.Parameters.AddWithValue("@y", y);
+                cmd.Parameters.AddWithValue("@w", w);
+                using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                    notes.Add((r.GetString(0), r.IsDBNull(1) ? "" : r.GetString(1)));
+            }
+        }
+
+        var statusLabel = new Dictionary<string, string>
+        { ["executed"] = "有執行", ["monitor"] = "Monitor", ["not_executed"] = "未執行" };
+
+        using var wb = new ClosedXML.Excel.XLWorkbook();
+
+        // --- Sheet 1:專案執行 ---
+        var ws = wb.Worksheets.Add($"W{w:00} 專案執行");
+        string[] headers = { "成員", "分類", "類型", "專案名稱", "計畫任務", "排程", "本週狀態", "工作說明" };
+        for (int i = 0; i < headers.Length; i++) ws.Cell(1, i + 1).Value = headers[i];
+        var head = ws.Range(1, 1, 1, headers.Length);
+        head.Style.Font.Bold = true;
+        head.Style.Font.FontColor = ClosedXML.Excel.XLColor.White;
+        head.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromArgb(0x00, 0x1F, 0x5B);
+        head.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center;
+
+        int row = 2;
+        foreach (var t in rows)
+        {
+            ws.Cell(row, 1).Value = t.Owner;
+            ws.Cell(row, 2).Value = t.Category;
+            ws.Cell(row, 3).Value = t.Type.ToUpperInvariant();
+            ws.Cell(row, 4).Value = t.Project;
+            ws.Cell(row, 5).Value = t.Task;
+            ws.Cell(row, 6).Value = $"W{t.Start}–W{t.End}";
+            ws.Cell(row, 7).Value = t.Status is null ? "未回報" : (statusLabel.GetValueOrDefault(t.Status, t.Status));
+            ws.Cell(row, 8).Value = t.Note ?? "";
+            var st = ws.Cell(row, 7).Style;
+            st.Font.Bold = true;
+            st.Fill.BackgroundColor = t.Status switch
+            {
+                "executed"     => ClosedXML.Excel.XLColor.FromArgb(0xD1, 0xFA, 0xE5),   // 綠
+                "monitor"      => ClosedXML.Excel.XLColor.FromArgb(0xDB, 0xEA, 0xFE),   // 藍
+                "not_executed" => ClosedXML.Excel.XLColor.FromArgb(0xE2, 0xE8, 0xF0),   // 灰
+                _              => ClosedXML.Excel.XLColor.FromArgb(0xFE, 0xF3, 0xC7)    // 未回報 = 黃
+            };
+            row++;
+        }
+        var used = ws.Range(1, 1, Math.Max(row - 1, 1), headers.Length);
+        used.Style.Border.InsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
+        used.Style.Border.OutsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
+        ws.SheetView.FreezeRows(1);
+        ws.Column(4).Width = 45; ws.Column(5).Width = 30; ws.Column(8).Width = 50;
+        ws.Columns(1, 3).AdjustToContents(); ws.Column(6).AdjustToContents(); ws.Column(7).AdjustToContents();
+        ws.Column(8).Style.Alignment.WrapText = true;
+
+        // --- Sheet 2:非專案事項 ---
+        var ws2 = wb.Worksheets.Add($"W{w:00} 非專案事項");
+        ws2.Cell(1, 1).Value = "成員"; ws2.Cell(1, 2).Value = "非專案工作內容";
+        var head2 = ws2.Range(1, 1, 1, 2);
+        head2.Style.Font.Bold = true;
+        head2.Style.Font.FontColor = ClosedXML.Excel.XLColor.White;
+        head2.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromArgb(0xEA, 0x58, 0x0C);
+        int row2 = 2;
+        foreach (var n in notes)
+        {
+            ws2.Cell(row2, 1).Value = n.Owner;
+            ws2.Cell(row2, 2).Value = n.Note;
+            row2++;
+        }
+        var used2 = ws2.Range(1, 1, Math.Max(row2 - 1, 1), 2);
+        used2.Style.Border.InsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
+        used2.Style.Border.OutsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
+        ws2.Column(1).AdjustToContents();
+        ws2.Column(2).Width = 80;
+        ws2.Column(2).Style.Alignment.WrapText = true;
+        ws2.SheetView.FreezeRows(1);
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return Results.File(ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"WeeklyReport_{y}_W{w:00}.xlsx");
+    }
+    catch (Exception ex) { return Fail(ex); }
 });
 
 app.Run();

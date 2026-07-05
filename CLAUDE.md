@@ -31,7 +31,9 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
 
 ## API 端點（Program.cs）
 
-- `GET  /api/bootstrap?year=` — 一次載入 users / projects(含 tasks) / taskLogs / extraNotes
+- `GET  /api/bootstrap?year=` — 一次載入 users / projects(含 tasks，依年度過濾) / taskLogs / extraNotes / years(可切換年度) / weeks(週→月對照)
+- `GET  /api/audit-log?top=`  — AuditLog 最近 N 筆（主管「異動紀錄」面板）
+- `GET  /api/weekly-report-excel?year=&week=` — 下載 Excel 週報 .xlsx（ClosedXML；「團隊總結」面板的匯出按鈕）
 - `POST /api/weekly-log`   — `dbo.usp_UpsertWeeklyLog`
 - `POST /api/extra-note`   — `dbo.usp_UpsertExtraNote`
 - `POST /api/task-schedule`— `dbo.usp_UpdateTaskSchedule`
@@ -43,15 +45,25 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
 - `POST /api/project/delete`  — `usp_DeleteProject`（軟刪除）
 - `POST /api/project/reorder` — `usp_ReorderProjects`（拖曳排序，body `orderedIds`）
 - `POST /api/task`            — `usp_InsertTask`（新增計畫區間，回傳 taskCode）
-- `POST /api/task/delete`     — `usp_DeleteTask`
+- `POST /api/task/delete`     — `usp_DeleteTask`（前端入口：TaskModal 主管視角的「刪除區間」按鈕）
+
+前端行為備註：登入後每 60 秒靜默輪詢 refreshData（多人共用時自動同步他人變更）；
+搜尋／類型篩選啟用時拖曳排序會暫停（避免落點與畫面不一致）。
 
 前端離線策略：連不到後端時顯示錯誤（ErrorScreen），不塞假資料。
+
+前端 API 路徑：`app.jsx` 的 `API_BASE` 於執行期由 `window.location.pathname` 自動偵測部署根路徑
+（本地＝`''`、IIS 子應用程式如 `/Gantt` ＝ `'/Gantt'`），本地測好可直接發布 IIS 子目錄，勿改回寫死的絕對路徑。
+
+錯誤處理慣例：所有端點的 catch 走 `Fail(ex)` — 內部例外只記 log、回一般化 500；
+SP 的 `RAISERROR`（Number=50000）視為商業邏輯訊息照原文回 400。新增端點請沿用，勿直接回 `ex.Message`。
 
 ## 資料庫
 
 - 伺服器 `Sariel`，資料庫 `Gantt`，連線字串在 `appsettings.json` 的 `ConnectionStrings:Gantt`（開發用明碼密碼）。
 - 建置腳本：`01_schema_and_objects.sql`（結構＋預存程序，含 DROP 保護可重跑；已含 `Projects.SortOrder` 與 `usp_ReorderProjects`）、`02_seed_data.sql`（種子資料：7 users、68 projects、107 tasks）。
-- `03_add_project_sortorder.sql` 為既有 DB「事後補 SortOrder」的遷移腳本（idempotent）；**全新建置只需 01→02**，不必跑 03。
+- `03_add_project_sortorder.sql`、`04_add_ensure_schedule_year.sql` 為既有 DB 的遷移腳本（idempotent）；**全新建置只需 01→02**，不必跑 03/04。
+- **開新年度**只需 `EXEC dbo.usp_EnsureScheduleYear <年度>;`（依 ISO 8601 產生該年 ScheduleWeeks），前端年度下拉即可選到，不用改程式。
 - 全新 server 需先 `CREATE DATABASE [Gantt];`（腳本本身不建資料庫）。
 - 用 sqlcmd 執行時需帶旗標：`-I`（QUOTED_IDENTIFIER ON，filtered index 必要）、`-f 65001`（UTF-8，中文 NVARCHAR 必要）、`-b`（遇錯停止）。
 
