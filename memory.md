@@ -146,6 +146,101 @@
 
 ---
 
+## 2026-07-06 — 主管成員管理（新增／移除成員 + 專案改派）
+
+**需求**：單位有新同仁轉入時，主管可自行新增成員（不必改種子資料），
+為其安排專案工作，新成員與其他成員一樣可登入打卡回報；也可移除已離開的成員。
+
+**資料庫**（`01_schema_and_objects.sql`；遷移 `05_add_user_management.sql`（CREATE OR ALTER，idempotent），已在 Sariel 執行）
+- `usp_InsertUser @UserName,@Actor,@ActorRole`：新增 member（SortOrder=MAX+1）；
+  名稱空白／已存在會 RAISERROR；**同名成員曾被移除（IsActive=0）則重新啟用**，歷史專案與回報自動恢復可見。
+- `usp_DeleteUser @UserName,@Actor,@ActorRole`：軟刪除（`IsActive=0`，歷史回報保留）；
+  不可移除 manager；**名下仍有未刪除專案時 RAISERROR 擋下**（提示先刪除或改派專案）。
+- 兩者皆寫 AuditLog（EntityType=`User`，Action=INSERT/DELETE）。Users 表結構不變（本來就有 IsActive）。
+
+**後端**（`Program.cs`）新增 2 個端點：`POST /api/user`、`POST /api/user/delete`（皆走 `Fail(ex)` 慣例）。
+
+**前端**（`ClientApp/app.jsx`，已 `npm run build`）
+1. 主管 header 新增「👥 成員管理」按鈕 → `MemberPanel` 右側滑出面板：
+   輸入名稱新增（Enter 可送出、重名前端先擋）；成員清單顯示當年度專案數；「移除」經 `ConfirmModal` 確認。
+2. **空群組列**：主管視角（未啟用搜尋／類型篩選）下，沒有專案的成員也顯示甘特圖群組列（0 項），
+   才能對剛加入的新同仁按「＋ 新增專案」。成員視角維持原行為（無專案不顯示）。
+3. **編輯專案可改派負責人**：`ProjectEditModal`（編輯模式）新增「負責人」下拉（後端 `usp_UpdateProject` 本就支援），
+   改選他人時顯示移轉警告；用於把專案移轉給新同仁、或清空離職成員名下專案以便移除。
+4. `AUDIT_ENTITY_LABELS` 補 `User: '成員'`。新成員自動出現在登入畫面（bootstrap users），即可打卡與填非專案事項。
+
+**驗證**：`npm run build`、`dotnet build` 0 error；以實際 Gantt DB 走完
+新增成員→空群組列出現→為其新增專案→（名下有專案時移除被 400 擋下，訊息照原文顯示）→
+編輯專案改派給冠芝→移除成員成功→AuditLog 有 User INSERT/DELETE 紀錄；
+測試成員與測試專案已從 DB 硬刪清除；console 無警告錯誤。
+
+**追加（同日）— 編輯成員名稱**
+- `usp_UpdateUser @UserName,@NewName,@Actor,@ActorRole`（01 與 05 皆已更新，05 已重跑於 Sariel）：
+  名稱空白／不存在／重名（含已停用者，UNIQUE 約束涵蓋全部列）RAISERROR；同名直接 RETURN 不記錄。
+  專案／回報以 UserId 關聯，改名後歷史資料自動跟隨；AuditLog 記 UPDATE User（OldValue→NewValue）。
+- 後端新增 `POST /api/user/update`。
+- 前端 `MemberPanel` 成員卡新增「✎ 編輯」→ 行內編輯（Enter 儲存、Esc 取消、重名前端先擋）。
+- 注意：成員被改名當下若正在其他瀏覽器以舊名登入，後續寫入會回「User 不存在」，重新登入即可。
+- 驗證：改名「冠芝→冠芝改」名下 5 專案跟隨→重名「玉婷」被擋→改回「冠芝」；AuditLog 兩筆 UPDATE User；console 乾淨。
+
+---
+
+## 2026-07-06 — Windows 工號稽核（whoami + AuditLog.ActorEmpId）
+
+**需求**：公司桌機登入必帶 Windows 帳號（如 `UMC\00058897`），要求記錄操作網頁者的**工號**，
+讓每筆編輯動作可追溯到實際操作的 Windows 帳號（顯示名稱可能共用/選錯人頭）。
+參考 EQDashboard `AuthController.WhoAmI` 的 Negotiate 作法。
+
+**套件**：`Gantt.csproj` 新增 `Microsoft.AspNetCore.Authentication.Negotiate 9.0.0`。
+
+**後端**（`Program.cs`）
+- 註冊 `AddAuthentication(Negotiate).AddNegotiate()` + `UseAuthentication/UseAuthorization`；
+  僅 `/api/whoami` 要求驗證（`RequireAuthorization` 指定 Negotiate scheme），其餘端點維持匿名。
+- 新增 `GET /api/whoami`：`User.Identity.Name` 剝 `{Auth:WindowsDomainStripPrefix}\`（預設 UMC，appsettings 可改）
+  → 剝 `@domain`（UPN 保險）→ 取最後 `\` 之後（非設定網域如本機開發 `SARIEL\yu-tinglin` 也能取到帳號）。
+  無法驗證的請求收到 401 + WWW-Authenticate: Negotiate；網域內瀏覽器會自動補認證。
+- 12 個寫入端點的 request record 全部加 `string? ActorEmpId`，傳入 SP `@ActorEmpId`。
+- `GET /api/audit-log` 回傳新增 `empId` 欄位。
+
+**資料庫**（`01`；遷移 `06_add_actor_empid.sql`，已在 Sariel 執行）
+- `AuditLog` 新增 `ActorEmpId NVARCHAR(20) NULL`。
+- 全部 12 個寫入 SP 加 `@ActorEmpId NVARCHAR(20)=NULL` 並寫入 AuditLog（06 以 CREATE OR ALTER 全數重建）。
+
+**前端**（`ClientApp/app.jsx`，已 `npm run build`）
+- 模組層 `CURRENT_EMP_ID` + `detectEmpId()`：App 載入時打一次 `/api/whoami`（401/失敗靜默 → null，系統照常）。
+- **`apiPost` 統一自動注入 `actorEmpId`**（一處改動涵蓋所有寫入，之後新端點不用另外處理）。
+- 顯示：登入畫面底部「已偵測到 Windows 工號：xxx」；header 使用者資訊「主管 · 工號 xxx」；
+  異動紀錄面板操作者旁灰色 mono 標籤顯示工號，並納入關鍵字篩選。
+
+**部署注意**：IIS 需啟用 Windows Authentication（**匿名驗證也要保持啟用**，其他端點才不會被擋）；
+Kestrel 本機由 Negotiate 套件處理（NTLM）。部署到非 UMC 網域改 `appsettings Auth:WindowsDomainStripPrefix`。
+
+**驗證**：本機 whoami 回 `SARIEL\yu-tinglin` → empId=`yu-tinglin`；登入畫面/header 顯示工號；
+新增＋移除測試成員後 `AuditLog.ActorEmpId` 兩筆皆為 `yu-tinglin`，異動紀錄面板顯示工號標籤；
+測試資料已清除；前後端建置 0 error、console 乾淨。
+
+---
+
+## 2026-07-06 — SQL 遷移腳本合併（03/04/05/06 → 03_upgrade_to_current.sql）
+
+**需求**：使用者的既有 DB 只跑過舊版 01+02，希望一份 03 執行一次就升級到目前完整架構，取代零散的 03～06。
+
+**處理**：
+- 新增 `03_upgrade_to_current.sql`（合併版），內容＝原 03+04+05+06 全部：
+  ① `Projects.SortOrder` 欄位＋回填（**加保護：僅在全部為 0 時回填**，重跑不會洗掉主管拖曳的自訂排序；
+  原 03 是無條件回填，重跑會破壞排序——此為合併時的行為修正）；
+  ② `AuditLog.ActorEmpId` 欄位；③ 13 個 SP 最新版（CREATE OR ALTER，含 @ActorEmpId 與 usp_EnsureScheduleYear）。
+- 刪除 `03_add_project_sortorder.sql`、`04_add_ensure_schedule_year.sql`、`05_add_user_management.sql`、
+  `06_add_actor_empid.sql`（內容已全數併入；歷史可從 git 取回）。
+- 目前 .sql 檔只剩三個：01（結構）、02（種子）、03（既有 DB 升級用）。全新建置仍只需 01→02。
+
+**驗證**：
+- 在正式 Gantt DB 重跑合併版：成功、SortOrder checksum 前後一致（14964/71/468，自訂排序未被動）。
+- 從 git（56b7f01）取出舊版 01/02 建臨時 DB `Gantt_MigTest` → 跑合併版 03 →
+  與正式 DB 比對：資料表欄位 diff=0、13 個 SP 定義 SHA2_256 雜湊 diff=0，結構完全一致；測試 DB 已刪除。
+
+---
+
 ## 先前修改（同一改造專案的前置作業）
 
 - **ServiceCenter → Gantt 更名**：專案由舊 ServiceCenter App 改造，所有 ServiceCenter 字樣改為 Gantt。

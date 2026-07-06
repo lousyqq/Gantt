@@ -149,13 +149,28 @@ async function apiGet(path) {
   if (!res.ok) throw new Error((await readApiError(res)) || 'HTTP ' + res.status);
   return res.json();
 }
+// Windows 工號(如 00058897):載入時由 /api/whoami 偵測(桌機網域帳號 UMC\00058897 剝前綴),
+// 所有寫入 API 自動附帶,由預存程序寫入 AuditLog.ActorEmpId 留下操作紀錄;非網域環境為 null(照常可用)
+let CURRENT_EMP_ID = null;
+async function detectEmpId() {
+  try {
+    const d = await apiGet('/api/whoami');
+    CURRENT_EMP_ID = d.empId || null;
+  } catch {
+    CURRENT_EMP_ID = null;
+  } // 401(非網域/無法驗證)→ 靜默忽略
+  return CURRENT_EMP_ID;
+}
 async function apiPost(path, body) {
   const res = await fetch(API_BASE + path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify({
+      actorEmpId: CURRENT_EMP_ID,
+      ...body
+    })
   });
   if (!res.ok) throw new Error((await readApiError(res)) || 'HTTP ' + res.status);
   return res.json();
@@ -178,6 +193,12 @@ function App() {
   const [users, setUsers] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState(null);
+  const [empId, setEmpId] = useState(null); // Windows 工號(顯示用;實際寫入由 apiPost 自動附帶)
+
+  // 載入時偵測一次 Windows 工號(非網域環境取不到 → null,系統照常運作)
+  React.useEffect(() => {
+    detectEmpId().then(setEmpId);
+  }, []);
 
   // 年度切換:可用年度與週→月對照皆來自 DB 的 ScheduleWeeks(開新年度只需 EXEC usp_EnsureScheduleYear)
   const [scheduleYear, setScheduleYear] = useState(DEFAULT_SCHEDULE_YEAR);
@@ -242,6 +263,7 @@ function App() {
   const [showWeeklyReport, setShowWeeklyReport] = useState(false);
   const [showPendingPanel, setShowPendingPanel] = useState(false);
   const [showAuditPanel, setShowAuditPanel] = useState(false); // 主管:異動紀錄(AuditLog)面板
+  const [showMemberPanel, setShowMemberPanel] = useState(false); // 主管:成員管理面板
 
   const weekW = isCompact ? 22 : 32;
   const todayWeek = getTodayWeek(scheduleYear, weeksTotal); // 本週(相對於選定年度)
@@ -515,6 +537,59 @@ function App() {
     }
   };
 
+  // --- 主管：成員 新增/移除 ---
+  const handleAddUser = async name => {
+    try {
+      await apiPost('/api/user', {
+        userName: name,
+        actor: currentUser,
+        actorRole: role
+      });
+      await refreshData();
+      showToast('✅ 成員已新增');
+      return true;
+    } catch (e) {
+      showToast('❌ 新增失敗：' + (e.message || '無法連線資料庫'));
+      return false;
+    }
+  };
+  const handleRenameUser = async (oldName, newName) => {
+    try {
+      await apiPost('/api/user/update', {
+        userName: oldName,
+        newName,
+        actor: currentUser,
+        actorRole: role
+      });
+      await refreshData();
+      showToast('✅ 成員名稱已更新');
+      return true;
+    } catch (e) {
+      showToast('❌ 更新失敗：' + (e.message || '無法連線資料庫'));
+      return false;
+    }
+  };
+  const handleDeleteUser = name => {
+    setConfirmInfo({
+      title: '移除成員',
+      message: `確定要移除成員「${name}」嗎？\n移除後將不再出現於登入畫面與甘特圖（歷史回報保留，重新新增同名成員即可還原）。\n若其名下仍有專案，需先刪除或改派專案才能移除。`,
+      onConfirm: async () => {
+        setConfirmInfo(null);
+        try {
+          await apiPost('/api/user/delete', {
+            userName: name,
+            actor: currentUser,
+            actorRole: role
+          });
+          await refreshData();
+          showToast('✅ 成員已移除');
+        } catch (e) {
+          showToast('❌ 移除失敗：' + (e.message || '無法連線資料庫'));
+        }
+      }
+    });
+  };
+
   // --- 篩選 ---
   const filteredProjects = useMemo(() => {
     const kw = searchText.trim().toLowerCase();
@@ -529,10 +604,12 @@ function App() {
       return true;
     });
   }, [projects, searchText, typeFilter, ownerFilter, onlyMine, role, currentUser]);
+
+  // 主管未啟用搜尋/類型篩選時，沒有專案的成員(如剛加入的新同仁)也要顯示群組列,才能為其新增專案
   const groupedProjects = useMemo(() => users.map(user => ({
     owner: user,
     projects: filteredProjects.filter(p => p.owner === user)
-  })).filter(g => g.projects.length > 0), [filteredProjects, users]);
+  })).filter(g => g.projects.length > 0 || role === 'manager' && !isFilteringRows && (ownerFilter === 'all' || ownerFilter === g.owner)), [filteredProjects, users, role, isFilteringRows, ownerFilter]);
 
   // --- 本週統計 ---
   const weekStats = useMemo(() => {
@@ -676,10 +753,13 @@ function App() {
   }, myPendingTasks.length)), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowExtraNoteModal(true),
     className: `relative px-3 py-1.5 rounded-md text-xs font-bold shadow transition border ${isViewingPast ? 'bg-slate-500 hover:bg-slate-400 border-slate-400/50 text-white' : extraNotes[currentUser]?.[currentWeek] ? 'bg-green-600 hover:bg-green-500 border-green-400/50 text-white' : 'bg-orange-500 hover:bg-orange-400 border-orange-400/50 text-white'}`
-  }, isViewingPast ? `🔒 檢視 W${String(currentWeek).padStart(2, '0')} 非專案事項` : extraNotes[currentUser]?.[currentWeek] ? '✓ 非專案事項(已填寫)' : '📝 非專案事項(未填寫)')), role === 'manager' && /*#__PURE__*/React.createElement("button", {
+  }, isViewingPast ? `🔒 檢視 W${String(currentWeek).padStart(2, '0')} 非專案事項` : extraNotes[currentUser]?.[currentWeek] ? '✓ 非專案事項(已填寫)' : '📝 非專案事項(未填寫)')), role === 'manager' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowMemberPanel(true),
+    className: "bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20"
+  }, "\uD83D\uDC65 \u6210\u54E1\u7BA1\u7406"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowAuditPanel(true),
     className: "bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20"
-  }, "\uD83D\uDCDC \u7570\u52D5\u7D00\u9304"), /*#__PURE__*/React.createElement("button", {
+  }, "\uD83D\uDCDC \u7570\u52D5\u7D00\u9304")), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowWeeklyReport(true),
     className: "bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-blue-400/50"
   }, "\uD83D\uDCCA W", String(currentWeek).padStart(2, '0'), " \u5718\u968A\u7E3D\u7D50"), /*#__PURE__*/React.createElement("div", {
@@ -690,7 +770,7 @@ function App() {
     className: "font-bold text-sm"
   }, currentUser), /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] text-white/50"
-  }, role === 'manager' ? '主管' : '成員')), /*#__PURE__*/React.createElement("button", {
+  }, role === 'manager' ? '主管' : '成員', empId ? ` · 工號 ${empId}` : '')), /*#__PURE__*/React.createElement("button", {
     onClick: handleLogout,
     className: "p-1.5 hover:bg-red-500/80 rounded-lg transition text-white/70 hover:text-white bg-white/5",
     title: "\u767B\u51FA"
@@ -710,7 +790,8 @@ function App() {
   }) : !currentUser ? /*#__PURE__*/React.createElement(LoginScreen, {
     onLogin: handleLogin,
     users: users,
-    year: scheduleYear
+    year: scheduleYear,
+    empId: empId
   }) : /*#__PURE__*/React.createElement("div", {
     className: "flex-1 flex flex-col overflow-hidden bg-white relative"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1252,6 +1333,7 @@ function App() {
   }), editingProject && /*#__PURE__*/React.createElement(ProjectEditModal, {
     info: editingProject,
     existingCategories: existingCategories,
+    users: users,
     onClose: () => setEditingProject(null),
     onSave: handleSaveProject
   }), addingInterval && /*#__PURE__*/React.createElement(IntervalModal, {
@@ -1262,6 +1344,14 @@ function App() {
     onSave: handleAddInterval
   }), showAuditPanel && /*#__PURE__*/React.createElement(AuditPanel, {
     onClose: () => setShowAuditPanel(false)
+  }), showMemberPanel && /*#__PURE__*/React.createElement(MemberPanel, {
+    users: users,
+    projects: projects,
+    year: scheduleYear,
+    onAdd: handleAddUser,
+    onRename: handleRenameUser,
+    onDelete: handleDeleteUser,
+    onClose: () => setShowMemberPanel(false)
   }), confirmInfo && /*#__PURE__*/React.createElement(ConfirmModal, {
     info: confirmInfo,
     onCancel: () => setConfirmInfo(null)
@@ -1320,7 +1410,8 @@ function ErrorScreen({
 function LoginScreen({
   onLogin,
   users,
-  year
+  year,
+  empId
 }) {
   return /*#__PURE__*/React.createElement("div", {
     className: "flex-1 flex justify-center items-center bg-slate-100 p-4"
@@ -1357,7 +1448,11 @@ function LoginScreen({
     key: u,
     onClick: () => onLogin(u, 'member'),
     className: "bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 py-2.5 rounded-xl font-bold text-slate-700 hover:text-blue-700 transition shadow-sm text-sm"
-  }, u)))));
+  }, u))), empId && /*#__PURE__*/React.createElement("div", {
+    className: "mt-6 text-center text-[11px] text-slate-400"
+  }, "\uD83D\uDDA5\uFE0F \u5DF2\u5075\u6E2C\u5230 Windows \u5DE5\u865F\uFF1A", /*#__PURE__*/React.createElement("span", {
+    className: "font-bold text-slate-500"
+  }, empId), "\uFF08\u64CD\u4F5C\u7D00\u9304\u5C07\u4E00\u4F75\u8A18\u8F09\uFF09")));
 }
 function TaskModal({
   info,
@@ -1931,6 +2026,7 @@ function WeeklyReportDashboard({
 function ProjectEditModal({
   info,
   existingCategories,
+  users = [],
   onClose,
   onSave
 }) {
@@ -1939,6 +2035,7 @@ function ProjectEditModal({
   const [name, setName] = useState(isEdit ? p.name : '');
   const [category, setCategory] = useState(isEdit ? p.category : '');
   const [type, setType] = useState(isEdit ? p.type : 'a');
+  const [owner, setOwner] = useState(info.owner); // 編輯時可改派負責人(如移轉給新成員)
   const [error, setError] = useState('');
   const submit = () => {
     if (!name.trim()) {
@@ -1952,7 +2049,7 @@ function ProjectEditModal({
     onSave({
       mode: info.mode,
       projectId: isEdit ? p.id : undefined,
-      owner: info.owner,
+      owner,
       name: name.trim(),
       category: category.trim(),
       type
@@ -2026,7 +2123,18 @@ function ProjectEditModal({
   }, Object.entries(PROJECT_TYPES).map(([key, meta]) => /*#__PURE__*/React.createElement("option", {
     key: key,
     value: key
-  }, key.toUpperCase(), "\xB7", meta.label)))), error && /*#__PURE__*/React.createElement("div", {
+  }, key.toUpperCase(), "\xB7", meta.label)))), isEdit && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-xs font-bold text-slate-500"
+  }, "\u8CA0\u8CAC\u4EBA"), /*#__PURE__*/React.createElement("select", {
+    value: owner,
+    onChange: e => setOwner(e.target.value),
+    className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white"
+  }, (users.includes(owner) ? users : [owner, ...users]).map(u => /*#__PURE__*/React.createElement("option", {
+    key: u,
+    value: u
+  }, u))), owner !== info.owner && /*#__PURE__*/React.createElement("div", {
+    className: "mt-1 text-[11px] text-orange-600 font-bold"
+  }, "\u26A0 \u5132\u5B58\u5F8C\u6B64\u5C08\u6848(\u542B\u5340\u9593\u8207\u56DE\u5831\u7D00\u9304)\u5C07\u79FB\u8F49\u7D66\u300C", owner, "\u300D")), error && /*#__PURE__*/React.createElement("div", {
     className: "text-xs text-red-600 font-bold"
   }, error), /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end space-x-3 pt-2"
@@ -2216,8 +2324,194 @@ const AUDIT_ENTITY_LABELS = {
   Project: '專案',
   Task: '任務',
   WeeklyLog: '週回報',
-  ExtraNote: '非專案事項'
+  ExtraNote: '非專案事項',
+  User: '成員'
 };
+
+// 主管:成員管理面板(新增/移除成員;移除為軟刪除 IsActive=0,名下仍有專案時後端會擋下)
+function MemberPanel({
+  users,
+  projects,
+  year,
+  onAdd,
+  onRename,
+  onDelete,
+  onClose
+}) {
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(null); // {old, value, error} — 行內編輯成員名稱
+  const [renaming, setRenaming] = useState(false);
+  const submit = async () => {
+    const n = name.trim();
+    if (!n) {
+      setError('請輸入成員名稱');
+      return;
+    }
+    if (users.includes(n)) {
+      setError(`成員「${n}」已存在`);
+      return;
+    }
+    setSaving(true);
+    const ok = await onAdd(n);
+    setSaving(false);
+    if (ok) {
+      setName('');
+      setError('');
+    }
+  };
+  const submitRename = async () => {
+    const n = (editing?.value || '').trim();
+    if (!n) {
+      setEditing(prev => ({
+        ...prev,
+        error: '成員名稱不可空白'
+      }));
+      return;
+    }
+    if (n === editing.old) {
+      setEditing(null);
+      return;
+    } // 沒改,直接關閉
+    if (users.includes(n)) {
+      setEditing(prev => ({
+        ...prev,
+        error: `成員「${n}」已存在`
+      }));
+      return;
+    }
+    setRenaming(true);
+    const ok = await onRename(editing.old, n);
+    setRenaming(false);
+    if (ok) setEditing(null);
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[115] flex justify-end",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-full max-w-sm bg-white h-full shadow-2xl flex flex-col",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "px-5 py-4 text-white flex justify-between items-center",
+    style: {
+      backgroundColor: NAVY
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
+    className: "font-bold text-lg"
+  }, "\uD83D\uDC65 \u6210\u54E1\u7BA1\u7406"), /*#__PURE__*/React.createElement("p", {
+    className: "text-xs text-blue-200 mt-0.5"
+  }, "\u65B0\u589E\u7684\u6210\u54E1\u5373\u53EF\u767B\u5165\u56DE\u5831\uFF0C\u4E26\u53EF\u70BA\u5176\u5B89\u6392\u5C08\u6848")), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    className: "text-white/60 hover:text-white p-1"
+  }, /*#__PURE__*/React.createElement("svg", {
+    className: "w-6 h-6",
+    fill: "none",
+    viewBox: "0 0 24 24",
+    stroke: "currentColor"
+  }, /*#__PURE__*/React.createElement("path", {
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    strokeWidth: 2,
+    d: "M6 18L18 6M6 6l12 12"
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "p-4 border-b border-slate-200 bg-slate-50"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "text-xs font-bold text-slate-500"
+  }, "\u65B0\u589E\u6210\u54E1"), /*#__PURE__*/React.createElement("div", {
+    className: "mt-1 flex gap-2"
+  }, /*#__PURE__*/React.createElement("input", {
+    value: name,
+    onChange: e => {
+      setName(e.target.value);
+      setError('');
+    },
+    onKeyDown: e => {
+      if (e.key === 'Enter') submit();
+    },
+    placeholder: "\u8F38\u5165\u65B0\u6210\u54E1\u986F\u793A\u540D\u7A31\u2026",
+    autoFocus: true,
+    className: `flex-1 border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 ${error ? 'border-red-400' : 'border-slate-300'}`
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: submit,
+    disabled: saving,
+    className: "flex-shrink-0 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition hover:opacity-90 disabled:opacity-50",
+    style: {
+      backgroundColor: NAVY
+    }
+  }, saving ? '新增中…' : '＋ 新增')), error && /*#__PURE__*/React.createElement("div", {
+    className: "mt-1.5 text-xs text-red-600 font-bold"
+  }, error), /*#__PURE__*/React.createElement("p", {
+    className: "mt-2 text-[11px] text-slate-400 leading-relaxed"
+  }, "\u65B0\u589E\u5F8C\u6210\u54E1\u6703\u51FA\u73FE\u5728\u767B\u5165\u756B\u9762\u8207\u7518\u7279\u5716\uFF0C\u53EF\u76F4\u63A5\u70BA\u5176\u65B0\u589E\u5C08\u6848\u4E26\u958B\u59CB\u6BCF\u9031\u6253\u5361\u56DE\u5831\u3002 \u82E5\u8F38\u5165\u66FE\u88AB\u79FB\u9664\u7684\u540C\u540D\u6210\u54E1\uFF0C\u6703\u81EA\u52D5\u91CD\u65B0\u555F\u7528\u4E26\u9084\u539F\u5176\u6B77\u53F2\u8CC7\u6599\u3002")), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 overflow-y-auto p-4 space-y-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs font-bold text-slate-400 mb-1"
+  }, "\u73FE\u6709\u6210\u54E1\uFF08", users.length, " \u4F4D\uFF09"), users.map(u => {
+    const projCount = projects.filter(p => p.owner === u).length;
+    const isEditing = editing?.old === u;
+    return /*#__PURE__*/React.createElement("div", {
+      key: u,
+      className: "flex items-center bg-white border border-slate-200 rounded-xl p-3 shadow-sm"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "w-8 h-8 rounded-full text-white flex items-center justify-center text-sm mr-3 flex-shrink-0",
+      style: {
+        backgroundColor: NAVY
+      }
+    }, u[0]), isEditing ? /*#__PURE__*/React.createElement("div", {
+      className: "flex-1 min-w-0"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-1.5"
+    }, /*#__PURE__*/React.createElement("input", {
+      value: editing.value,
+      autoFocus: true,
+      onChange: e => setEditing(prev => ({
+        ...prev,
+        value: e.target.value,
+        error: ''
+      })),
+      onKeyDown: e => {
+        if (e.key === 'Enter') submitRename();
+        if (e.key === 'Escape') setEditing(null);
+      },
+      className: `flex-1 min-w-0 border rounded-lg px-2 py-1 text-sm outline-none focus:border-blue-500 ${editing.error ? 'border-red-400' : 'border-slate-300'}`
+    }), /*#__PURE__*/React.createElement("button", {
+      onClick: submitRename,
+      disabled: renaming,
+      className: "flex-shrink-0 px-2 py-1 rounded-lg text-xs font-bold text-white transition hover:opacity-90 disabled:opacity-50",
+      style: {
+        backgroundColor: NAVY
+      }
+    }, renaming ? '…' : '✓ 儲存'), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setEditing(null),
+      className: "flex-shrink-0 px-2 py-1 rounded-lg text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition"
+    }, "\u2715")), editing.error ? /*#__PURE__*/React.createElement("div", {
+      className: "mt-1 text-[11px] text-red-600 font-bold"
+    }, editing.error) : /*#__PURE__*/React.createElement("div", {
+      className: "mt-1 text-[11px] text-slate-400"
+    }, "\u6539\u540D\u5F8C\u5176\u5C08\u6848\u8207\u6B77\u53F2\u56DE\u5831\u81EA\u52D5\u8DDF\u96A8\u65B0\u540D\u7A31")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "flex-1 min-w-0"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "font-bold text-sm text-slate-700 truncate"
+    }, u), /*#__PURE__*/React.createElement("div", {
+      className: "text-[11px] text-slate-400"
+    }, year, " \u5E74\u5EA6\u5C08\u6848 ", projCount, " \u9805")), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setEditing({
+        old: u,
+        value: u,
+        error: ''
+      }),
+      className: "flex-shrink-0 mr-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-blue-600 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition",
+      title: "\u7DE8\u8F2F\u6210\u54E1\u540D\u7A31"
+    }, "\u270E \u7DE8\u8F2F"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => onDelete(u),
+      className: "flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold text-red-600 bg-red-50 border border-red-200 hover:bg-red-100 transition",
+      title: projCount > 0 ? '名下仍有專案，需先刪除或改派專案才能移除' : '移除成員（軟刪除，歷史回報保留）'
+    }, "\u79FB\u9664")));
+  }), users.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "text-center text-slate-400 py-10 text-sm"
+  }, "\u5C1A\u7121\u6210\u54E1\uFF0C\u8ACB\u65BC\u4E0A\u65B9\u65B0\u589E\u3002"))));
+}
 function AuditPanel({
   onClose
 }) {
@@ -2231,7 +2525,7 @@ function AuditPanel({
     if (!logs) return [];
     const kw = filter.trim().toLowerCase();
     if (!kw) return logs;
-    return logs.filter(l => `${l.actor} ${l.action} ${l.entityType} ${l.entityId || ''} ${l.newValue || ''} ${l.detail || ''} ${l.at}`.toLowerCase().includes(kw));
+    return logs.filter(l => `${l.actor} ${l.empId || ''} ${l.action} ${l.entityType} ${l.entityId || ''} ${l.newValue || ''} ${l.detail || ''} ${l.at}`.toLowerCase().includes(kw));
   }, [logs, filter]);
   return /*#__PURE__*/React.createElement("div", {
     className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[115] flex justify-end",
@@ -2298,7 +2592,10 @@ function AuditPanel({
       className: "mt-1 flex items-start gap-2"
     }, /*#__PURE__*/React.createElement("span", {
       className: "flex-shrink-0 text-slate-500 font-medium"
-    }, l.actor, l.role === 'manager' ? '（主管）' : ''), (l.newValue || l.detail) && /*#__PURE__*/React.createElement("span", {
+    }, l.actor, l.role === 'manager' ? '（主管）' : '', l.empId && /*#__PURE__*/React.createElement("span", {
+      className: "ml-1 px-1 py-px rounded bg-slate-100 text-slate-400 font-mono text-[10px]",
+      title: "\u64CD\u4F5C\u8005 Windows \u5DE5\u865F"
+    }, l.empId)), (l.newValue || l.detail) && /*#__PURE__*/React.createElement("span", {
       className: "text-slate-600 break-all",
       style: {
         display: '-webkit-box',

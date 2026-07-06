@@ -74,11 +74,22 @@ async function apiGet(path) {
   if (!res.ok) throw new Error((await readApiError(res)) || ('HTTP ' + res.status));
   return res.json();
 }
+// Windows 工號(如 00058897):載入時由 /api/whoami 偵測(桌機網域帳號 UMC\00058897 剝前綴),
+// 所有寫入 API 自動附帶,由預存程序寫入 AuditLog.ActorEmpId 留下操作紀錄;非網域環境為 null(照常可用)
+let CURRENT_EMP_ID = null;
+async function detectEmpId() {
+  try {
+    const d = await apiGet('/api/whoami');
+    CURRENT_EMP_ID = d.empId || null;
+  } catch { CURRENT_EMP_ID = null; }   // 401(非網域/無法驗證)→ 靜默忽略
+  return CURRENT_EMP_ID;
+}
+
 async function apiPost(path, body) {
   const res = await fetch(API_BASE + path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify({ actorEmpId: CURRENT_EMP_ID, ...body })
   });
   if (!res.ok) throw new Error((await readApiError(res)) || ('HTTP ' + res.status));
   return res.json();
@@ -102,6 +113,10 @@ function App() {
   const [users, setUsers] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState(null);
+  const [empId, setEmpId] = useState(null);   // Windows 工號(顯示用;實際寫入由 apiPost 自動附帶)
+
+  // 載入時偵測一次 Windows 工號(非網域環境取不到 → null,系統照常運作)
+  React.useEffect(() => { detectEmpId().then(setEmpId); }, []);
 
   // 年度切換:可用年度與週→月對照皆來自 DB 的 ScheduleWeeks(開新年度只需 EXEC usp_EnsureScheduleYear)
   const [scheduleYear, setScheduleYear] = useState(DEFAULT_SCHEDULE_YEAR);
@@ -166,6 +181,7 @@ function App() {
   const [showWeeklyReport, setShowWeeklyReport] = useState(false);
   const [showPendingPanel, setShowPendingPanel] = useState(false);
   const [showAuditPanel, setShowAuditPanel] = useState(false);   // 主管:異動紀錄(AuditLog)面板
+  const [showMemberPanel, setShowMemberPanel] = useState(false); // 主管:成員管理面板
 
   const weekW = isCompact ? 22 : 32;
   const todayWeek = getTodayWeek(scheduleYear, weeksTotal);   // 本週(相對於選定年度)
@@ -392,6 +408,48 @@ function App() {
     }
   };
 
+  // --- 主管：成員 新增/移除 ---
+  const handleAddUser = async (name) => {
+    try {
+      await apiPost('/api/user', { userName: name, actor: currentUser, actorRole: role });
+      await refreshData();
+      showToast('✅ 成員已新增');
+      return true;
+    } catch (e) {
+      showToast('❌ 新增失敗：' + (e.message || '無法連線資料庫'));
+      return false;
+    }
+  };
+
+  const handleRenameUser = async (oldName, newName) => {
+    try {
+      await apiPost('/api/user/update', { userName: oldName, newName, actor: currentUser, actorRole: role });
+      await refreshData();
+      showToast('✅ 成員名稱已更新');
+      return true;
+    } catch (e) {
+      showToast('❌ 更新失敗：' + (e.message || '無法連線資料庫'));
+      return false;
+    }
+  };
+
+  const handleDeleteUser = (name) => {
+    setConfirmInfo({
+      title: '移除成員',
+      message: `確定要移除成員「${name}」嗎？\n移除後將不再出現於登入畫面與甘特圖（歷史回報保留，重新新增同名成員即可還原）。\n若其名下仍有專案，需先刪除或改派專案才能移除。`,
+      onConfirm: async () => {
+        setConfirmInfo(null);
+        try {
+          await apiPost('/api/user/delete', { userName: name, actor: currentUser, actorRole: role });
+          await refreshData();
+          showToast('✅ 成員已移除');
+        } catch (e) {
+          showToast('❌ 移除失敗：' + (e.message || '無法連線資料庫'));
+        }
+      }
+    });
+  };
+
   // --- 篩選 ---
   const filteredProjects = useMemo(() => {
     const kw = searchText.trim().toLowerCase();
@@ -407,10 +465,12 @@ function App() {
     });
   }, [projects, searchText, typeFilter, ownerFilter, onlyMine, role, currentUser]);
 
+  // 主管未啟用搜尋/類型篩選時，沒有專案的成員(如剛加入的新同仁)也要顯示群組列,才能為其新增專案
   const groupedProjects = useMemo(() =>
     users.map(user => ({ owner: user, projects: filteredProjects.filter(p => p.owner === user) }))
-      .filter(g => g.projects.length > 0)
-  , [filteredProjects, users]);
+      .filter(g => g.projects.length > 0 ||
+        (role === 'manager' && !isFilteringRows && (ownerFilter === 'all' || ownerFilter === g.owner)))
+  , [filteredProjects, users, role, isFilteringRows, ownerFilter]);
 
   // --- 本週統計 ---
   const weekStats = useMemo(() => {
@@ -507,10 +567,16 @@ function App() {
               </>
             )}
             {role === 'manager' && (
-              <button onClick={() => setShowAuditPanel(true)}
-                className="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20">
-                📜 異動紀錄
-              </button>
+              <>
+                <button onClick={() => setShowMemberPanel(true)}
+                  className="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20">
+                  👥 成員管理
+                </button>
+                <button onClick={() => setShowAuditPanel(true)}
+                  className="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20">
+                  📜 異動紀錄
+                </button>
+              </>
             )}
             <button onClick={() => setShowWeeklyReport(true)}
               className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-blue-400/50">
@@ -519,7 +585,7 @@ function App() {
             <div className="flex items-center space-x-3 border-l border-white/20 pl-3 ml-1">
               <div className="text-right leading-tight">
                 <div className="font-bold text-sm">{currentUser}</div>
-                <div className="text-[10px] text-white/50">{role === 'manager' ? '主管' : '成員'}</div>
+                <div className="text-[10px] text-white/50">{role === 'manager' ? '主管' : '成員'}{empId ? ` · 工號 ${empId}` : ''}</div>
               </div>
               <button onClick={handleLogout} className="p-1.5 hover:bg-red-500/80 rounded-lg transition text-white/70 hover:text-white bg-white/5" title="登出">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
@@ -534,7 +600,7 @@ function App() {
       ) : dataError ? (
         <ErrorScreen message={dataError} onRetry={loadBootstrap} />
       ) : !currentUser ? (
-        <LoginScreen onLogin={handleLogin} users={users} year={scheduleYear} />
+        <LoginScreen onLogin={handleLogin} users={users} year={scheduleYear} empId={empId} />
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden bg-white relative">
           <div className="px-4 py-2 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white flex items-center gap-3 text-xs overflow-x-auto">
@@ -891,7 +957,7 @@ function App() {
       )}
       {editingProject && (
         <ProjectEditModal
-          info={editingProject} existingCategories={existingCategories}
+          info={editingProject} existingCategories={existingCategories} users={users}
           onClose={() => setEditingProject(null)} onSave={handleSaveProject}
         />
       )}
@@ -903,6 +969,13 @@ function App() {
       )}
       {showAuditPanel && (
         <AuditPanel onClose={() => setShowAuditPanel(false)} />
+      )}
+      {showMemberPanel && (
+        <MemberPanel
+          users={users} projects={projects} year={scheduleYear}
+          onAdd={handleAddUser} onRename={handleRenameUser} onDelete={handleDeleteUser}
+          onClose={() => setShowMemberPanel(false)}
+        />
       )}
       {confirmInfo && (
         <ConfirmModal info={confirmInfo} onCancel={() => setConfirmInfo(null)} />
@@ -951,7 +1024,7 @@ function ErrorScreen({ message, onRetry }) {
   );
 }
 
-function LoginScreen({ onLogin, users, year }) {
+function LoginScreen({ onLogin, users, year, empId }) {
   return (
     <div className="flex-1 flex justify-center items-center bg-slate-100 p-4">
       <div className="bg-white p-10 rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full">
@@ -974,6 +1047,11 @@ function LoginScreen({ onLogin, users, year }) {
             </button>
           ))}
         </div>
+        {empId && (
+          <div className="mt-6 text-center text-[11px] text-slate-400">
+            🖥️ 已偵測到 Windows 工號：<span className="font-bold text-slate-500">{empId}</span>（操作紀錄將一併記載）
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1339,12 +1417,13 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
   );
 }
 
-function ProjectEditModal({ info, existingCategories, onClose, onSave }) {
+function ProjectEditModal({ info, existingCategories, users = [], onClose, onSave }) {
   const isEdit = info.mode === 'edit';
   const p = info.project;
   const [name, setName] = useState(isEdit ? p.name : '');
   const [category, setCategory] = useState(isEdit ? p.category : '');
   const [type, setType] = useState(isEdit ? p.type : 'a');
+  const [owner, setOwner] = useState(info.owner);   // 編輯時可改派負責人(如移轉給新成員)
   const [error, setError] = useState('');
 
   const submit = () => {
@@ -1353,7 +1432,7 @@ function ProjectEditModal({ info, existingCategories, onClose, onSave }) {
     onSave({
       mode: info.mode,
       projectId: isEdit ? p.id : undefined,
-      owner: info.owner,
+      owner,
       name: name.trim(),
       category: category.trim(),
       type
@@ -1393,6 +1472,18 @@ function ProjectEditModal({ info, existingCategories, onClose, onSave }) {
               ))}
             </select>
           </div>
+          {isEdit && (
+            <div>
+              <label className="text-xs font-bold text-slate-500">負責人</label>
+              <select value={owner} onChange={e => setOwner(e.target.value)}
+                className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white">
+                {(users.includes(owner) ? users : [owner, ...users]).map(u => <option key={u} value={u}>{u}</option>)}
+              </select>
+              {owner !== info.owner && (
+                <div className="mt-1 text-[11px] text-orange-600 font-bold">⚠ 儲存後此專案(含區間與回報紀錄)將移轉給「{owner}」</div>
+              )}
+            </div>
+          )}
           {error && <div className="text-xs text-red-600 font-bold">{error}</div>}
           <div className="flex justify-end space-x-3 pt-2">
             <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
@@ -1486,7 +1577,118 @@ const AUDIT_ACTION_META = {
   CLOCKIN:   { label: '回報', cls: 'bg-teal-100 text-teal-700' },
   EXTRANOTE: { label: '非專案', cls: 'bg-orange-100 text-orange-700' }
 };
-const AUDIT_ENTITY_LABELS = { Project: '專案', Task: '任務', WeeklyLog: '週回報', ExtraNote: '非專案事項' };
+const AUDIT_ENTITY_LABELS = { Project: '專案', Task: '任務', WeeklyLog: '週回報', ExtraNote: '非專案事項', User: '成員' };
+
+// 主管:成員管理面板(新增/移除成員;移除為軟刪除 IsActive=0,名下仍有專案時後端會擋下)
+function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose }) {
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(null);       // {old, value, error} — 行內編輯成員名稱
+  const [renaming, setRenaming] = useState(false);
+
+  const submit = async () => {
+    const n = name.trim();
+    if (!n) { setError('請輸入成員名稱'); return; }
+    if (users.includes(n)) { setError(`成員「${n}」已存在`); return; }
+    setSaving(true);
+    const ok = await onAdd(n);
+    setSaving(false);
+    if (ok) { setName(''); setError(''); }
+  };
+
+  const submitRename = async () => {
+    const n = (editing?.value || '').trim();
+    if (!n) { setEditing(prev => ({ ...prev, error: '成員名稱不可空白' })); return; }
+    if (n === editing.old) { setEditing(null); return; }   // 沒改,直接關閉
+    if (users.includes(n)) { setEditing(prev => ({ ...prev, error: `成員「${n}」已存在` })); return; }
+    setRenaming(true);
+    const ok = await onRename(editing.old, n);
+    setRenaming(false);
+    if (ok) setEditing(null);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[115] flex justify-end" onClick={onClose}>
+      <div className="w-full max-w-sm bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: NAVY }}>
+          <div>
+            <h3 className="font-bold text-lg">👥 成員管理</h3>
+            <p className="text-xs text-blue-200 mt-0.5">新增的成員即可登入回報，並可為其安排專案</p>
+          </div>
+          <button onClick={onClose} className="text-white/60 hover:text-white p-1"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+        </div>
+
+        <div className="p-4 border-b border-slate-200 bg-slate-50">
+          <label className="text-xs font-bold text-slate-500">新增成員</label>
+          <div className="mt-1 flex gap-2">
+            <input value={name} onChange={e => { setName(e.target.value); setError(''); }}
+              onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+              placeholder="輸入新成員顯示名稱…" autoFocus
+              className={`flex-1 border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 ${error ? 'border-red-400' : 'border-slate-300'}`} />
+            <button onClick={submit} disabled={saving}
+              className="flex-shrink-0 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: NAVY }}>
+              {saving ? '新增中…' : '＋ 新增'}
+            </button>
+          </div>
+          {error && <div className="mt-1.5 text-xs text-red-600 font-bold">{error}</div>}
+          <p className="mt-2 text-[11px] text-slate-400 leading-relaxed">
+            新增後成員會出現在登入畫面與甘特圖，可直接為其新增專案並開始每週打卡回報。
+            若輸入曾被移除的同名成員，會自動重新啟用並還原其歷史資料。
+          </p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          <div className="text-xs font-bold text-slate-400 mb-1">現有成員（{users.length} 位）</div>
+          {users.map(u => {
+            const projCount = projects.filter(p => p.owner === u).length;
+            const isEditing = editing?.old === u;
+            return (
+              <div key={u} className="flex items-center bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
+                <div className="w-8 h-8 rounded-full text-white flex items-center justify-center text-sm mr-3 flex-shrink-0" style={{ backgroundColor: NAVY }}>{u[0]}</div>
+                {isEditing ? (
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <input value={editing.value} autoFocus
+                        onChange={e => setEditing(prev => ({ ...prev, value: e.target.value, error: '' }))}
+                        onKeyDown={e => { if (e.key === 'Enter') submitRename(); if (e.key === 'Escape') setEditing(null); }}
+                        className={`flex-1 min-w-0 border rounded-lg px-2 py-1 text-sm outline-none focus:border-blue-500 ${editing.error ? 'border-red-400' : 'border-slate-300'}`} />
+                      <button onClick={submitRename} disabled={renaming}
+                        className="flex-shrink-0 px-2 py-1 rounded-lg text-xs font-bold text-white transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: NAVY }}>
+                        {renaming ? '…' : '✓ 儲存'}
+                      </button>
+                      <button onClick={() => setEditing(null)}
+                        className="flex-shrink-0 px-2 py-1 rounded-lg text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition">✕</button>
+                    </div>
+                    {editing.error
+                      ? <div className="mt-1 text-[11px] text-red-600 font-bold">{editing.error}</div>
+                      : <div className="mt-1 text-[11px] text-slate-400">改名後其專案與歷史回報自動跟隨新名稱</div>}
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-sm text-slate-700 truncate">{u}</div>
+                      <div className="text-[11px] text-slate-400">{year} 年度專案 {projCount} 項</div>
+                    </div>
+                    <button onClick={() => setEditing({ old: u, value: u, error: '' })}
+                      className="flex-shrink-0 mr-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-blue-600 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition"
+                      title="編輯成員名稱">✎ 編輯</button>
+                    <button onClick={() => onDelete(u)}
+                      className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold text-red-600 bg-red-50 border border-red-200 hover:bg-red-100 transition"
+                      title={projCount > 0 ? '名下仍有專案，需先刪除或改派專案才能移除' : '移除成員（軟刪除，歷史回報保留）'}>
+                      移除
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+          {users.length === 0 && <div className="text-center text-slate-400 py-10 text-sm">尚無成員，請於上方新增。</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function AuditPanel({ onClose }) {
   const [logs, setLogs] = useState(null);   // null=載入中
@@ -1504,7 +1706,7 @@ function AuditPanel({ onClose }) {
     const kw = filter.trim().toLowerCase();
     if (!kw) return logs;
     return logs.filter(l =>
-      `${l.actor} ${l.action} ${l.entityType} ${l.entityId || ''} ${l.newValue || ''} ${l.detail || ''} ${l.at}`.toLowerCase().includes(kw));
+      `${l.actor} ${l.empId || ''} ${l.action} ${l.entityType} ${l.entityId || ''} ${l.newValue || ''} ${l.detail || ''} ${l.at}`.toLowerCase().includes(kw));
   }, [logs, filter]);
 
   return (
@@ -1539,7 +1741,10 @@ function AuditPanel({ onClose }) {
                   <span className="ml-auto flex-shrink-0 text-slate-400">{l.at}</span>
                 </div>
                 <div className="mt-1 flex items-start gap-2">
-                  <span className="flex-shrink-0 text-slate-500 font-medium">{l.actor}{l.role === 'manager' ? '（主管）' : ''}</span>
+                  <span className="flex-shrink-0 text-slate-500 font-medium">
+                    {l.actor}{l.role === 'manager' ? '（主管）' : ''}
+                    {l.empId && <span className="ml-1 px-1 py-px rounded bg-slate-100 text-slate-400 font-mono text-[10px]" title="操作者 Windows 工號">{l.empId}</span>}
+                  </span>
                   {(l.newValue || l.detail) && (
                     <span className="text-slate-600 break-all" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                       {l.newValue || l.detail}

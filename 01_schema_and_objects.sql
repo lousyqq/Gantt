@@ -26,6 +26,9 @@ IF OBJECT_ID('dbo.usp_ReorderProjects','P')   IS NOT NULL DROP PROCEDURE dbo.usp
 IF OBJECT_ID('dbo.usp_InsertTask','P')        IS NOT NULL DROP PROCEDURE dbo.usp_InsertTask;
 IF OBJECT_ID('dbo.usp_DeleteTask','P')        IS NOT NULL DROP PROCEDURE dbo.usp_DeleteTask;
 IF OBJECT_ID('dbo.usp_EnsureScheduleYear','P') IS NOT NULL DROP PROCEDURE dbo.usp_EnsureScheduleYear;
+IF OBJECT_ID('dbo.usp_InsertUser','P')        IS NOT NULL DROP PROCEDURE dbo.usp_InsertUser;
+IF OBJECT_ID('dbo.usp_UpdateUser','P')        IS NOT NULL DROP PROCEDURE dbo.usp_UpdateUser;
+IF OBJECT_ID('dbo.usp_DeleteUser','P')        IS NOT NULL DROP PROCEDURE dbo.usp_DeleteUser;
 
 IF OBJECT_ID('dbo.vw_WeeklyReport','V') IS NOT NULL DROP VIEW dbo.vw_WeeklyReport;
 IF OBJECT_ID('dbo.vw_ProjectTasks','V') IS NOT NULL DROP VIEW dbo.vw_ProjectTasks;
@@ -172,6 +175,7 @@ CREATE TABLE dbo.AuditLog (
     AuditId       BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_AuditLog PRIMARY KEY,
     ActorName     NVARCHAR(50)  NOT NULL,              -- 操作者顯示名稱
     ActorRole     NVARCHAR(20)   NULL,                 -- manager/member
+    ActorEmpId    NVARCHAR(20)   NULL,                 -- 操作者 Windows 工號(由 /api/whoami 偵測,如 00058897;非網域環境為 NULL)
     Action        NVARCHAR(30)  NOT NULL,              -- INSERT/UPDATE/DELETE/CLOCKIN/EXTRANOTE
     EntityType    NVARCHAR(30)  NOT NULL,              -- Project/Task/WeeklyLog/ExtraNote
     EntityId      NVARCHAR(50)   NULL,                 -- ProjectId / TaskCode / 週次key
@@ -229,7 +233,8 @@ CREATE PROCEDURE dbo.usp_UpsertWeeklyLog
     @Status   NVARCHAR(20),
     @Note     NVARCHAR(MAX),
     @Actor    NVARCHAR(50),
-    @ActorRole NVARCHAR(20) = NULL
+    @ActorRole NVARCHAR(20) = NULL,
+    @ActorEmpId NVARCHAR(20) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -251,8 +256,8 @@ BEGIN
         INSERT (TaskId,ScheduleYear,WeekNo,Status,Note,ReportedByUserId)
         VALUES (@TaskId,@Year,@Week,@Status,@Note,@ActorId);
 
-    INSERT dbo.AuditLog(ActorName,ActorRole,Action,EntityType,EntityId,FieldName,OldValue,NewValue,Detail)
-    VALUES(@Actor,@ActorRole,'CLOCKIN','WeeklyLog',
+    INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,FieldName,OldValue,NewValue,Detail)
+    VALUES(@Actor,@ActorRole,@ActorEmpId,'CLOCKIN','WeeklyLog',
            CONCAT(@TaskCode,'@',@Year,'W',@Week),'status',
            @OldStatus, @Status,
            CONCAT(N'note舊=',ISNULL(@OldNote,N''),N' | note新=',ISNULL(@Note,N'')));
@@ -266,7 +271,8 @@ CREATE PROCEDURE dbo.usp_UpsertExtraNote
     @Week     INT,
     @Note     NVARCHAR(MAX),
     @Actor    NVARCHAR(50),
-    @ActorRole NVARCHAR(20) = NULL
+    @ActorRole NVARCHAR(20) = NULL,
+    @ActorEmpId NVARCHAR(20) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -284,8 +290,8 @@ BEGIN
     WHEN NOT MATCHED THEN INSERT(UserId,ScheduleYear,WeekNo,Note,UpdatedByUserId)
                           VALUES(@Uid,@Year,@Week,@Note,@ActorId);
 
-    INSERT dbo.AuditLog(ActorName,ActorRole,Action,EntityType,EntityId,OldValue,NewValue)
-    VALUES(@Actor,@ActorRole,'EXTRANOTE','ExtraNote',CONCAT(@UserName,'@',@Year,'W',@Week),@OldNote,@Note);
+    INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,OldValue,NewValue)
+    VALUES(@Actor,@ActorRole,@ActorEmpId,'EXTRANOTE','ExtraNote',CONCAT(@UserName,'@',@Year,'W',@Week),@OldNote,@Note);
 END
 GO
 
@@ -296,7 +302,8 @@ CREATE PROCEDURE dbo.usp_UpdateTaskSchedule
     @Start    INT,
     @End      INT,
     @Actor    NVARCHAR(50),
-    @ActorRole NVARCHAR(20) = NULL
+    @ActorRole NVARCHAR(20) = NULL,
+    @ActorEmpId NVARCHAR(20) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -308,8 +315,8 @@ BEGIN
     UPDATE dbo.Tasks SET TaskName=@Name, StartWeek=@Start, EndWeek=@End, UpdatedAt=SYSDATETIME()
     WHERE TaskCode=@TaskCode;
 
-    INSERT dbo.AuditLog(ActorName,ActorRole,Action,EntityType,EntityId,OldValue,NewValue)
-    VALUES(@Actor,@ActorRole,'UPDATE','Task',@TaskCode,@Old,
+    INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,OldValue,NewValue)
+    VALUES(@Actor,@ActorRole,@ActorEmpId,'UPDATE','Task',@TaskCode,@Old,
            CONCAT(N'name=',@Name,N' | W',@Start,N'-W',@End));
 END
 GO
@@ -317,7 +324,7 @@ GO
 -- 8.4 新增專案 --------------------------------------------------------
 CREATE PROCEDURE dbo.usp_InsertProject
     @TypeCode CHAR(1), @Category NVARCHAR(20), @OwnerName NVARCHAR(50),
-    @Name NVARCHAR(200), @Year INT = 2026, @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL,
+    @Name NVARCHAR(200), @Year INT = 2026, @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL, @ActorEmpId NVARCHAR(20)=NULL,
     @NewProjectId INT OUTPUT
 AS
 BEGIN
@@ -327,8 +334,8 @@ BEGIN
     INSERT dbo.Projects(TypeCode,Category,OwnerUserId,Name,ScheduleYear)
     VALUES(@TypeCode,@Category,@Owner,@Name,@Year);
     SET @NewProjectId = SCOPE_IDENTITY();
-    INSERT dbo.AuditLog(ActorName,ActorRole,Action,EntityType,EntityId,NewValue)
-    VALUES(@Actor,@ActorRole,'INSERT','Project',CONVERT(NVARCHAR(50),@NewProjectId),
+    INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,NewValue)
+    VALUES(@Actor,@ActorRole,@ActorEmpId,'INSERT','Project',CONVERT(NVARCHAR(50),@NewProjectId),
            CONCAT(@TypeCode,N'|',@Category,N'|',@OwnerName,N'|',@Name));
 END
 GO
@@ -336,7 +343,7 @@ GO
 -- 8.5 修改專案 --------------------------------------------------------
 CREATE PROCEDURE dbo.usp_UpdateProject
     @ProjectId INT, @TypeCode CHAR(1), @Category NVARCHAR(20), @OwnerName NVARCHAR(50),
-    @Name NVARCHAR(200), @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL
+    @Name NVARCHAR(200), @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL, @ActorEmpId NVARCHAR(20)=NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -346,29 +353,29 @@ BEGIN
     FROM dbo.Projects p WHERE ProjectId=@ProjectId;
     UPDATE dbo.Projects SET TypeCode=@TypeCode,Category=@Category,OwnerUserId=@Owner,Name=@Name,UpdatedAt=SYSDATETIME()
     WHERE ProjectId=@ProjectId;
-    INSERT dbo.AuditLog(ActorName,ActorRole,Action,EntityType,EntityId,OldValue,NewValue)
-    VALUES(@Actor,@ActorRole,'UPDATE','Project',CONVERT(NVARCHAR(50),@ProjectId),@Old,
+    INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,OldValue,NewValue)
+    VALUES(@Actor,@ActorRole,@ActorEmpId,'UPDATE','Project',CONVERT(NVARCHAR(50),@ProjectId),@Old,
            CONCAT(@TypeCode,N'|',@Category,N'|',@OwnerName,N'|',@Name));
 END
 GO
 
 -- 8.6 刪除專案(軟刪除,連同其任務) ------------------------------------
 CREATE PROCEDURE dbo.usp_DeleteProject
-    @ProjectId INT, @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL
+    @ProjectId INT, @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL, @ActorEmpId NVARCHAR(20)=NULL
 AS
 BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.Projects SET IsDeleted=1, UpdatedAt=SYSDATETIME() WHERE ProjectId=@ProjectId;
     UPDATE dbo.Tasks    SET IsDeleted=1, UpdatedAt=SYSDATETIME() WHERE ProjectId=@ProjectId;
-    INSERT dbo.AuditLog(ActorName,ActorRole,Action,EntityType,EntityId,Detail)
-    VALUES(@Actor,@ActorRole,'DELETE','Project',CONVERT(NVARCHAR(50),@ProjectId),N'軟刪除(含任務)');
+    INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,Detail)
+    VALUES(@Actor,@ActorRole,@ActorEmpId,'DELETE','Project',CONVERT(NVARCHAR(50),@ProjectId),N'軟刪除(含任務)');
 END
 GO
 
 -- 8.7 新增任務 --------------------------------------------------------
 CREATE PROCEDURE dbo.usp_InsertTask
     @ProjectId INT, @TaskName NVARCHAR(200), @Start INT, @End INT,
-    @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL, @NewTaskCode NVARCHAR(30) OUTPUT
+    @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL, @ActorEmpId NVARCHAR(20)=NULL, @NewTaskCode NVARCHAR(30) OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -377,20 +384,20 @@ BEGIN
     SET @NewTaskCode = CONCAT('t',@ProjectId,'-',@NextSeq);
     INSERT dbo.Tasks(TaskCode,ProjectId,TaskName,StartWeek,EndWeek)
     VALUES(@NewTaskCode,@ProjectId,@TaskName,@Start,@End);
-    INSERT dbo.AuditLog(ActorName,ActorRole,Action,EntityType,EntityId,NewValue)
-    VALUES(@Actor,@ActorRole,'INSERT','Task',@NewTaskCode,CONCAT(@TaskName,N' | W',@Start,N'-W',@End));
+    INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,NewValue)
+    VALUES(@Actor,@ActorRole,@ActorEmpId,'INSERT','Task',@NewTaskCode,CONCAT(@TaskName,N' | W',@Start,N'-W',@End));
 END
 GO
 
 -- 8.8 刪除任務(軟刪除) ------------------------------------------------
 CREATE PROCEDURE dbo.usp_DeleteTask
-    @TaskCode NVARCHAR(30), @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL
+    @TaskCode NVARCHAR(30), @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL, @ActorEmpId NVARCHAR(20)=NULL
 AS
 BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.Tasks SET IsDeleted=1, UpdatedAt=SYSDATETIME() WHERE TaskCode=@TaskCode;
-    INSERT dbo.AuditLog(ActorName,ActorRole,Action,EntityType,EntityId,Detail)
-    VALUES(@Actor,@ActorRole,'DELETE','Task',@TaskCode,N'軟刪除');
+    INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,Detail)
+    VALUES(@Actor,@ActorRole,@ActorEmpId,'DELETE','Task',@TaskCode,N'軟刪除');
 END
 GO
 
@@ -398,7 +405,8 @@ GO
 CREATE PROCEDURE dbo.usp_ReorderProjects
     @OrderedIdsJson NVARCHAR(MAX),          -- 例:'[105,101,110]'
     @Actor NVARCHAR(50),
-    @ActorRole NVARCHAR(20) = NULL
+    @ActorRole NVARCHAR(20) = NULL,
+    @ActorEmpId NVARCHAR(20) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -412,8 +420,78 @@ BEGIN
         FROM OPENJSON(@OrderedIdsJson)
     ) j ON j.ProjectId = p.ProjectId;
 
-    INSERT dbo.AuditLog(ActorName,ActorRole,Action,EntityType,EntityId,NewValue)
-    VALUES(@Actor,@ActorRole,'REORDER','Project',NULL,@OrderedIdsJson);
+    INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,NewValue)
+    VALUES(@Actor,@ActorRole,@ActorEmpId,'REORDER','Project',NULL,@OrderedIdsJson);
+END
+GO
+
+-- 8.10 新增成員(同名成員曾被移除則重新啟用,保留其歷史資料) ------------
+CREATE PROCEDURE dbo.usp_InsertUser
+    @UserName NVARCHAR(50), @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL, @ActorEmpId NVARCHAR(20)=NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET @UserName = LTRIM(RTRIM(ISNULL(@UserName, N'')));
+    IF @UserName = N'' BEGIN RAISERROR('成員名稱不可空白',16,1); RETURN; END
+
+    DECLARE @Uid INT, @Active BIT;
+    SELECT @Uid = UserId, @Active = IsActive FROM dbo.Users WHERE UserName = @UserName;
+    IF @Uid IS NOT NULL AND @Active = 1
+    BEGIN RAISERROR('成員名稱已存在',16,1); RETURN; END
+
+    IF @Uid IS NOT NULL  -- 曾被移除 → 重新啟用(歷史專案與回報自動恢復可見)
+    BEGIN
+        UPDATE dbo.Users SET IsActive = 1 WHERE UserId = @Uid;
+        INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,Detail)
+        VALUES(@Actor,@ActorRole,@ActorEmpId,'INSERT','User',@UserName,N'重新啟用成員');
+        RETURN;
+    END
+
+    INSERT dbo.Users(UserName,Role,SortOrder)
+    VALUES(@UserName,'member',(SELECT ISNULL(MAX(SortOrder),0)+1 FROM dbo.Users));
+    INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,Detail)
+    VALUES(@Actor,@ActorRole,@ActorEmpId,'INSERT','User',@UserName,N'新增成員');
+END
+GO
+
+-- 8.11 修改成員名稱(專案/回報以 UserId 關聯,改名後歷史資料自動跟隨) --
+CREATE PROCEDURE dbo.usp_UpdateUser
+    @UserName NVARCHAR(50), @NewName NVARCHAR(50), @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL, @ActorEmpId NVARCHAR(20)=NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET @NewName = LTRIM(RTRIM(ISNULL(@NewName, N'')));
+    IF @NewName = N'' BEGIN RAISERROR('成員名稱不可空白',16,1); RETURN; END
+
+    DECLARE @Uid INT;
+    SELECT @Uid = UserId FROM dbo.Users WHERE UserName = @UserName AND IsActive = 1;
+    IF @Uid IS NULL BEGIN RAISERROR('成員不存在或已移除',16,1); RETURN; END
+    IF @NewName = @UserName RETURN;   -- 沒改,不動也不記錄
+    IF EXISTS (SELECT 1 FROM dbo.Users WHERE UserName = @NewName)
+    BEGIN RAISERROR('成員名稱已存在',16,1); RETURN; END
+
+    UPDATE dbo.Users SET UserName = @NewName WHERE UserId = @Uid;
+    INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,OldValue,NewValue)
+    VALUES(@Actor,@ActorRole,@ActorEmpId,'UPDATE','User',@NewName,@UserName,@NewName);
+END
+GO
+
+-- 8.12 移除成員(軟刪除=IsActive:0;名下仍有專案時擋下) ----------------
+CREATE PROCEDURE dbo.usp_DeleteUser
+    @UserName NVARCHAR(50), @Actor NVARCHAR(50), @ActorRole NVARCHAR(20)=NULL, @ActorEmpId NVARCHAR(20)=NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Uid INT, @Role NVARCHAR(20);
+    SELECT @Uid = UserId, @Role = Role FROM dbo.Users WHERE UserName = @UserName AND IsActive = 1;
+    IF @Uid IS NULL BEGIN RAISERROR('成員不存在或已移除',16,1); RETURN; END
+    IF @Role = 'manager' BEGIN RAISERROR('不可移除主管帳號',16,1); RETURN; END
+    IF EXISTS (SELECT 1 FROM dbo.Projects WHERE OwnerUserId = @Uid AND IsDeleted = 0)
+    BEGIN RAISERROR('該成員名下仍有專案，請先刪除專案或於「編輯專案」改派負責人後再移除',16,1); RETURN; END
+
+    UPDATE dbo.Users SET IsActive = 0 WHERE UserId = @Uid;
+    INSERT dbo.AuditLog(ActorName,ActorRole,ActorEmpId,Action,EntityType,EntityId,Detail)
+    VALUES(@Actor,@ActorRole,@ActorEmpId,'DELETE','User',@UserName,N'移除成員(停用,歷史回報保留)');
 END
 GO
 

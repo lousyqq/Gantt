@@ -1,11 +1,21 @@
+using Microsoft.AspNetCore.Authentication.Negotiate;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Data.SqlClient;
 using System.Data;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Windows 驗證(Negotiate/NTLM):僅 /api/whoami 要求驗證,其餘端點維持匿名。
+// Kestrel 由此套件處理;掛 IIS 時 handler 會自動交給 IIS 的 Windows 驗證(IIS 需啟用 Windows Authentication,匿名驗證也要保持啟用)。
+builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNegotiate();
+builder.Services.AddAuthorization();
+
 var app = builder.Build();
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseAuthentication();
+app.UseAuthorization();
 
 // 連線字串來自 appsettings.json 的 ConnectionStrings:Gantt
 string connStr = builder.Configuration.GetConnectionString("Gantt")
@@ -22,6 +32,29 @@ IResult Fail(Exception ex)
     app.Logger.LogError(ex, "API 處理失敗");
     return Results.Problem("伺服器處理失敗，請稍後再試或聯絡系統管理員。");
 }
+
+// 0) 取得桌機目前 Windows 登入者的工號(參考 EQDashboard AuthController.WhoAmI)。
+//    未帶 Windows 認證票證的請求會收到 401 + WWW-Authenticate: Negotiate,網域內瀏覽器會自動補上;
+//    非網域環境前端 catch 掉即可(empId 視為 null,寫入動作照常、AuditLog 的工號欄留空)。
+app.MapGet("/api/whoami", (HttpContext ctx) =>
+{
+    var stripPrefix = builder.Configuration["Auth:WindowsDomainStripPrefix"] ?? "UMC";
+    var rawName = ctx.User?.Identity?.Name ?? "";
+
+    // 先剝 DOMAIN\、再剝 @domain.com (Kerberos UPN 形態的保險)
+    var empId = rawName
+        .Replace($"{stripPrefix}\\", "", StringComparison.OrdinalIgnoreCase)
+        .Trim();
+    var atIdx = empId.IndexOf('@');
+    if (atIdx > 0) empId = empId[..atIdx];
+    // 非設定網域(如本機開發 MACHINE\user)也取反斜線後的帳號,避免整串含網域寫入 DB
+    var bsIdx = empId.LastIndexOf('\\');
+    if (bsIdx >= 0) empId = empId[(bsIdx + 1)..];
+
+    return string.IsNullOrWhiteSpace(empId)
+        ? Results.Ok(new { success = false, empId = (string?)null, rawName })
+        : Results.Ok(new { success = true, empId = (string?)empId, rawName });
+}).RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = NegotiateDefaults.AuthenticationScheme });
 
 // 1) 一次載入前端所需的全部資料：使用者、專案(含任務)、每週打卡、非專案事項
 app.MapGet("/api/bootstrap", async (int? year) =>
@@ -159,6 +192,7 @@ app.MapPost("/api/weekly-log", async (WeeklyLogReq req) =>
         cmd.Parameters.AddWithValue("@Note", (object?)req.Note ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -179,6 +213,7 @@ app.MapPost("/api/extra-note", async (ExtraNoteReq req) =>
         cmd.Parameters.AddWithValue("@Note", (object?)req.Note ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -199,6 +234,7 @@ app.MapPost("/api/task-schedule", async (TaskScheduleReq req) =>
         cmd.Parameters.AddWithValue("@End", req.End);
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -220,6 +256,7 @@ app.MapPost("/api/project", async (ProjectCreateReq req) =>
         cmd.Parameters.AddWithValue("@Year", req.Year);
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
         var outId = new SqlParameter("@NewProjectId", SqlDbType.Int) { Direction = ParameterDirection.Output };
         cmd.Parameters.Add(outId);
         await cmd.ExecuteNonQueryAsync();
@@ -243,6 +280,7 @@ app.MapPost("/api/project/update", async (ProjectUpdateReq req) =>
         cmd.Parameters.AddWithValue("@Name", req.Name);
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -260,6 +298,7 @@ app.MapPost("/api/project/delete", async (ProjectDeleteReq req) =>
         cmd.Parameters.AddWithValue("@ProjectId", req.ProjectId);
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -277,6 +316,7 @@ app.MapPost("/api/project/reorder", async (ProjectReorderReq req) =>
         cmd.Parameters.AddWithValue("@OrderedIdsJson", System.Text.Json.JsonSerializer.Serialize(req.OrderedIds ?? new List<int>()));
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -297,6 +337,7 @@ app.MapPost("/api/task", async (TaskCreateReq req) =>
         cmd.Parameters.AddWithValue("@End", req.End);
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
         var outCode = new SqlParameter("@NewTaskCode", SqlDbType.NVarChar, 30) { Direction = ParameterDirection.Output };
         cmd.Parameters.Add(outCode);
         await cmd.ExecuteNonQueryAsync();
@@ -316,6 +357,7 @@ app.MapPost("/api/task/delete", async (TaskDeleteReq req) =>
         cmd.Parameters.AddWithValue("@TaskCode", req.TaskCode);
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -332,7 +374,7 @@ app.MapGet("/api/audit-log", async (int? top) =>
         await conn.OpenAsync();
         var logs = new List<object>();
         using var cmd = new SqlCommand(@"
-            SELECT TOP (@n) AuditId, ActorName, ActorRole, Action, EntityType, EntityId, NewValue, Detail, CreatedAt
+            SELECT TOP (@n) AuditId, ActorName, ActorRole, ActorEmpId, Action, EntityType, EntityId, NewValue, Detail, CreatedAt
             FROM dbo.AuditLog
             ORDER BY AuditId DESC", conn);
         cmd.Parameters.AddWithValue("@n", n);
@@ -343,12 +385,13 @@ app.MapGet("/api/audit-log", async (int? top) =>
                 id = r.GetInt64(0),
                 actor = r.GetString(1),
                 role = r.IsDBNull(2) ? null : r.GetString(2),
-                action = r.GetString(3),
-                entityType = r.GetString(4),
-                entityId = r.IsDBNull(5) ? null : r.GetString(5),
-                newValue = r.IsDBNull(6) ? null : r.GetString(6),
-                detail = r.IsDBNull(7) ? null : r.GetString(7),
-                at = r.GetDateTime(8).ToString("yyyy-MM-dd HH:mm:ss")
+                empId = r.IsDBNull(3) ? null : r.GetString(3),
+                action = r.GetString(4),
+                entityType = r.GetString(5),
+                entityId = r.IsDBNull(6) ? null : r.GetString(6),
+                newValue = r.IsDBNull(7) ? null : r.GetString(7),
+                detail = r.IsDBNull(8) ? null : r.GetString(8),
+                at = r.GetDateTime(9).ToString("yyyy-MM-dd HH:mm:ss")
             });
         return Results.Ok(new { logs });
     }
@@ -477,6 +520,61 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
     catch (Exception ex) { return Fail(ex); }
 });
 
+// 13) 主管新增成員 — usp_InsertUser(同名成員曾被移除則重新啟用)
+app.MapPost("/api/user", async (UserCreateReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connStr);
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_InsertUser", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@UserName", req.UserName);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 14) 主管修改成員名稱 — usp_UpdateUser(專案/回報以 UserId 關聯,歷史資料自動跟隨)
+app.MapPost("/api/user/update", async (UserUpdateReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connStr);
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_UpdateUser", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@UserName", req.UserName);
+        cmd.Parameters.AddWithValue("@NewName", req.NewName);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 15) 主管移除成員 (軟刪除=IsActive:0，名下仍有專案時回 400) — usp_DeleteUser
+app.MapPost("/api/user/delete", async (UserDeleteReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connStr);
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_DeleteUser", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@UserName", req.UserName);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
 app.Run();
 
 class ProjectDto
@@ -497,12 +595,16 @@ class TaskItemDto
     public int End { get; set; }
 }
 
-record WeeklyLogReq(string TaskCode, int Year, int Week, string Status, string? Note, string Actor, string? ActorRole);
-record ExtraNoteReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole);
-record TaskScheduleReq(string TaskCode, string Name, int Start, int End, string Actor, string? ActorRole);
-record ProjectCreateReq(string Type, string Category, string Owner, string Name, int Year, string Actor, string? ActorRole);
-record ProjectUpdateReq(int ProjectId, string Type, string Category, string Owner, string Name, string Actor, string? ActorRole);
-record ProjectDeleteReq(int ProjectId, string Actor, string? ActorRole);
-record ProjectReorderReq(List<int>? OrderedIds, string Actor, string? ActorRole);
-record TaskCreateReq(int ProjectId, string TaskName, int Start, int End, string Actor, string? ActorRole);
-record TaskDeleteReq(string TaskCode, string Actor, string? ActorRole);
+// ActorEmpId = 前端 /api/whoami 偵測到的 Windows 工號(如 00058897);非網域環境為 null,由 apiPost 自動附帶
+record WeeklyLogReq(string TaskCode, int Year, int Week, string Status, string? Note, string Actor, string? ActorRole, string? ActorEmpId);
+record ExtraNoteReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole, string? ActorEmpId);
+record TaskScheduleReq(string TaskCode, string Name, int Start, int End, string Actor, string? ActorRole, string? ActorEmpId);
+record ProjectCreateReq(string Type, string Category, string Owner, string Name, int Year, string Actor, string? ActorRole, string? ActorEmpId);
+record ProjectUpdateReq(int ProjectId, string Type, string Category, string Owner, string Name, string Actor, string? ActorRole, string? ActorEmpId);
+record ProjectDeleteReq(int ProjectId, string Actor, string? ActorRole, string? ActorEmpId);
+record ProjectReorderReq(List<int>? OrderedIds, string Actor, string? ActorRole, string? ActorEmpId);
+record TaskCreateReq(int ProjectId, string TaskName, int Start, int End, string Actor, string? ActorRole, string? ActorEmpId);
+record TaskDeleteReq(string TaskCode, string Actor, string? ActorRole, string? ActorEmpId);
+record UserCreateReq(string UserName, string Actor, string? ActorRole, string? ActorEmpId);
+record UserUpdateReq(string UserName, string NewName, string Actor, string? ActorRole, string? ActorEmpId);
+record UserDeleteReq(string UserName, string Actor, string? ActorRole, string? ActorEmpId);
