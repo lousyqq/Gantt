@@ -45,7 +45,8 @@ const PROJECT_TYPES = {
   'a': { label: '一級專案/KPI', chip: 'bg-pink-100 text-pink-800 border-pink-300', dot: 'bg-pink-400' },
   'b': { label: '重大貢獻及亮點', chip: 'bg-yellow-100 text-yellow-800 border-yellow-300', dot: 'bg-yellow-400' },
   'c': { label: '日常管理', chip: 'bg-teal-100 text-teal-800 border-teal-300', dot: 'bg-teal-400' },
-  'd': { label: '其他加分項', chip: 'bg-orange-100 text-orange-800 border-orange-300', dot: 'bg-orange-400' }
+  'd': { label: '其他加分項', chip: 'bg-orange-100 text-orange-800 border-orange-300', dot: 'bg-orange-400' },
+  'e': { label: '主管交辦', chip: 'bg-purple-100 text-purple-800 border-purple-300', dot: 'bg-purple-400' }
 };
 
 const STATUS_META = {
@@ -182,6 +183,7 @@ function App() {
   const [showPendingPanel, setShowPendingPanel] = useState(false);
   const [showAuditPanel, setShowAuditPanel] = useState(false);   // 主管:異動紀錄(AuditLog)面板
   const [showMemberPanel, setShowMemberPanel] = useState(false); // 主管:成員管理面板
+  const [showDeadlinePanel, setShowDeadlinePanel] = useState(false); // 即將到期清單面板(頂部 ⏰ 晶片點開)
 
   const weekW = isCompact ? 22 : 32;
   const todayWeek = getTodayWeek(scheduleYear, weeksTotal);   // 本週(相對於選定年度)
@@ -472,6 +474,30 @@ function App() {
         (role === 'manager' && !isFilteringRows && (ownerFilter === 'all' || ownerFilter === g.owner)))
   , [filteredProjects, users, role, isFilteringRows, ownerFilter]);
 
+  // 排程到期提醒:任務進行中(以「實際本週」計)且 剩餘 ≤2 週 或 時程已過 ≥70%
+  const isTaskDeadlineSoon = useCallback((task) => {
+    if (task.start > todayWeek || task.end < todayWeek) return false;
+    const span = task.end - task.start + 1;
+    const remain = task.end - todayWeek + 1;                 // 含本週
+    const elapsed = (todayWeek - task.start + 1) / span;     // 已過比例
+    return remain <= 2 || elapsed >= 0.7;
+  }, [todayWeek]);
+
+  // 即將到期清單(依剩餘週數排序,供頂部晶片點開的面板與統計數字共用)
+  const deadlineTasks = useMemo(() => {
+    const list = [];
+    projects.forEach(p => p.tasks.forEach(t => {
+      if (isTaskDeadlineSoon(t)) {
+        list.push({
+          proj: p, task: t,
+          remain: t.end - todayWeek + 1,
+          elapsed: Math.round(((todayWeek - t.start + 1) / (t.end - t.start + 1)) * 100)
+        });
+      }
+    }));
+    return list.sort((a, b) => a.remain - b.remain);
+  }, [projects, isTaskDeadlineSoon, todayWeek]);
+
   // --- 本週統計 ---
   const weekStats = useMemo(() => {
     let active = 0, reported = 0, executed = 0, monitor = 0, notExec = 0;
@@ -623,6 +649,12 @@ function App() {
               <StatChip label="Monitor" value={weekStats.monitor} className="bg-sky-100 text-sky-700" />
               <StatChip label="未執行" value={weekStats.notExec} className="bg-slate-200 text-slate-600" />
               <StatChip label="未回報" value={weekStats.pending} className={weekStats.pending > 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-slate-100 text-slate-400'} />
+              <button onClick={() => setShowDeadlinePanel(true)} title="點擊檢視即將到期清單"
+                className={`flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 transition ${deadlineTasks.length > 0 ? 'bg-orange-100 text-orange-800 hover:bg-orange-200 ring-1 ring-orange-300' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
+                <span className="opacity-60 font-medium text-[10px]">⏰ 即將到期</span>
+                <span className="text-[13px] leading-none">{deadlineTasks.length}</span>
+                <span className="text-[10px] opacity-50">›</span>
+              </button>
             </div>
             <div className="flex-1 min-w-[8px]"></div>
             <div className="flex-shrink-0 flex items-center gap-2 text-slate-500">
@@ -630,6 +662,7 @@ function App() {
               <span className="hidden xl:flex items-center"><span className="w-2.5 h-2.5 bg-green-500 mr-1 rounded-sm"></span>有執行</span>
               <span className="hidden xl:flex items-center"><span className="w-2.5 h-2.5 bg-sky-500 mr-1 rounded-sm"></span>Monitor</span>
               <span className="hidden xl:flex items-center"><span className="w-2.5 h-2.5 bg-slate-400 mr-1 rounded-sm"></span>未執行</span>
+              <span className="hidden xl:flex items-center"><span className="w-3 h-2.5 mr-1 rounded-sm border-2 border-orange-400 bg-white"></span>⏰ 即將到期</span>
             </div>
           </div>
 
@@ -814,6 +847,18 @@ function App() {
                               )}
                               <div className={`flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`}>{proj.type.toUpperCase()}</div>
                               <span className="flex-1 min-w-0 truncate font-medium text-slate-700 text-[11px]">{proj.name}</span>
+                              {/* 到期徽章放在「凍結」的左欄:橫向捲動到別的月份時提醒依然可見 */}
+                              {(() => {
+                                const soon = proj.tasks.filter(isTaskDeadlineSoon);
+                                if (soon.length === 0) return null;
+                                const remain = Math.min(...soon.map(t => t.end - todayWeek + 1));
+                                return (
+                                  <span className="flex-shrink-0 ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-orange-100 text-orange-700 border border-orange-300 whitespace-nowrap"
+                                    title={`${soon.length} 個計畫區間即將到期(最近的剩 ${remain} 週)`}>
+                                    ⏰ 剩{remain}週
+                                  </span>
+                                );
+                              })()}
                               {role === 'manager' && (
                                 <div className="flex-shrink-0 flex items-center gap-0.5 ml-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
                                   <button onClick={() => setAddingInterval(proj)}
@@ -839,6 +884,7 @@ function App() {
                               const isActiveThisWeek = task.start <= currentWeek && task.end >= currentWeek;
                               const weekLog = taskLogs[task.id]?.[currentWeek];
                               const isPending = role === 'member' && proj.owner === currentUser && isActiveThisWeek && !weekLog;
+                              const deadlineSoon = isTaskDeadlineSoon(task);   // 剩 ≤2 週或已過 70% 時程 → 橘框 + ⏰(未回報紅框優先)
 
                               const barClass = 'text-slate-700';
                               const barStyle = {
@@ -859,7 +905,7 @@ function App() {
                                     onMouseEnter={(e) => showTooltip(e, proj, task)}
                                     onMouseMove={moveTooltip}
                                     onMouseLeave={hideTooltip}
-                                    className={`absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 z-10 border rounded-sm shadow-sm ${barClass} ${isPending ? 'ring-2 ring-red-400 ring-offset-1' : ''}`}
+                                    className={`absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 z-10 border rounded-sm shadow-sm ${barClass} ${isPending ? 'ring-2 ring-red-400 ring-offset-1' : deadlineSoon ? 'ring-2 ring-orange-400 ring-offset-1' : ''}`}
                                     style={{ left: `${leftPercent}%`, width: `${widthPercent}%`, top: 4, bottom: isCompact ? 8 : 10, ...barStyle }}>
                                     
                                     {Object.entries(logs).map(([w, log]) => {
@@ -880,7 +926,7 @@ function App() {
                                     
                                     <span className={`relative z-10 truncate px-1.5 whitespace-nowrap ${isCompact ? 'text-[9px]' : 'text-[11px]'} ${textClass}`}
                                       style={{ textShadow: '0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.75)' }}>
-                                      {isPending && '❗'}{!isCompact && weekLog?.note ? `${task.name} ➔ ${weekLog.note}` : task.name}
+                                      {isPending && '❗'}{deadlineSoon && '⏰'}{!isCompact && weekLog?.note ? `${task.name} ➔ ${weekLog.note}` : task.name}
                                     </span>
                                   </div>
 
@@ -907,6 +953,12 @@ function App() {
             <div className="text-slate-300 mb-0.5">👤 {tooltip.proj.owner}　·　{tooltip.proj.category}</div>
             <div className="text-slate-300">📅 {tooltip.task.name}</div>
             <div className="text-slate-400">W{tooltip.task.start} – W{tooltip.task.end}（{weekToMonth(tooltip.task.start, months)} ~ {weekToMonth(tooltip.task.end, months)}）</div>
+            {isTaskDeadlineSoon(tooltip.task) && (
+              <div className="mt-1 text-orange-300 font-bold">
+                ⏰ 排程即將到期：剩 {tooltip.task.end - todayWeek + 1} 週
+                （時程已過 {Math.round(((todayWeek - tooltip.task.start + 1) / (tooltip.task.end - tooltip.task.start + 1)) * 100)}%）
+              </div>
+            )}
             {tooltip.weekLog && (
               <div className="mt-2 pt-2 border-t border-slate-700">
                 <div className="font-bold mb-0.5">{STATUS_META[tooltip.weekLog.status]?.icon} 本週 W{currentWeek}：{STATUS_META[tooltip.weekLog.status]?.label}</div>
@@ -936,6 +988,21 @@ function App() {
           currentWeek={currentWeek} initialNote={extraNotes[currentUser]?.[currentWeek] || ''}
           readOnly={isViewingPast}
           onClose={() => setShowExtraNoteModal(false)} onSave={handleSaveExtraNote}
+        />
+      )}
+      {showDeadlinePanel && (
+        <DeadlinePanel
+          items={deadlineTasks}
+          onClose={() => setShowDeadlinePanel(false)}
+          onSelect={(item) => {
+            setShowDeadlinePanel(false);
+            setScrollTargetWeek(Math.min(item.task.end, weeksTotal));   // 捲動定位到該任務結束週
+            setSelectedTaskInfo({
+              proj: item.proj, task: item.task,
+              isActiveThisWeek: item.task.start <= currentWeek && item.task.end >= currentWeek,
+              weekLog: taskLogs[item.task.id]?.[currentWeek]
+            });
+          }}
         />
       )}
       {showPendingPanel && (
@@ -1086,7 +1153,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex justify-center items-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex justify-between items-start" style={{ backgroundColor: isManager ? '#001F5B' : '#334155' }}>
           <div className="pr-3">
@@ -1197,7 +1264,7 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, onClose, onSave })
   };
   if (readOnly) {
     return (
-      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4" onClick={onClose}>
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
           <div className="px-6 py-4 bg-slate-600 text-white flex justify-between items-center">
             <h3 className="font-bold text-lg">🔒 W{currentWeek} 非專案工作（唯讀）</h3>
@@ -1219,7 +1286,8 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, onClose, onSave })
     );
   }
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4" onClick={onClose}>
+    // 注意:全站慣例 — 所有彈出視窗/面板的遮罩都「不」綁 onClick 關閉(避免誤點視窗外遺失輸入),一律用「取消」「×」或送出按鈕關閉;新增 Modal 請沿用
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 bg-orange-500 text-white flex justify-between items-center">
           <h3 className="font-bold text-lg flex items-center">📝 填寫 W{currentWeek} 非專案工作</h3>
@@ -1252,9 +1320,52 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, onClose, onSave })
   );
 }
 
+// 即將到期清單面板:列出剩餘 ≤2 週或已過 70% 時程的任務,依剩餘週數排序,點擊可定位並開啟任務視窗
+function DeadlinePanel({ items, onClose, onSelect }) {
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end">
+      <div className="w-full max-w-sm bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 text-white flex justify-between items-center bg-orange-600">
+          <div>
+            <h3 className="font-bold text-lg">⏰ 即將到期清單</h3>
+            <p className="text-xs text-orange-100 mt-0.5">剩餘 ≤2 週或時程已過 70% 的計畫區間</p>
+          </div>
+          <button onClick={onClose} className="text-white/70 hover:text-white p-1"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+          {items.length === 0 ? (
+            <div className="text-center text-slate-400 py-16">
+              <div className="text-4xl mb-3">🎉</div>
+              <div className="font-bold text-slate-600">目前沒有即將到期的任務</div>
+            </div>
+          ) : items.map(({ proj, task, remain, elapsed }) => (
+            <button key={task.id} onClick={() => onSelect({ proj, task })}
+              className="w-full text-left bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-xl p-3 transition group">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 pr-2">
+                  <div className="text-xs font-bold text-slate-700 truncate">{proj.name}</div>
+                  <div className="text-sm text-slate-600 mt-0.5 truncate">{task.name}</div>
+                  <div className="text-[10px] text-slate-400 mt-1">👤 {proj.owner} · 排程 W{task.start}–W{task.end}</div>
+                </div>
+                <div className="flex-shrink-0 text-right">
+                  <div className={`font-bold text-sm ${remain <= 1 ? 'text-red-600' : 'text-orange-600'}`}>剩 {remain} 週</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">已過 {elapsed}%</div>
+                </div>
+              </div>
+              <div className="mt-2 h-1.5 bg-white rounded-full overflow-hidden border border-orange-200">
+                <div className={`h-full rounded-full ${remain <= 1 ? 'bg-red-500' : 'bg-orange-400'}`} style={{ width: `${Math.min(elapsed, 100)}%` }}></div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PendingPanel({ pending, currentWeek, onClose, onSelect }) {
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end" onClick={onClose}>
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end">
       <div className="w-full max-w-sm bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#001F5B' }}>
           <div>
@@ -1440,7 +1551,7 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#001F5B' }}>
           <div>
@@ -1509,7 +1620,7 @@ function IntervalModal({ project, currentWeek, weeksTotal = WEEKS_TOTAL, onClose
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#001F5B' }}>
           <div>
@@ -1550,7 +1661,7 @@ function IntervalModal({ project, currentWeek, weeksTotal = WEEKS_TOTAL, onClose
 // 自製刪除確認視窗(取代 window.confirm,樣式與系統一致)
 function ConfirmModal({ info, onCancel }) {
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[150] flex justify-center items-center p-4" onClick={onCancel}>
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[150] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 bg-red-600 text-white flex items-center">
           <span className="text-xl mr-2">⚠️</span>
@@ -1609,7 +1720,7 @@ function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[115] flex justify-end" onClick={onClose}>
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[115] flex justify-end">
       <div className="w-full max-w-sm bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: NAVY }}>
           <div>
@@ -1706,11 +1817,11 @@ function AuditPanel({ onClose }) {
     const kw = filter.trim().toLowerCase();
     if (!kw) return logs;
     return logs.filter(l =>
-      `${l.actor} ${l.empId || ''} ${l.action} ${l.entityType} ${l.entityId || ''} ${l.newValue || ''} ${l.detail || ''} ${l.at}`.toLowerCase().includes(kw));
+      `${l.actor} ${l.empId || ''} ${l.action} ${l.entityType} ${l.entityId || ''} ${l.summary || ''} ${l.newValue || ''} ${l.detail || ''} ${l.at}`.toLowerCase().includes(kw));
   }, [logs, filter]);
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[115] flex justify-end" onClick={onClose}>
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[115] flex justify-end">
       <div className="w-full max-w-lg bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: NAVY }}>
           <div>
@@ -1733,23 +1844,19 @@ function AuditPanel({ onClose }) {
           ) : shown.map(l => {
             const meta = AUDIT_ACTION_META[l.action] || { label: l.action, cls: 'bg-slate-100 text-slate-600' };
             return (
-              <div key={l.id} className="border border-slate-200 rounded-lg p-2.5 hover:bg-slate-50">
+              // title 保留技術識別碼(如 t101-1@2026W9),畫面上只顯示後端翻譯好的白話摘要(summary)
+              <div key={l.id} className="border border-slate-200 rounded-lg p-2.5 hover:bg-slate-50" title={`${l.entityType}${l.entityId ? ' ' + l.entityId : ''}`}>
                 <div className="flex items-center gap-2">
                   <span className={`flex-shrink-0 px-1.5 py-0.5 rounded font-bold ${meta.cls}`}>{meta.label}</span>
                   <span className="font-bold text-slate-700">{AUDIT_ENTITY_LABELS[l.entityType] || l.entityType}</span>
-                  {l.entityId && <span className="text-slate-400 truncate">{l.entityId}</span>}
-                  <span className="ml-auto flex-shrink-0 text-slate-400">{l.at}</span>
-                </div>
-                <div className="mt-1 flex items-start gap-2">
-                  <span className="flex-shrink-0 text-slate-500 font-medium">
+                  <span className="flex-shrink-0 text-slate-500 font-medium ml-1">
                     {l.actor}{l.role === 'manager' ? '（主管）' : ''}
                     {l.empId && <span className="ml-1 px-1 py-px rounded bg-slate-100 text-slate-400 font-mono text-[10px]" title="操作者 Windows 工號">{l.empId}</span>}
                   </span>
-                  {(l.newValue || l.detail) && (
-                    <span className="text-slate-600 break-all" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {l.newValue || l.detail}
-                    </span>
-                  )}
+                  <span className="ml-auto flex-shrink-0 text-slate-400">{l.at}</span>
+                </div>
+                <div className="mt-1 text-slate-600 break-all leading-relaxed" style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {l.summary || l.newValue || l.detail || ''}
                 </div>
               </div>
             );

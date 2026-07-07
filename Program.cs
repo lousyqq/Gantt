@@ -364,7 +364,8 @@ app.MapPost("/api/task/delete", async (TaskDeleteReq req) =>
     catch (Exception ex) { return Fail(ex); }
 });
 
-// 11) 稽核紀錄查詢(主管「異動紀錄」面板) — 讀 AuditLog 最近 N 筆
+// 11) 稽核紀錄查詢(主管「異動紀錄」面板) — 讀 AuditLog 最近 N 筆,
+//     並於讀取時把技術代碼(如 t101-1@2026W9、軟刪除)翻譯成給高階主管看的白話摘要(summary)。
 app.MapGet("/api/audit-log", async (int? top) =>
 {
     int n = Math.Clamp(top ?? 200, 1, 1000);
@@ -372,27 +373,182 @@ app.MapGet("/api/audit-log", async (int? top) =>
     {
         using var conn = new SqlConnection(connStr);
         await conn.OpenAsync();
-        var logs = new List<object>();
-        using var cmd = new SqlCommand(@"
-            SELECT TOP (@n) AuditId, ActorName, ActorRole, ActorEmpId, Action, EntityType, EntityId, NewValue, Detail, CreatedAt
-            FROM dbo.AuditLog
-            ORDER BY AuditId DESC", conn);
-        cmd.Parameters.AddWithValue("@n", n);
-        using var r = await cmd.ExecuteReaderAsync();
-        while (await r.ReadAsync())
-            logs.Add(new
+
+        // 名稱對照(含已刪除/已停用者,舊紀錄才翻得出名稱)
+        var taskInfo = new Dictionary<string, (string Task, string Proj, string Owner)>();
+        using (var cmd = new SqlCommand(@"
+            SELECT t.TaskCode, t.TaskName, p.Name, u.UserName
+            FROM dbo.Tasks t
+            JOIN dbo.Projects p ON p.ProjectId = t.ProjectId
+            JOIN dbo.Users u    ON u.UserId = p.OwnerUserId", conn))
+        using (var r0 = await cmd.ExecuteReaderAsync())
+            while (await r0.ReadAsync())
+                taskInfo[r0.GetString(0)] = (r0.GetString(1), r0.GetString(2), r0.GetString(3));
+
+        var projInfo = new Dictionary<string, (string Name, string Owner)>();
+        using (var cmd = new SqlCommand(@"
+            SELECT p.ProjectId, p.Name, u.UserName
+            FROM dbo.Projects p
+            JOIN dbo.Users u ON u.UserId = p.OwnerUserId", conn))
+        using (var r0 = await cmd.ExecuteReaderAsync())
+            while (await r0.ReadAsync())
+                projInfo[r0.GetInt32(0).ToString()] = (r0.GetString(1), r0.GetString(2));
+
+        var statusLabel = new Dictionary<string, string>
+        { ["executed"] = "有執行", ["monitor"] = "Monitor(例行監控)", ["not_executed"] = "未執行" };
+        var typeLabel = new Dictionary<string, string>
+        { ["a"] = "a·一級專案/KPI", ["b"] = "b·重大貢獻及亮點", ["c"] = "c·日常管理", ["d"] = "d·其他加分項", ["e"] = "e·主管交辦" };
+
+        // 解析 "2026W9" → (2026, 9);解析 "name=xxx | W3-W7" → ("xxx","W3–W7")
+        static (string Year, string Week) ParseYw(string yw)
+        {
+            var i = yw.IndexOf('W');
+            return i > 0 ? (yw[..i], yw[(i + 1)..]) : (yw, "?");
+        }
+        static (string Name, string Range) ParseTaskSchedule(string v)
+        {
+            var s = v.StartsWith("name=") ? v[5..] : v;
+            var i = s.LastIndexOf(" | W", StringComparison.Ordinal);
+            return i > 0 ? (s[..i], s[(i + 4)..].Insert(0, "W")) : (s, "");
+        }
+
+        string Summarize(string action, string entityType, string? entityId, string? oldV, string? newV, string? detail)
+        {
+            try
             {
-                id = r.GetInt64(0),
-                actor = r.GetString(1),
-                role = r.IsDBNull(2) ? null : r.GetString(2),
-                empId = r.IsDBNull(3) ? null : r.GetString(3),
-                action = r.GetString(4),
-                entityType = r.GetString(5),
-                entityId = r.IsDBNull(6) ? null : r.GetString(6),
-                newValue = r.IsDBNull(7) ? null : r.GetString(7),
-                detail = r.IsDBNull(8) ? null : r.GetString(8),
-                at = r.GetDateTime(9).ToString("yyyy-MM-dd HH:mm:ss")
-            });
+                switch (entityType)
+                {
+                    case "WeeklyLog":   // entityId = t101-1@2026W9,NewValue = 狀態
+                    {
+                        var at = (entityId ?? "").Split('@');
+                        var (y, w) = at.Length == 2 ? ParseYw(at[1]) : ("?", "?");
+                        var where = at.Length > 0 && taskInfo.TryGetValue(at[0], out var ti)
+                            ? $"專案「{ti.Proj}」的任務「{ti.Task}」" : "任務";
+                        var s = $"回報 {where} {y} 年第 {w} 週進度：{statusLabel.GetValueOrDefault(newV ?? "", newV ?? "")}";
+                        // Detail 格式:note舊=... | note新=...,取出新說明附在後面
+                        var idx = (detail ?? "").LastIndexOf("note新=", StringComparison.Ordinal);
+                        if (idx >= 0)
+                        {
+                            var note = detail![(idx + 6)..].Trim();
+                            if (note != "") s += $"，工作說明：{note}";
+                        }
+                        return s;
+                    }
+                    case "ExtraNote":   // entityId = 裕隆@2026W27,NewValue = 內容
+                    {
+                        var at = (entityId ?? "").Split('@');
+                        var (y, w) = at.Length == 2 ? ParseYw(at[1]) : ("?", "?");
+                        var who = at.Length > 0 ? at[0] : "?";
+                        var s = $"填寫 {who} {y} 年第 {w} 週的非專案事項";
+                        if (!string.IsNullOrWhiteSpace(newV)) s += $"：{newV}";
+                        return s;
+                    }
+                    case "Project":
+                    {
+                        if (action == "REORDER")
+                        {
+                            var ids = System.Text.Json.JsonSerializer.Deserialize<List<int>>(newV ?? "[]") ?? new();
+                            var owner = ids.Count > 0 && projInfo.TryGetValue(ids[0].ToString(), out var pi0) ? pi0.Owner : null;
+                            return owner is null ? $"調整專案顯示順序（共 {ids.Count} 項）"
+                                                 : $"調整 {owner} 的專案顯示順序（共 {ids.Count} 項）";
+                        }
+                        if (action == "DELETE")
+                            return projInfo.TryGetValue(entityId ?? "", out var pd)
+                                ? $"刪除專案「{pd.Name}」（負責人：{pd.Owner}，含其所有計畫區間；資料保留，必要時可請系統管理者還原）"
+                                : "刪除專案（含其所有計畫區間；資料保留，必要時可請系統管理者還原）";
+                        // INSERT / UPDATE:值格式 type|分類|負責人|名稱
+                        var np = (newV ?? "").Split('|');
+                        if (action == "INSERT" && np.Length == 4)
+                            return $"新增專案「{np[3]}」（負責人:{np[2]}，分類:{np[1]}，類型:{typeLabel.GetValueOrDefault(np[0], np[0])}）";
+                        if (action == "UPDATE" && np.Length == 4)
+                        {
+                            var op = (oldV ?? "").Split('|');
+                            var changes = new List<string>();
+                            if (op.Length == 4)
+                            {
+                                if (op[3] != np[3]) changes.Add($"名稱「{op[3]}」→「{np[3]}」");
+                                if (op[1] != np[1]) changes.Add($"分類「{op[1]}」→「{np[1]}」");
+                                if (op[0] != np[0]) changes.Add($"類型「{typeLabel.GetValueOrDefault(op[0], op[0])}」→「{typeLabel.GetValueOrDefault(np[0], np[0])}」");
+                                if (op[2] != np[2]) changes.Add($"負責人「{op[2]}」→「{np[2]}」(專案移轉)");
+                            }
+                            return changes.Count > 0
+                                ? $"修改專案「{np[3]}」：{string.Join("、", changes)}"
+                                : $"修改專案「{np[3]}」（內容未變更）";
+                        }
+                        break;
+                    }
+                    case "Task":
+                    {
+                        var projName = taskInfo.TryGetValue(entityId ?? "", out var t) ? t.Proj : null;
+                        if (action == "INSERT")
+                        {
+                            // NewValue 格式:任務名 | W10-W20
+                            var i = (newV ?? "").LastIndexOf(" | W", StringComparison.Ordinal);
+                            var (nm, rg) = i > 0 ? (newV![..i], newV[(i + 3)..]) : (newV ?? "", "");
+                            return projName is null
+                                ? $"新增計畫區間「{nm}」（排程 {rg}）"
+                                : $"在專案「{projName}」新增計畫區間「{nm}」（排程 {rg}）";
+                        }
+                        if (action == "UPDATE")
+                        {
+                            var (on, orr) = ParseTaskSchedule(oldV ?? "");
+                            var (nn, nr) = ParseTaskSchedule(newV ?? "");
+                            var what = on != nn ? $"任務「{on}」更名為「{nn}」，排程 {orr} → {nr}" : $"任務「{nn}」排程 {orr} → {nr}";
+                            return projName is null ? $"調整計畫區間：{what}" : $"調整專案「{projName}」的計畫區間：{what}";
+                        }
+                        if (action == "DELETE")
+                            return taskInfo.TryGetValue(entityId ?? "", out var td)
+                                ? $"刪除專案「{td.Proj}」的計畫區間「{td.Task}」（資料保留，必要時可請系統管理者還原）"
+                                : "刪除計畫區間（資料保留，必要時可請系統管理者還原）";
+                        break;
+                    }
+                    case "User":
+                        return action switch
+                        {
+                            "INSERT" => (detail ?? "").Contains("重新啟用")
+                                        ? $"重新啟用成員「{entityId}」（還原其歷史專案與回報）"
+                                        : $"新增成員「{entityId}」",
+                            "UPDATE" => $"成員更名：「{oldV}」→「{newV}」（其專案與歷史回報自動跟隨）",
+                            "DELETE" => $"移除成員「{entityId}」（其歷史回報保留）",
+                            _ => ""
+                        };
+                }
+            }
+            catch { /* 解析失敗 → 走 fallback */ }
+            return newV ?? detail ?? "";
+        }
+
+        var logs = new List<object>();
+        using (var cmd = new SqlCommand(@"
+            SELECT TOP (@n) AuditId, ActorName, ActorRole, ActorEmpId, Action, EntityType, EntityId, OldValue, NewValue, Detail, CreatedAt
+            FROM dbo.AuditLog
+            ORDER BY AuditId DESC", conn))
+        {
+            cmd.Parameters.AddWithValue("@n", n);
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                string action = r.GetString(4), entityType = r.GetString(5);
+                string? entityId = r.IsDBNull(6) ? null : r.GetString(6);
+                string? oldValue = r.IsDBNull(7) ? null : r.GetString(7);
+                string? newValue = r.IsDBNull(8) ? null : r.GetString(8);
+                string? detail = r.IsDBNull(9) ? null : r.GetString(9);
+                logs.Add(new
+                {
+                    id = r.GetInt64(0),
+                    actor = r.GetString(1),
+                    role = r.IsDBNull(2) ? null : r.GetString(2),
+                    empId = r.IsDBNull(3) ? null : r.GetString(3),
+                    action,
+                    entityType,
+                    entityId,
+                    newValue,
+                    detail,
+                    summary = Summarize(action, entityType, entityId, oldValue, newValue, detail),
+                    at = r.GetDateTime(10).ToString("yyyy-MM-dd HH:mm:ss")
+                });
+            }
+        }
         return Results.Ok(new { logs });
     }
     catch (Exception ex) { return Fail(ex); }
