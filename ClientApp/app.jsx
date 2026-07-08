@@ -135,9 +135,10 @@ function App() {
   const [tooltip, setTooltip] = useState(null);                  // {x, y, proj, task, weekLog, history}
   const ganttRef = useRef(null);
 
-  // 紀錄打卡與非專案工作
+  // 紀錄打卡、非專案工作與下週預計
   const [taskLogs, setTaskLogs] = useState({});
   const [extraNotes, setExtraNotes] = useState({});
+  const [weeklyPlans, setWeeklyPlans] = useState({});   // weeklyPlans[user][week] = 下週預計執行工作(填寫於該週)
 
   // 重新抓取資料但不顯示整頁 Loading (供編輯後靜默刷新)
   const refreshData = useCallback(async () => {
@@ -151,6 +152,7 @@ function App() {
     setProjects(data.projects || []);
     setTaskLogs(data.taskLogs || {});
     setExtraNotes(data.extraNotes || {});
+    setWeeklyPlans(data.weeklyPlans || {});
     if (data.years && data.years.length) setYears(data.years);
     if (data.weeks && data.weeks.length) setMonths(groupWeeksToMonths(data.weeks));
   }, [scheduleYear]);
@@ -172,6 +174,7 @@ function App() {
 
   const [selectedTaskInfo, setSelectedTaskInfo] = useState(null);
   const [showExtraNoteModal, setShowExtraNoteModal] = useState(false);
+  const [showWeeklyPlanModal, setShowWeeklyPlanModal] = useState(false);   // 下週預計執行工作
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
   const showToast = (msg) => {
@@ -225,7 +228,7 @@ function App() {
   const scrollToWeek = useCallback((wk) => {
     const el = ganttRef.current;
     if (!el) return;
-    const LEFT_W = 430;
+    const LEFT_W = 490;
     const target = LEFT_W + (wk - 1) * weekW - (el.clientWidth - LEFT_W) / 2;
     el.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
   }, [weekW]);
@@ -254,7 +257,14 @@ function App() {
         [taskId]: { ...prev[taskId], [currentWeek]: { isExecuting: status !== 'not_executed', status, note } }
       }));
       setSelectedTaskInfo(null);
-      showToast(`✅ W${String(currentWeek).padStart(2, '0')} 任務回報已送出`);
+      // 「下週預計工作」為強制回報項目:回報完本週最後一項任務後仍未填寫時,直接開啟填寫視窗
+      const remainingPending = myPendingTasks.filter(x => x.task.id !== taskId).length;
+      if (role === 'member' && currentWeek === todayWeek && remainingPending === 0 && !weeklyPlans[currentUser]?.[todayWeek]) {
+        showToast(`✅ 本週任務已全數回報，請接著填寫「下週預計工作」`);
+        setShowWeeklyPlanModal(true);
+      } else {
+        showToast(`✅ W${String(currentWeek).padStart(2, '0')} 任務回報已送出`);
+      }
     } catch (e) {
       showToast('❌ 儲存失敗：' + (e.message || '無法連線資料庫'));
     }
@@ -274,6 +284,57 @@ function App() {
       showToast(`✅ W${String(currentWeek).padStart(2, '0')} 非專案事項已送出`);
     } catch (e) {
       showToast('❌ 儲存失敗：' + (e.message || '無法連線資料庫'));
+    }
+  };
+
+  const handleSaveWeeklyPlan = async (note) => {
+    try {
+      await apiPost('/api/weekly-plan', {
+        userName: currentUser, year: scheduleYear, week: currentWeek,
+        note, actor: currentUser, actorRole: role
+      });
+      setWeeklyPlans(prev => ({
+        ...prev,
+        [currentUser]: { ...prev[currentUser], [currentWeek]: note }
+      }));
+      setShowWeeklyPlanModal(false);
+      showToast(`✅ W${String(currentWeek).padStart(2, '0')} 下週預計工作已送出`);
+    } catch (e) {
+      showToast('❌ 儲存失敗：' + (e.message || '無法連線資料庫'));
+    }
+  };
+
+  // 具體產出項目 = 專案「全部執行完畢後」的交付成果(專案層級,非單一區間);負責人本人或主管可編輯,權限由 SP 再驗一次
+  const [deliverableProj, setDeliverableProj] = useState(null);   // 開啟中的產出項目視窗(甘特列 🎯 進入)
+  const handleSaveDeliverable = async (projId, deliverable) => {
+    try {
+      await apiPost('/api/project/deliverable', {
+        projectId: projId, deliverable, actor: currentUser, actorRole: role
+      });
+      setProjects(prev => prev.map(p => p.id === projId ? { ...p, deliverable } : p));
+      setDeliverableProj(null);
+      showToast('✅ 具體產出項目已更新');
+    } catch (e) {
+      showToast('❌ 儲存失敗：' + (e.message || '無法連線資料庫'));
+    }
+  };
+
+  // 主管調整打卡分數(0.3/0.5/0.8/0.9/1)
+  const handleUpdateScore = async (taskId, score) => {
+    try {
+      await apiPost('/api/weekly-log/score', {
+        taskCode: taskId, year: scheduleYear, week: currentWeek, score,
+        actor: currentUser, actorRole: role
+      });
+      setTaskLogs(prev => {
+        const log = prev[taskId]?.[currentWeek];
+        if (!log) return prev;
+        return { ...prev, [taskId]: { ...prev[taskId], [currentWeek]: { ...log, score } } };
+      });
+      setSelectedTaskInfo(prev => prev?.weekLog ? { ...prev, weekLog: { ...prev.weekLog, score } } : prev);
+      showToast(`✅ 分數已調整為 ${score} 分`);
+    } catch (e) {
+      showToast('❌ 調整失敗：' + (e.message || '無法連線資料庫'));
     }
   };
 
@@ -527,6 +588,10 @@ function App() {
     return list;
   }, [projects, taskLogs, todayWeek, role, currentUser]);
 
+  // 「下週預計工作」也是強制回報項目:未填寫時計入待回報數,回報完最後一項任務會自動跳出填寫視窗
+  const planPendingThisWeek = role === 'member' && !!currentUser && !weeklyPlans[currentUser]?.[todayWeek];
+  const totalPendingCount = myPendingTasks.length + (planPendingThisWeek ? 1 : 0);
+
   const showTooltip = (e, proj, task) => {
     const weekLog = taskLogs[task.id]?.[currentWeek];
     const history = Object.entries(taskLogs[task.id] || {})
@@ -582,13 +647,17 @@ function App() {
                 <button onClick={() => setShowPendingPanel(true)}
                   className="relative bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition flex items-center border border-white/20">
                   🔔 本週待回報
-                  {myPendingTasks.length > 0 && (
-                    <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold border-2 border-white/40 shadow">{myPendingTasks.length}</span>
+                  {totalPendingCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold border-2 border-white/40 shadow">{totalPendingCount}</span>
                   )}
                 </button>
                 <button onClick={() => setShowExtraNoteModal(true)}
                   className={`relative px-3 py-1.5 rounded-md text-xs font-bold shadow transition border ${isViewingPast ? 'bg-slate-500 hover:bg-slate-400 border-slate-400/50 text-white' : extraNotes[currentUser]?.[currentWeek] ? 'bg-green-600 hover:bg-green-500 border-green-400/50 text-white' : 'bg-orange-500 hover:bg-orange-400 border-orange-400/50 text-white'}`}>
                   {isViewingPast ? `🔒 檢視 W${String(currentWeek).padStart(2, '0')} 非專案事項` : extraNotes[currentUser]?.[currentWeek] ? '✓ 非專案事項(已填寫)' : '📝 非專案事項(未填寫)'}
+                </button>
+                <button onClick={() => setShowWeeklyPlanModal(true)}
+                  className={`relative px-3 py-1.5 rounded-md text-xs font-bold shadow transition border ${isViewingPast ? 'bg-slate-500 hover:bg-slate-400 border-slate-400/50 text-white' : weeklyPlans[currentUser]?.[currentWeek] ? 'bg-green-600 hover:bg-green-500 border-green-400/50 text-white' : 'bg-indigo-500 hover:bg-indigo-400 border-indigo-400/50 text-white'}`}>
+                  {isViewingPast ? `🔒 檢視 W${String(currentWeek).padStart(2, '0')} 下週預計` : weeklyPlans[currentUser]?.[currentWeek] ? '✓ 下週預計(已填寫)' : '📅 下週預計(未填寫)'}
                 </button>
               </>
             )}
@@ -725,16 +794,16 @@ function App() {
           </div>
 
           <div ref={ganttRef} className="flex-1 overflow-auto bg-slate-50 relative">
-            <table className="border-collapse bg-white" style={{ tableLayout: 'fixed', width: 430 + weeksTotal * weekW }}>
+            <table className="border-collapse bg-white" style={{ tableLayout: 'fixed', width: 490 + weeksTotal * weekW }}>
               <colgroup>
                 <col style={{ width: 28 }} />
                 <col style={{ width: 42 }} />
-                <col style={{ width: 360 }} />
+                <col style={{ width: 420 }} />
                 {Array.from({ length: weeksTotal }).map((_, i) => <col key={i} style={{ width: weekW }} />)}
               </colgroup>
               <thead className="sticky top-0 z-40 text-xs shadow-sm bg-slate-100">
                 <tr>
-                  <th colSpan="3" className="border-r border-b border-slate-300 bg-slate-200 sticky left-0 z-50 px-2 py-1 text-left" style={{ width: 430 }}>
+                  <th colSpan="3" className="border-r border-b border-slate-300 bg-slate-200 sticky left-0 z-50 px-2 py-1 text-left" style={{ width: 490 }}>
                     <div className="flex justify-between items-center text-[10px]">
                       <span className="font-bold text-slate-600">專案基本資訊</span>
                       <span className="text-slate-400 font-normal">顯示 {filteredProjects.length} / {projects.length} 項</span>
@@ -750,7 +819,7 @@ function App() {
                 <tr className="bg-slate-100 text-slate-600 text-[11px]">
                   <th className="border-r border-b border-slate-300 p-1 sticky left-0 bg-slate-100 z-50 text-center font-medium" style={{ width: 28 }}>No</th>
                   <th className="border-r border-b border-slate-300 p-1 sticky bg-slate-100 z-50 text-center font-medium" style={{ width: 42, left: 28 }}>分類</th>
-                  <th className="border-r border-b border-slate-300 p-1 sticky bg-slate-100 z-50 shadow-[2px_0_5px_rgba(0,0,0,0.05)] text-left pl-3 font-medium" style={{ width: 360, left: 70 }}>專案名稱 (Project Name)</th>
+                  <th className="border-r border-b border-slate-300 p-1 sticky bg-slate-100 z-50 shadow-[2px_0_5px_rgba(0,0,0,0.05)] text-left pl-3 font-medium" style={{ width: 420, left: 70 }}>專案名稱 (Project Name)</th>
                   {Array.from({ length: weeksTotal }).map((_, i) => {
                     const weekNum = i + 1;
                     const isCurrent = weekNum === currentWeek;
@@ -846,7 +915,12 @@ function App() {
                                 )
                               )}
                               <div className={`flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`}>{proj.type.toUpperCase()}</div>
-                              <span className="flex-1 min-w-0 truncate font-medium text-slate-700 text-[11px]">{proj.name}</span>
+                              <span className="flex-1 min-w-0 truncate font-medium text-slate-700 text-[11px]" title={proj.name}>{proj.name}</span>
+                              {/* 具體產出項目(專案執行完畢後的成果)入口:已填=實色,未填=淡色;負責人與主管可編輯,其他人唯讀 */}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setDeliverableProj(proj); }}
+                                className={`flex-shrink-0 ml-1 text-[12px] leading-none transition hover:scale-125 ${proj.deliverable ? 'opacity-90' : 'opacity-25 hover:opacity-70'}`}
+                                title={proj.deliverable ? `具體產出項目：${proj.deliverable}` : '具體產出項目（尚未填寫，點擊檢視/填寫）'}>🎯</button>
                               {/* 到期徽章放在「凍結」的左欄:橫向捲動到別的月份時提醒依然可見 */}
                               {(() => {
                                 const soon = proj.tasks.filter(isTaskDeadlineSoon);
@@ -951,6 +1025,7 @@ function App() {
           <div className="bg-slate-900/95 text-white rounded-lg shadow-xl px-3.5 py-3 text-xs max-w-xs border border-slate-700">
             <div className="font-bold text-[13px] mb-1 text-yellow-200">{tooltip.proj.name}</div>
             <div className="text-slate-300 mb-0.5">👤 {tooltip.proj.owner}　·　{tooltip.proj.category}</div>
+            {tooltip.proj.deliverable && <div className="text-amber-200/90 mb-0.5">🎯 {tooltip.proj.deliverable}</div>}
             <div className="text-slate-300">📅 {tooltip.task.name}</div>
             <div className="text-slate-400">W{tooltip.task.start} – W{tooltip.task.end}（{weekToMonth(tooltip.task.start, months)} ~ {weekToMonth(tooltip.task.end, months)}）</div>
             {isTaskDeadlineSoon(tooltip.task) && (
@@ -980,7 +1055,7 @@ function App() {
           info={selectedTaskInfo} role={role} currentUser={currentUser} currentWeek={currentWeek} todayWeek={todayWeek}
           weeksTotal={weeksTotal}
           onClose={() => setSelectedTaskInfo(null)} onSaveLog={handleSaveLog} onUpdateTaskDetails={handleUpdateTaskDetails}
-          onDeleteTask={handleDeleteTask}
+          onDeleteTask={handleDeleteTask} onUpdateScore={handleUpdateScore}
         />
       )}
       {showExtraNoteModal && (
@@ -988,6 +1063,13 @@ function App() {
           currentWeek={currentWeek} initialNote={extraNotes[currentUser]?.[currentWeek] || ''}
           readOnly={isViewingPast}
           onClose={() => setShowExtraNoteModal(false)} onSave={handleSaveExtraNote}
+        />
+      )}
+      {showWeeklyPlanModal && (
+        <WeeklyPlanModal
+          currentWeek={currentWeek} initialNote={weeklyPlans[currentUser]?.[currentWeek] || ''}
+          readOnly={isViewingPast}
+          onClose={() => setShowWeeklyPlanModal(false)} onSave={handleSaveWeeklyPlan}
         />
       )}
       {showDeadlinePanel && (
@@ -1007,7 +1089,12 @@ function App() {
       )}
       {showPendingPanel && (
         <PendingPanel
-          pending={myPendingTasks} currentWeek={todayWeek}
+          pending={myPendingTasks} currentWeek={todayWeek} planPending={planPendingThisWeek}
+          onFillPlan={() => {
+            setShowPendingPanel(false);
+            setCurrentWeek(todayWeek);
+            setShowWeeklyPlanModal(true);
+          }}
           onClose={() => setShowPendingPanel(false)}
           onSelect={(item) => {
             setShowPendingPanel(false);
@@ -1019,6 +1106,7 @@ function App() {
       {showWeeklyReport && (
         <WeeklyReportDashboard
           currentWeek={currentWeek} year={scheduleYear} users={users} projects={projects} taskLogs={taskLogs} extraNotes={extraNotes}
+          weeklyPlans={weeklyPlans}
           onClose={() => setShowWeeklyReport(false)}
         />
       )}
@@ -1042,6 +1130,12 @@ function App() {
           users={users} projects={projects} year={scheduleYear}
           onAdd={handleAddUser} onRename={handleRenameUser} onDelete={handleDeleteUser}
           onClose={() => setShowMemberPanel(false)}
+        />
+      )}
+      {deliverableProj && (
+        <DeliverableModal
+          proj={deliverableProj} role={role} currentUser={currentUser}
+          onClose={() => setDeliverableProj(null)} onSave={handleSaveDeliverable}
         />
       )}
       {confirmInfo && (
@@ -1124,12 +1218,22 @@ function LoginScreen({ onLogin, users, year, empId }) {
   );
 }
 
-function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal = WEEKS_TOTAL, onClose, onSaveLog, onUpdateTaskDetails, onDeleteTask }) {
+// 主管評分選項(成員回報預設 1 分,未回報 0 分,僅主管可調整)
+const SCORE_OPTIONS = [
+  { value: 0.3, label: '再三交代' },
+  { value: 0.5, label: '說一動做一動' },
+  { value: 0.8, label: '完成老闆交代' },
+  { value: 0.9, label: '超越老闆期許' },
+  { value: 1, label: '主動承擔' }
+];
+
+function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal = WEEKS_TOTAL, onClose, onSaveLog, onUpdateTaskDetails, onDeleteTask, onUpdateScore }) {
   const { proj, task, isActiveThisWeek, weekLog } = info;
   const isManager = role === 'manager';
   const isMyTask = proj.owner === currentUser;
   const isReportingWeek = currentWeek === todayWeek;
   const canClockIn = role === 'member' && isMyTask && isActiveThisWeek && isReportingWeek;
+  const score = weekLog ? Number(weekLog.score ?? 1) : 0;
 
   const [status, setStatus] = useState(weekLog?.status || null);
   const [note, setNote] = useState(weekLog?.note || '');
@@ -1173,7 +1277,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
               {isManager && <span className="text-[10px] bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded font-bold">主管可編輯</span>}
             </div>
             <input type="text" value={taskName} onChange={e => { setTaskName(e.target.value); setScheduleError(''); }} disabled={!isManager}
-              className="w-full border border-slate-300 rounded-md p-2 text-sm mb-3 disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" />
+              className="w-full border border-slate-300 rounded-md p-2 text-sm mb-3 text-center disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" />
             <div className="flex space-x-3 items-center">
               <div className="w-1/2">
                 <label className="text-[10px] text-slate-400 font-bold">開始週</label>
@@ -1198,12 +1302,21 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
           </div>
 
           <div>
-            <h4 className="text-sm font-bold text-slate-800 mb-3">W{String(currentWeek).padStart(2, '0')} 實際執行回報</h4>
+            <h4 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
+              W{String(currentWeek).padStart(2, '0')} 實際執行回報
+              {isActiveThisWeek && (
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-[11px] font-bold ${weekLog ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-500'}`}
+                  title="回報成功預設 1 分,未回報 0 分;主管可依表現調整">
+                  🏆 {score} 分
+                </span>
+              )}
+            </h4>
             {canClockIn ? (
               <div className={`p-4 rounded-xl border transition-colors ${status && status !== 'not_executed' ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
                 <div className="mb-3">
                   <div className="font-bold text-slate-800 text-sm">本週此任務的執行狀態</div>
                   <div className="text-xs text-slate-500 mt-0.5">回報後會在該週甘特條標示對應顏色（有執行=綠、Monitor=藍、未執行=灰）。Monitor 為例行監控工作，可不填說明。</div>
+                  <div className="text-xs text-indigo-600 mt-1 font-bold">🏆 完成回報預設獲得 1 分（未回報為 0 分），主管可依表現調整分數。</div>
                 </div>
                 <div className="space-y-3">
                   <div className="grid grid-cols-3 gap-2">
@@ -1237,15 +1350,30 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                   <div className="text-slate-500 text-center py-2">此任務排定於 W{task.start}–W{task.end}，非 W{String(currentWeek).padStart(2, '0')} 排定項目。</div>
                 ) : weekLog ? (
                   <div>
-                    <div className="mb-2"><span className="font-bold mr-2">狀態：</span>
+                    <div className="mb-2 flex items-center flex-wrap gap-y-1"><span className="font-bold mr-2">狀態：</span>
                       <span className={`px-2 py-0.5 rounded text-xs font-bold ${STATUS_META[weekLog.status]?.tag}`}>
                         {STATUS_META[weekLog.status]?.icon} {STATUS_META[weekLog.status]?.label}
                       </span>
+                      <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700" title="回報成功預設 1 分,主管可調整">🏆 {score} 分</span>
                     </div>
                     <div className="font-bold mb-1">工作說明：</div>
                     <div className="bg-white p-3 rounded border border-slate-200 text-slate-700 whitespace-pre-wrap">{weekLog.note || '（未填寫備註）'}</div>
+                    {isManager && (
+                      <div className="mt-3 pt-3 border-t border-slate-200">
+                        <div className="text-xs font-bold text-slate-500 mb-2">主管評分（點擊即修改此週分數）</div>
+                        <div className="grid grid-cols-5 gap-1.5">
+                          {SCORE_OPTIONS.map(o => (
+                            <button key={o.value} onClick={() => onUpdateScore(task.id, o.value)}
+                              className={`px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`}>
+                              <div className="text-[11px] font-bold leading-tight">{o.label}</div>
+                              <div className={`text-[10px] mt-0.5 ${score === o.value ? 'text-indigo-100' : 'text-slate-400'}`}>{o.value} 分</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                ) : <div className="text-slate-500 text-center py-2">📌 W{String(currentWeek).padStart(2, '0')} 未回報此項目（維持計畫中）。</div>}
+                ) : <div className="text-slate-500 text-center py-2">📌 W{String(currentWeek).padStart(2, '0')} 未回報此項目（維持計畫中，🏆 0 分）。</div>}
               </div>
             )}
           </div>
@@ -1320,6 +1448,121 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, onClose, onSave })
   );
 }
 
+// 具體產出項目:專案「全部執行完畢後」預計交付的具體成果(專案層級,所有計畫區間共用);
+// 負責人本人與主管可編輯(SP 內再驗一次權限),其他成員唯讀
+function DeliverableModal({ proj, role, currentUser, onClose, onSave }) {
+  const canEdit = role === 'manager' || proj.owner === currentUser;
+  const [text, setText] = useState(proj.deliverable || '');
+  return (
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 bg-amber-500 text-white flex justify-between items-start">
+          <div className="pr-3">
+            <h3 className="font-bold text-lg">🎯 具體產出項目</h3>
+            <p className="text-xs text-amber-100 mt-0.5 truncate max-w-[360px]">{proj.name}（負責人：{proj.owner}）</p>
+          </div>
+          <button onClick={onClose} className="text-white/70 hover:text-white flex-shrink-0"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+        </div>
+        <div className="p-6">
+          <p className="text-sm text-slate-500 mb-4 border-l-4 border-amber-400 pl-3">
+            請描述此專案<span className="font-bold text-slate-700">全部執行完畢後</span>預計交付的具體成果
+            （例如：系統上線、SOP 文件、驗證報告），非單週或單一區間的產出。
+          </p>
+          {canEdit ? (
+            <>
+              <div className="flex justify-end mb-1">
+                <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold">{role === 'manager' ? '主管可編輯' : '負責人可編輯'}</span>
+              </div>
+              <textarea value={text} onChange={e => setText(e.target.value)} autoFocus
+                placeholder="描述專案完成後要交付的最終成果…"
+                className="w-full border border-slate-300 rounded-lg p-3 text-sm h-32 outline-none focus:ring-2 focus:ring-amber-400 resize-none"></textarea>
+              <div className="flex justify-end space-x-3 pt-4">
+                <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
+                <button onClick={() => onSave(proj.id, text.trim())}
+                  className="px-6 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg shadow-md">儲存</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-sm text-slate-700 whitespace-pre-wrap bg-amber-50/70 border border-amber-200 rounded-lg p-4">
+                {proj.deliverable || <span className="text-slate-400 italic">（負責人尚未填寫）</span>}
+              </div>
+              <div className="flex justify-end pt-4">
+                <button onClick={onClose} className="px-6 py-2 text-sm bg-slate-600 hover:bg-slate-700 text-white font-bold rounded-lg">關閉</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 下週預計執行工作:每人每週一筆(填寫於本週,內容為下一週的工作安排),樣式比照非專案事項但用靛藍色系
+function WeeklyPlanModal({ currentWeek, initialNote, readOnly, onClose, onSave }) {
+  const [note, setNote] = useState(initialNote);
+  const [error, setError] = useState('');
+  const submit = () => {
+    if (!note.trim()) { setError('請填寫內容後再儲存'); return; }
+    onSave(note.trim());
+  };
+  if (readOnly) {
+    return (
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="px-6 py-4 bg-slate-600 text-white flex justify-between items-center">
+            <h3 className="font-bold text-lg">🔒 W{currentWeek} 下週預計工作（唯讀）</h3>
+            <button onClick={onClose} className="text-white/60 hover:text-white"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+          </div>
+          <div className="p-6">
+            <p className="text-xs text-slate-400 mb-3">歷史週次僅供瀏覽，無法修改。</p>
+            {initialNote ? (
+              <div className="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-4 whitespace-pre-wrap">{initialNote}</div>
+            ) : (
+              <div className="text-sm text-slate-400 italic text-center py-6">該週未填寫下週預計工作</div>
+            )}
+            <div className="flex justify-end pt-4">
+              <button onClick={onClose} className="px-6 py-2 text-sm bg-slate-600 hover:bg-slate-700 text-white font-bold rounded-lg">關閉</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 bg-indigo-500 text-white flex justify-between items-center">
+          <h3 className="font-bold text-lg flex items-center">📅 填寫 W{currentWeek} 下週預計執行工作</h3>
+          <button onClick={onClose} className="text-white/60 hover:text-white"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+        </div>
+        <div className="p-6">
+          {initialNote ? (
+            <div className="mb-4 bg-green-50 border border-green-300 text-green-800 rounded-lg px-3 py-2.5 text-sm font-bold flex items-center">
+              <span className="mr-2">✅</span> 本週已送出過，以下為已儲存的內容，可修改後重新送出。
+            </div>
+          ) : (
+            <div className="mb-4 bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-lg px-3 py-2.5 text-sm font-bold flex items-center">
+              <span className="mr-2">📭</span> 本週尚未填寫。
+            </div>
+          )}
+          <p className="text-sm text-slate-500 mb-4 border-l-4 border-indigo-400 pl-3">
+            請填寫下一週（W{String(Math.min(currentWeek + 1, 53)).padStart(2, '0')}）預計進行的工作安排，會呈現在團隊總結看板與 Excel 週報。
+          </p>
+          <textarea value={note} onChange={e => { setNote(e.target.value); setError(''); }}
+            placeholder={"例如：\n1. OOO 專案進入測試階段，預計完成驗證報告\n2. 準備季度檢討資料…"}
+            className={`w-full border rounded-lg p-3 text-sm h-40 outline-none focus:ring-2 focus:ring-indigo-400 resize-none ${error ? 'border-red-400' : 'border-slate-300'}`}></textarea>
+          {error && <div className="text-xs text-red-600 font-bold mt-1">{error}</div>}
+          <div className="flex justify-end space-x-3 pt-4">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
+            <button onClick={submit} className="px-6 py-2 text-sm bg-indigo-500 hover:bg-indigo-600 text-white font-bold rounded-lg shadow-md">送出</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 即將到期清單面板:列出剩餘 ≤2 週或已過 70% 時程的任務,依剩餘週數排序,點擊可定位並開啟任務視窗
 function DeadlinePanel({ items, onClose, onSelect }) {
   return (
@@ -1363,22 +1606,35 @@ function DeadlinePanel({ items, onClose, onSelect }) {
   );
 }
 
-function PendingPanel({ pending, currentWeek, onClose, onSelect }) {
+function PendingPanel({ pending, currentWeek, planPending = false, onFillPlan, onClose, onSelect }) {
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end">
       <div className="w-full max-w-sm bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#001F5B' }}>
           <div>
             <h3 className="font-bold text-lg">🔔 W{String(currentWeek).padStart(2, '0')} 待回報清單</h3>
-            <p className="text-xs text-blue-200 mt-0.5">本週排定但尚未打卡的任務</p>
+            <p className="text-xs text-blue-200 mt-0.5">本週排定任務打卡 ＋ 下週預計工作(必填)</p>
           </div>
           <button onClick={onClose} className="text-white/60 hover:text-white p-1"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
-          {pending.length === 0 ? (
+          {planPending && (
+            <button onClick={onFillPlan}
+              className="w-full text-left bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 rounded-xl p-3 transition group">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 pr-2">
+                  <div className="text-xs font-bold text-indigo-700">📅 下週預計執行工作</div>
+                  <div className="text-sm text-slate-600 mt-0.5">本週必填項目，尚未填寫</div>
+                  <div className="text-[10px] text-slate-400 mt-1">請安排下一週（W{String(Math.min(currentWeek + 1, 53)).padStart(2, '0')}）預計進行的工作</div>
+                </div>
+                <div className="flex-shrink-0 text-indigo-600 font-bold text-xs bg-white border border-indigo-200 rounded-full px-2.5 py-1 group-hover:bg-indigo-600 group-hover:text-white transition">填寫 ›</div>
+              </div>
+            </button>
+          )}
+          {pending.length === 0 && !planPending ? (
             <div className="text-center text-slate-400 py-16">
               <div className="text-4xl mb-3">🎉</div>
-              <div className="font-bold text-slate-600">本週任務已全數回報</div>
+              <div className="font-bold text-slate-600">本週任務與下週預計已全數完成</div>
               <div className="text-xs mt-1">辛苦了！</div>
             </div>
           ) : pending.map(({ proj, task }) => (
@@ -1400,7 +1656,7 @@ function PendingPanel({ pending, currentWeek, onClose, onSelect }) {
   );
 }
 
-function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, extraNotes, onClose }) {
+function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, extraNotes, weeklyPlans = {}, onClose }) {
   const [copied, setCopied] = useState(false);
 
   // 下載後端產生的 Excel 週報(.xlsx:專案執行 + 非專案事項 兩個工作表)
@@ -1422,18 +1678,24 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
         else pendingTasks.push({ proj: p, task: t });
       }
     }));
-    return { user, activeTasks, pendingTasks, extraNote: extraNotes[user]?.[currentWeek], total: activeTasks.length + pendingTasks.length };
-  }), [users, projects, taskLogs, extraNotes, currentWeek]);
+    return {
+      user, activeTasks, pendingTasks,
+      extraNote: extraNotes[user]?.[currentWeek],
+      weekPlan: weeklyPlans[user]?.[currentWeek],
+      total: activeTasks.length + pendingTasks.length
+    };
+  }), [users, projects, taskLogs, extraNotes, weeklyPlans, currentWeek]);
 
   const buildReportText = () => {
     const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} 團隊週報】`, ''];
     summary.forEach(s => {
-      if (s.activeTasks.length === 0 && !s.extraNote) return;
+      if (s.activeTasks.length === 0 && !s.extraNote && !s.weekPlan) return;
       lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}）`);
       s.activeTasks.forEach(({ proj, task, log }) => {
         lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}`);
       });
       if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
+      if (s.weekPlan) lines.push(`  (下週預計) ${s.weekPlan.replace(/\n/g, ' / ')}`);
       lines.push('');
     });
     return lines.join('\n');
@@ -1477,8 +1739,8 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
-        {summary.map(({ user, activeTasks, pendingTasks, extraNote, total }) => {
-          if (activeTasks.length === 0 && !extraNote && pendingTasks.length === 0) return null;
+        {summary.map(({ user, activeTasks, pendingTasks, extraNote, weekPlan, total }) => {
+          if (activeTasks.length === 0 && !extraNote && !weekPlan && pendingTasks.length === 0) return null;
           const rate = total > 0 ? Math.round((activeTasks.length / total) * 100) : 0;
           return (
             <div key={user} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -1501,7 +1763,10 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
                     <div key={task.id} className={`text-sm p-2.5 rounded-lg border ${log.status === 'not_executed' ? 'bg-slate-100 border-slate-200 opacity-80' : log.status === 'monitor' ? 'bg-sky-50/70 border-sky-200' : 'bg-green-50/60 border-green-200'}`}>
                       <div className="flex items-center justify-between">
                         <div className="font-bold text-slate-700 truncate text-xs pr-2">{proj.name}</div>
-                        <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_META[log.status]?.tag}`}>{STATUS_META[log.status]?.label}</span>
+                        <div className="flex-shrink-0 flex items-center gap-1">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_META[log.status]?.tag}`}>{STATUS_META[log.status]?.label}</span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700" title="打卡得分">{Number(log.score ?? 1)}分</span>
+                        </div>
                       </div>
                       <div className="text-slate-600 my-1 font-medium text-xs">{task.name}</div>
                       {log.note && <div className="text-slate-700 text-xs bg-white p-1.5 rounded border border-slate-100 whitespace-pre-wrap">{log.note}</div>}
@@ -1518,6 +1783,10 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
                   {extraNote ? (
                     <div className="text-sm text-slate-700 bg-orange-50 p-3 rounded-lg border border-orange-200 whitespace-pre-wrap">{extraNote}</div>
                   ) : <div className="text-sm text-slate-400 italic py-2">無填寫其他項目</div>}
+                  <div className="text-xs font-bold text-slate-400 border-b border-slate-100 pb-1 pt-1">📅 下週預計執行工作</div>
+                  {weekPlan ? (
+                    <div className="text-sm text-slate-700 bg-indigo-50 p-3 rounded-lg border border-indigo-200 whitespace-pre-wrap">{weekPlan}</div>
+                  ) : <div className="text-sm text-slate-400 italic py-2">未填寫</div>}
                 </div>
               </div>
             </div>
@@ -1686,9 +1955,11 @@ const AUDIT_ACTION_META = {
   DELETE:    { label: '刪除', cls: 'bg-red-100 text-red-700' },
   REORDER:   { label: '排序', cls: 'bg-purple-100 text-purple-700' },
   CLOCKIN:   { label: '回報', cls: 'bg-teal-100 text-teal-700' },
-  EXTRANOTE: { label: '非專案', cls: 'bg-orange-100 text-orange-700' }
+  EXTRANOTE: { label: '非專案', cls: 'bg-orange-100 text-orange-700' },
+  WEEKPLAN:  { label: '下週預計', cls: 'bg-indigo-100 text-indigo-700' },
+  SCORE:     { label: '評分', cls: 'bg-fuchsia-100 text-fuchsia-700' }
 };
-const AUDIT_ENTITY_LABELS = { Project: '專案', Task: '任務', WeeklyLog: '週回報', ExtraNote: '非專案事項', User: '成員' };
+const AUDIT_ENTITY_LABELS = { Project: '專案', Task: '任務', WeeklyLog: '週回報', ExtraNote: '非專案事項', WeeklyPlan: '下週計畫', User: '成員' };
 
 // 主管:成員管理面板(新增/移除成員;移除為軟刪除 IsActive=0,名下仍有專案時後端會擋下)
 function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose }) {

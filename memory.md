@@ -307,6 +307,72 @@ PendingPanel、ProjectEditModal、IntervalModal、ConfirmModal、AuditPanel、Me
 
 ---
 
+## 2026-07-08 — 下週預計工作／名稱欄加寬／具體產出項目／打卡計分（4 項）
+
+**資料庫**（遷移 `05_add_plan_deliverable_score.sql`，已在 Sariel 執行；01~03 不動）
+- 新表 `WeeklyPlans`（每人每年每週一筆，結構同 ExtraNotes）＋ `usp_UpsertWeeklyPlan`（稽核 WEEKPLAN/WeeklyPlan）。
+- `Projects.Deliverable NVARCHAR(1000)` ＋ `usp_UpdateProjectDeliverable`（**SP 內檢查**：僅負責人本人或主管；
+  稽核 UPDATE Project + FieldName='Deliverable'）。
+- `WeeklyLogs.Score DECIMAL(2,1) NOT NULL DEFAULT(1)`（既有列自動補 1）＋ `usp_UpdateLogScore`
+  （**SP 內檢查**：僅主管、分數限 0.3/0.5/0.8/0.9/1；稽核 SCORE）。回報=1 分（含未執行），未回報=無列=0 分；
+  成員重新回報不會洗掉主管評分（MERGE UPDATE 不動 Score）。
+
+**後端**（`Program.cs`）
+- bootstrap 回傳 `weeklyPlans`、taskLogs 加 `score`、projects 加 `deliverable`。
+- 新端點：`POST /api/weekly-plan`、`/api/project/deliverable`、`/api/weekly-log/score`。
+- audit-log 白話化補三種：SCORE（含分數名稱如「完成老闆交代」）、WeeklyPlan、Deliverable（讀 FieldName 判別）。
+- Excel 週報 Sheet2 加第三欄「下週預計執行工作」（改以 Users 排序合併非專案＋下週預計）。
+
+**前端**（`ClientApp/app.jsx`，已 `npm run build`）
+1. **下週預計**：成員 header 新增「📅 下週預計」按鈕（靛藍，已填轉綠、歷史週唯讀）→ `WeeklyPlanModal`；
+   團隊總結右欄加「📅 下週預計執行工作」區塊；複製週報文字加「(下週預計)」行。
+2. **名稱欄加寬**：360→420（表格 430→490，含 LEFT_W／表頭／colgroup 同步改）；專案名稱 truncate 時
+   滑鼠停留顯示完整名稱（title）；TaskModal 任務名稱輸入框改置中（text-center）。
+3. **具體產出項目**：TaskModal 排程卡下方新增琥珀色卡片（整個專案共用）；負責人本人與主管可編輯
+   （內容有變才出現「儲存產出項目」鈕），其他人唯讀；甘特 tooltip 加「🎯 產出」行。
+4. **打卡計分**：TaskModal「實際執行回報」標題旁 🏆 分數徽章（未回報 0 分）；成員回報卡加計分說明；
+   主管在已回報項目下看到 5 顆評分鈕（0.3 再三交代/0.5 說一動做一動/0.8 完成老闆交代/0.9 超越老闆期許/1 主動承擔，
+   現分數高亮）；團隊總結每項任務顯示分數小徽章；AUDIT 標籤補 WEEKPLAN/SCORE/WeeklyPlan。
+
+**驗證**（實際 DB 全流程）：名稱欄 420px、任務名置中；主管填產出→負責人可見可編輯；裕隆填下週預計（按鈕轉綠）
+→回報任務得 1 分→主管點 0.8 徽章即時更新且按鈕高亮；異動紀錄四種新紀錄皆白話；團隊總結顯示下週預計＋分數；
+Excel sharedStrings 含新欄與內容；測試專案/回報/計畫已從 DB 硬刪；console 乾淨。
+
+---
+
+## 2026-07-08 — 「下週預計工作」納入強制回報
+
+**需求**：不要只有本週進度算打卡，下週預計工作也強制必填。
+
+**修正**（`ClientApp/app.jsx`，已 `npm run build`；後端與 DB 不變）：
+1. `planPendingThisWeek`（本週未填下週預計）計入 header「本週待回報」紅色徽章數（totalPendingCount）。
+2. `PendingPanel` 最上方新增靛藍色「📅 下週預計執行工作(必填)」項目，點「填寫 ›」直接開 `WeeklyPlanModal`；
+   空狀態(🎉)需任務與下週預計皆完成才顯示；副標改「本週排定任務打卡 ＋ 下週預計工作(必填)」。
+3. `handleSaveLog`：成員於本週回報完**最後一項**待回報任務且尚未填下週預計時，
+   自動開啟下週預計視窗＋提示 toast（多項任務連續回報時不干擾，只在最後一項觸發）。
+
+**驗證**：裕隆(5 待回報+未填) 徽章=6、清單含必填項、點擊開窗；冠芝(剩 1 項)回報 Monitor 後
+自動跳出下週預計視窗＋「請接著填寫」toast；測試回報已從 DB 清除；console 乾淨。
+
+---
+
+## 2026-07-08 — 具體產出項目重新定位（區間視窗 → 專案層級專屬視窗）
+
+**需求釐清**：具體產出項目＝專案「**全部執行完畢後**」的最終交付成果（專案層級），
+原本放在 TaskModal（進度區間的回報視窗）內會被誤解為該區間的產出。資料模型本來就存 `Projects.Deliverable`，不用改 DB。
+
+**修正**（`ClientApp/app.jsx`，已 `npm run build`；後端與 DB 不變）：
+1. TaskModal 內的產出卡片整段移除（含 deliverable state 與 onSaveDeliverable prop）。
+2. 甘特圖專案列名稱旁新增 🎯 小圖示入口（已填=實色＋title 預覽內容；未填=淡色），點擊開新的 `DeliverableModal`。
+3. `DeliverableModal`（琥珀色標題列，顯示專案名與負責人）：說明文字強調「全部執行完畢後預計交付的具體成果，
+   非單週或單一區間的產出」；負責人本人與主管可編輯（儲存後自動關閉），其他成員唯讀（僅「關閉」）。
+4. 甘特 tooltip 的「🎯 產出」行保留。
+
+**驗證**：每列都有 🎯；裕隆編輯自己專案→儲存→圖示轉實色且 title 帶內容；開玉婷的專案=唯讀；
+TaskModal 已無產出卡片；測試寫入的 Deliverable 已從 DB 清除（使用者自填的「測試用」保留）；console 乾淨。
+
+---
+
 ## 先前修改（同一改造專案的前置作業）
 
 - **ServiceCenter → Gantt 更名**：專案由舊 ServiceCenter App 改造，所有 ServiceCenter 字樣改為 Gantt。

@@ -93,7 +93,7 @@ app.MapGet("/api/bootstrap", async (int? year) =>
         var projOrder = new List<int>();
         using (var cmd = new SqlCommand(@"
             SELECT p.ProjectId, p.TypeCode, p.Category, u.UserName AS Owner, p.Name,
-                   t.TaskCode, t.TaskName, t.StartWeek, t.EndWeek
+                   t.TaskCode, t.TaskName, t.StartWeek, t.EndWeek, p.Deliverable
             FROM dbo.Projects p
             JOIN dbo.Users u ON u.UserId = p.OwnerUserId
             LEFT JOIN dbo.Tasks t ON t.ProjectId = p.ProjectId AND t.IsDeleted = 0
@@ -114,6 +114,7 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                         Category = r.GetString(2),
                         Owner = r.GetString(3),
                         Name = r.GetString(4),
+                        Deliverable = r.IsDBNull(9) ? null : r.GetString(9),
                         Tasks = new List<TaskItemDto>()
                     };
                     projMap[pid] = proj;
@@ -131,10 +132,10 @@ app.MapGet("/api/bootstrap", async (int? year) =>
         }
         var projects = projOrder.Select(id => projMap[id]).ToList();
 
-        // taskLogs[taskCode][week] = { status, note, isExecuting }
+        // taskLogs[taskCode][week] = { status, note, isExecuting, score }
         var taskLogs = new Dictionary<string, Dictionary<int, object>>();
         using (var cmd = new SqlCommand(@"
-            SELECT t.TaskCode, w.WeekNo, w.Status, w.Note
+            SELECT t.TaskCode, w.WeekNo, w.Status, w.Note, w.Score
             FROM dbo.WeeklyLogs w
             JOIN dbo.Tasks t ON t.TaskId = w.TaskId
             WHERE w.ScheduleYear = @y", conn))
@@ -147,8 +148,9 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                 int wk = r.GetInt32(1);
                 string status = r.GetString(2);
                 string? note = r.IsDBNull(3) ? null : r.GetString(3);
+                decimal score = r.GetDecimal(4);
                 if (!taskLogs.TryGetValue(code, out var m)) { m = new(); taskLogs[code] = m; }
-                m[wk] = new { status, note, isExecuting = status != "not_executed" };
+                m[wk] = new { status, note, isExecuting = status != "not_executed", score };
             }
         }
 
@@ -172,7 +174,27 @@ app.MapGet("/api/bootstrap", async (int? year) =>
             }
         }
 
-        return Results.Ok(new { year = y, years, weeks, users, projects, taskLogs, extraNotes });
+        // weeklyPlans[userName][week] = 下週預計執行工作(填寫於該週)
+        var weeklyPlans = new Dictionary<string, Dictionary<int, string>>();
+        using (var cmd = new SqlCommand(@"
+            SELECT u.UserName, wp.WeekNo, wp.Note
+            FROM dbo.WeeklyPlans wp
+            JOIN dbo.Users u ON u.UserId = wp.UserId
+            WHERE wp.ScheduleYear = @y", conn))
+        {
+            cmd.Parameters.AddWithValue("@y", y);
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                string name = r.GetString(0);
+                int wk = r.GetInt32(1);
+                string note = r.IsDBNull(2) ? "" : r.GetString(2);
+                if (!weeklyPlans.TryGetValue(name, out var m)) { m = new(); weeklyPlans[name] = m; }
+                m[wk] = note;
+            }
+        }
+
+        return Results.Ok(new { year = y, years, weeks, users, projects, taskLogs, extraNotes, weeklyPlans });
     }
     catch (Exception ex) { return Fail(ex); }
 });
@@ -211,6 +233,67 @@ app.MapPost("/api/extra-note", async (ExtraNoteReq req) =>
         cmd.Parameters.AddWithValue("@Year", req.Year);
         cmd.Parameters.AddWithValue("@Week", req.Week);
         cmd.Parameters.AddWithValue("@Note", (object?)req.Note ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 3.1) 下週預計執行工作 — usp_UpsertWeeklyPlan
+app.MapPost("/api/weekly-plan", async (WeeklyPlanReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connStr);
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_UpsertWeeklyPlan", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@UserName", req.UserName);
+        cmd.Parameters.AddWithValue("@Year", req.Year);
+        cmd.Parameters.AddWithValue("@Week", req.Week);
+        cmd.Parameters.AddWithValue("@Note", (object?)req.Note ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 3.2) 專案具體產出項目 — usp_UpdateProjectDeliverable(僅負責人或主管,SP 內檢查)
+app.MapPost("/api/project/deliverable", async (DeliverableReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connStr);
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_UpdateProjectDeliverable", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@ProjectId", req.ProjectId);
+        cmd.Parameters.AddWithValue("@Deliverable", (object?)req.Deliverable ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 3.3) 主管調整打卡分數 — usp_UpdateLogScore(僅主管,SP 內檢查;分數限 0.3/0.5/0.8/0.9/1)
+app.MapPost("/api/weekly-log/score", async (ScoreReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connStr);
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_UpdateLogScore", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@TaskCode", req.TaskCode);
+        cmd.Parameters.AddWithValue("@Year", req.Year);
+        cmd.Parameters.AddWithValue("@Week", req.Week);
+        cmd.Parameters.AddWithValue("@Score", req.Score);
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
@@ -412,18 +495,26 @@ app.MapGet("/api/audit-log", async (int? top) =>
             return i > 0 ? (s[..i], s[(i + 4)..].Insert(0, "W")) : (s, "");
         }
 
-        string Summarize(string action, string entityType, string? entityId, string? oldV, string? newV, string? detail)
+        string Summarize(string action, string entityType, string? entityId, string? oldV, string? newV, string? detail, string? fieldName = null)
         {
             try
             {
                 switch (entityType)
                 {
-                    case "WeeklyLog":   // entityId = t101-1@2026W9,NewValue = 狀態
+                    case "WeeklyLog":   // entityId = t101-1@2026W9,NewValue = 狀態(CLOCKIN)或分數(SCORE)
                     {
                         var at = (entityId ?? "").Split('@');
                         var (y, w) = at.Length == 2 ? ParseYw(at[1]) : ("?", "?");
                         var where = at.Length > 0 && taskInfo.TryGetValue(at[0], out var ti)
                             ? $"專案「{ti.Proj}」的任務「{ti.Task}」" : "任務";
+                        if (action == "SCORE")
+                        {
+                            var scoreName = new Dictionary<string, string>
+                            { ["0.3"] = "再三交代", ["0.5"] = "說一動做一動", ["0.8"] = "完成老闆交代", ["0.9"] = "超越老闆期許", ["1.0"] = "主動承擔", ["1"] = "主動承擔" };
+                            var nv = (newV ?? "").TrimEnd('0').TrimEnd('.');
+                            var label = scoreName.GetValueOrDefault(newV ?? "", scoreName.GetValueOrDefault(nv, ""));
+                            return $"評分 {where} {y} 年第 {w} 週回報：{oldV} 分 → {newV} 分{(label != "" ? $"（{label}）" : "")}";
+                        }
                         var s = $"回報 {where} {y} 年第 {w} 週進度：{statusLabel.GetValueOrDefault(newV ?? "", newV ?? "")}";
                         // Detail 格式:note舊=... | note新=...,取出新說明附在後面
                         var idx = (detail ?? "").LastIndexOf("note新=", StringComparison.Ordinal);
@@ -435,11 +526,13 @@ app.MapGet("/api/audit-log", async (int? top) =>
                         return s;
                     }
                     case "ExtraNote":   // entityId = 裕隆@2026W27,NewValue = 內容
+                    case "WeeklyPlan":  // 同格式;內容為「下週預計執行工作」
                     {
                         var at = (entityId ?? "").Split('@');
                         var (y, w) = at.Length == 2 ? ParseYw(at[1]) : ("?", "?");
                         var who = at.Length > 0 ? at[0] : "?";
-                        var s = $"填寫 {who} {y} 年第 {w} 週的非專案事項";
+                        var what = entityType == "WeeklyPlan" ? "下週預計執行工作" : "非專案事項";
+                        var s = $"填寫 {who} {y} 年第 {w} 週的{what}";
                         if (!string.IsNullOrWhiteSpace(newV)) s += $"：{newV}";
                         return s;
                     }
@@ -456,6 +549,10 @@ app.MapGet("/api/audit-log", async (int? top) =>
                             return projInfo.TryGetValue(entityId ?? "", out var pd)
                                 ? $"刪除專案「{pd.Name}」（負責人：{pd.Owner}，含其所有計畫區間；資料保留，必要時可請系統管理者還原）"
                                 : "刪除專案（含其所有計畫區間；資料保留，必要時可請系統管理者還原）";
+                        if (action == "UPDATE" && fieldName == "Deliverable")
+                            return projInfo.TryGetValue(entityId ?? "", out var pv)
+                                ? $"更新專案「{pv.Name}」的具體產出項目：{newV}"
+                                : $"更新專案的具體產出項目：{newV}";
                         // INSERT / UPDATE:值格式 type|分類|負責人|名稱
                         var np = (newV ?? "").Split('|');
                         if (action == "INSERT" && np.Length == 4)
@@ -520,7 +617,7 @@ app.MapGet("/api/audit-log", async (int? top) =>
 
         var logs = new List<object>();
         using (var cmd = new SqlCommand(@"
-            SELECT TOP (@n) AuditId, ActorName, ActorRole, ActorEmpId, Action, EntityType, EntityId, OldValue, NewValue, Detail, CreatedAt
+            SELECT TOP (@n) AuditId, ActorName, ActorRole, ActorEmpId, Action, EntityType, EntityId, OldValue, NewValue, Detail, CreatedAt, FieldName
             FROM dbo.AuditLog
             ORDER BY AuditId DESC", conn))
         {
@@ -533,6 +630,7 @@ app.MapGet("/api/audit-log", async (int? top) =>
                 string? oldValue = r.IsDBNull(7) ? null : r.GetString(7);
                 string? newValue = r.IsDBNull(8) ? null : r.GetString(8);
                 string? detail = r.IsDBNull(9) ? null : r.GetString(9);
+                string? fieldName = r.IsDBNull(11) ? null : r.GetString(11);
                 logs.Add(new
                 {
                     id = r.GetInt64(0),
@@ -544,7 +642,7 @@ app.MapGet("/api/audit-log", async (int? top) =>
                     entityId,
                     newValue,
                     detail,
-                    summary = Summarize(action, entityType, entityId, oldValue, newValue, detail),
+                    summary = Summarize(action, entityType, entityId, oldValue, newValue, detail, fieldName),
                     at = r.GetDateTime(10).ToString("yyyy-MM-dd HH:mm:ss")
                 });
             }
@@ -561,9 +659,11 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
     int w = week ?? 1;
     try
     {
-        // --- 撈本週排定任務(含未回報)與非專案事項 ---
+        // --- 撈本週排定任務(含未回報)、非專案事項、下週預計工作 ---
         var rows = new List<(string Owner, string Category, string Type, string Project, string Task, int Start, int End, string? Status, string? Note)>();
-        var notes = new List<(string Owner, string Note)>();
+        var userOrder = new List<string>();
+        var extraD = new Dictionary<string, string>();
+        var planD = new Dictionary<string, string>();
         using (var conn = new SqlConnection(connStr))
         {
             await conn.OpenAsync();
@@ -585,18 +685,33 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
                               r.IsDBNull(7) ? null : r.GetString(7),
                               r.IsDBNull(8) ? null : r.GetString(8)));
             }
+            using (var cmd = new SqlCommand(
+                "SELECT UserName FROM dbo.Users WHERE IsActive = 1 AND Role = 'member' ORDER BY SortOrder", conn))
+            using (var r = await cmd.ExecuteReaderAsync())
+                while (await r.ReadAsync()) userOrder.Add(r.GetString(0));
             using (var cmd = new SqlCommand(@"
                 SELECT u.UserName, e.Note
                 FROM dbo.ExtraNotes e
                 JOIN dbo.Users u ON u.UserId = e.UserId
-                WHERE e.ScheduleYear = @y AND e.WeekNo = @w
-                ORDER BY u.SortOrder", conn))
+                WHERE e.ScheduleYear = @y AND e.WeekNo = @w", conn))
             {
                 cmd.Parameters.AddWithValue("@y", y);
                 cmd.Parameters.AddWithValue("@w", w);
                 using var r = await cmd.ExecuteReaderAsync();
                 while (await r.ReadAsync())
-                    notes.Add((r.GetString(0), r.IsDBNull(1) ? "" : r.GetString(1)));
+                    extraD[r.GetString(0)] = r.IsDBNull(1) ? "" : r.GetString(1);
+            }
+            using (var cmd = new SqlCommand(@"
+                SELECT u.UserName, wp.Note
+                FROM dbo.WeeklyPlans wp
+                JOIN dbo.Users u ON u.UserId = wp.UserId
+                WHERE wp.ScheduleYear = @y AND wp.WeekNo = @w", conn))
+            {
+                cmd.Parameters.AddWithValue("@y", y);
+                cmd.Parameters.AddWithValue("@w", w);
+                using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                    planD[r.GetString(0)] = r.IsDBNull(1) ? "" : r.GetString(1);
             }
         }
 
@@ -645,26 +760,32 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
         ws.Columns(1, 3).AdjustToContents(); ws.Column(6).AdjustToContents(); ws.Column(7).AdjustToContents();
         ws.Column(8).Style.Alignment.WrapText = true;
 
-        // --- Sheet 2:非專案事項 ---
+        // --- Sheet 2:非專案事項 + 下週預計工作 ---
         var ws2 = wb.Worksheets.Add($"W{w:00} 非專案事項");
-        ws2.Cell(1, 1).Value = "成員"; ws2.Cell(1, 2).Value = "非專案工作內容";
-        var head2 = ws2.Range(1, 1, 1, 2);
+        ws2.Cell(1, 1).Value = "成員"; ws2.Cell(1, 2).Value = "非專案工作內容"; ws2.Cell(1, 3).Value = "下週預計執行工作";
+        var head2 = ws2.Range(1, 1, 1, 3);
         head2.Style.Font.Bold = true;
         head2.Style.Font.FontColor = ClosedXML.Excel.XLColor.White;
         head2.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromArgb(0xEA, 0x58, 0x0C);
         int row2 = 2;
-        foreach (var n in notes)
+        foreach (var u in userOrder)
         {
-            ws2.Cell(row2, 1).Value = n.Owner;
-            ws2.Cell(row2, 2).Value = n.Note;
+            var extra = extraD.GetValueOrDefault(u, "");
+            var plan = planD.GetValueOrDefault(u, "");
+            if (extra == "" && plan == "") continue;
+            ws2.Cell(row2, 1).Value = u;
+            ws2.Cell(row2, 2).Value = extra;
+            ws2.Cell(row2, 3).Value = plan;
             row2++;
         }
-        var used2 = ws2.Range(1, 1, Math.Max(row2 - 1, 1), 2);
+        var used2 = ws2.Range(1, 1, Math.Max(row2 - 1, 1), 3);
         used2.Style.Border.InsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
         used2.Style.Border.OutsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
         ws2.Column(1).AdjustToContents();
-        ws2.Column(2).Width = 80;
+        ws2.Column(2).Width = 55;
         ws2.Column(2).Style.Alignment.WrapText = true;
+        ws2.Column(3).Width = 45;
+        ws2.Column(3).Style.Alignment.WrapText = true;
         ws2.SheetView.FreezeRows(1);
 
         using var ms = new MemoryStream();
@@ -740,6 +861,7 @@ class ProjectDto
     public string Category { get; set; } = "";
     public string Owner { get; set; } = "";
     public string Name { get; set; } = "";
+    public string? Deliverable { get; set; }   // 具體產出項目(負責人與主管可編輯)
     public List<TaskItemDto> Tasks { get; set; } = new();
 }
 
@@ -764,3 +886,6 @@ record TaskDeleteReq(string TaskCode, string Actor, string? ActorRole, string? A
 record UserCreateReq(string UserName, string Actor, string? ActorRole, string? ActorEmpId);
 record UserUpdateReq(string UserName, string NewName, string Actor, string? ActorRole, string? ActorEmpId);
 record UserDeleteReq(string UserName, string Actor, string? ActorRole, string? ActorEmpId);
+record WeeklyPlanReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole, string? ActorEmpId);
+record DeliverableReq(int ProjectId, string? Deliverable, string Actor, string? ActorRole, string? ActorEmpId);
+record ScoreReq(string TaskCode, int Year, int Week, decimal Score, string Actor, string? ActorRole, string? ActorEmpId);
