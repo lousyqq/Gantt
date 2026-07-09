@@ -78,54 +78,58 @@ const groupWeeksToMonths = weeks => {
   }
   return out;
 };
+
+// 類型標籤:邊框用 400/500 深階(投影機對比打折,300 級邊框在布幕上會消失)
 const PROJECT_TYPES = {
   'a': {
     label: '一級專案/KPI',
-    chip: 'bg-pink-100 text-pink-800 border-pink-300',
-    dot: 'bg-pink-400'
+    chip: 'bg-pink-100 text-pink-800 border-pink-400',
+    dot: 'bg-pink-500'
   },
   'b': {
     label: '重大貢獻及亮點',
-    chip: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-    dot: 'bg-yellow-400'
+    chip: 'bg-yellow-100 text-yellow-800 border-yellow-500',
+    dot: 'bg-yellow-500'
   },
   'c': {
     label: '日常管理',
-    chip: 'bg-teal-100 text-teal-800 border-teal-300',
-    dot: 'bg-teal-400'
+    chip: 'bg-teal-100 text-teal-800 border-teal-400',
+    dot: 'bg-teal-500'
   },
   'd': {
     label: '其他加分項',
-    chip: 'bg-orange-100 text-orange-800 border-orange-300',
-    dot: 'bg-orange-400'
+    chip: 'bg-orange-100 text-orange-800 border-orange-400',
+    dot: 'bg-orange-500'
   },
   'e': {
     label: '主管交辦',
-    chip: 'bg-purple-100 text-purple-800 border-purple-300',
-    dot: 'bg-purple-400'
+    chip: 'bg-purple-100 text-purple-800 border-purple-400',
+    dot: 'bg-purple-500'
   }
 };
+
+// 狀態色加深(範本 B 高對比):白字在色塊上達 WCAG AA,年長使用者更易辨識
 const STATUS_META = {
   executed: {
     label: '有執行',
     icon: '✅',
-    bar: 'bg-green-500 border-green-600 text-white',
-    tag: 'bg-green-100 text-green-700',
-    dot: 'bg-green-500'
+    bar: 'bg-green-700 border-green-800 text-white',
+    tag: 'bg-green-100 text-green-800',
+    dot: 'bg-green-700'
   },
   monitor: {
     label: 'Monitor',
     icon: '👁️',
-    bar: 'bg-sky-500 border-sky-600 text-white',
-    tag: 'bg-sky-100 text-sky-700',
-    dot: 'bg-sky-500'
+    bar: 'bg-sky-700 border-sky-800 text-white',
+    tag: 'bg-sky-100 text-sky-800',
+    dot: 'bg-sky-700'
   },
   not_executed: {
     label: '未執行',
     icon: '⏸️',
-    bar: 'bg-slate-400 border-slate-500 text-white',
-    tag: 'bg-slate-200 text-slate-600',
-    dot: 'bg-slate-400'
+    bar: 'bg-slate-500 border-slate-600 text-white',
+    tag: 'bg-slate-200 text-slate-700',
+    dot: 'bg-slate-500'
   }
 };
 
@@ -211,8 +215,9 @@ function App() {
   const [months, setMonths] = useState(MONTHS);
   const weeksTotal = useMemo(() => months.reduce((s, m) => s + m.weeks, 0), [months]);
 
-  // UI 狀態
-  const [isCompact, setIsCompact] = useState(true);
+  // UI 狀態(範本 B:預設寬鬆模式,字級較大對年長者友善)
+  const [isCompact, setIsCompact] = useState(false);
+  const [isOverview, setIsOverview] = useState(false); // 年度總覽:52 週自動縮放進一個畫面寬,無水平捲軸(唯讀瀏覽視角)
   const [collapsedOwners, setCollapsedOwners] = useState(new Set());
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState(new Set()); // 空 = 全部
@@ -829,7 +834,7 @@ function App() {
       backgroundColor: '#001338'
     }
   }, /*#__PURE__*/React.createElement("span", {
-    className: "text-white/60 mr-2 text-xs font-medium"
+    className: "text-white/85 mr-2 text-xs font-medium"
   }, "\u7CFB\u7D71\u9031\u6578"), role === 'manager' ? /*#__PURE__*/React.createElement("div", {
     className: "flex items-center space-x-1.5"
   }, /*#__PURE__*/React.createElement("button", {
@@ -843,7 +848,7 @@ function App() {
       minWidth: 100
     }
   }, "W", String(currentWeek).padStart(2, '0'), /*#__PURE__*/React.createElement("span", {
-    className: "text-white/40 font-normal text-[10px] ml-1"
+    className: "text-white/75 font-normal text-[10px] ml-1"
   }, weekToMonth(currentWeek, months))), /*#__PURE__*/React.createElement("button", {
     onClick: () => setCurrentWeek(p => Math.min(weeksTotal, p + 1)),
     className: "w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
@@ -861,7 +866,7 @@ function App() {
       minWidth: 100
     }
   }, "W", String(currentWeek).padStart(2, '0'), /*#__PURE__*/React.createElement("span", {
-    className: "text-white/40 font-normal text-[10px] ml-1"
+    className: "text-white/75 font-normal text-[10px] ml-1"
   }, weekToMonth(currentWeek, months))), /*#__PURE__*/React.createElement("button", {
     onClick: () => setCurrentWeek(p => Math.min(todayWeek, p + 1)),
     disabled: currentWeek >= todayWeek,
@@ -899,7 +904,7 @@ function App() {
   }, /*#__PURE__*/React.createElement("div", {
     className: "font-bold text-sm"
   }, currentUser), /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] text-white/50"
+    className: "text-[10px] text-white/80"
   }, role === 'manager' ? '主管' : '成員', empId ? ` · 工號 ${empId}` : '')), /*#__PURE__*/React.createElement("button", {
     onClick: handleLogout,
     className: "p-1.5 hover:bg-red-500/80 rounded-lg transition text-white/70 hover:text-white bg-white/5",
@@ -929,20 +934,20 @@ function App() {
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center flex-shrink-0"
   }, /*#__PURE__*/React.createElement("span", {
-    className: "font-black text-slate-800 text-sm"
+    className: "font-black text-slate-900 text-sm"
   }, "W", String(currentWeek).padStart(2, '0')), /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-400 ml-1 text-[10px]"
+    className: "text-slate-600 ml-1 text-[10px]"
   }, weekToMonth(currentWeek, months), " \u6982\u6CC1")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center flex-shrink-0 min-w-[150px]"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 h-2 bg-slate-200 rounded-full overflow-hidden"
+    className: "flex-1 h-2 bg-slate-300 rounded-full overflow-hidden"
   }, /*#__PURE__*/React.createElement("div", {
-    className: `h-full rounded-full transition-all duration-500 ${weekStats.active > 0 && weekStats.reported === weekStats.active ? 'bg-green-500' : 'bg-indigo-500'}`,
+    className: `h-full rounded-full transition-all duration-500 ${weekStats.active > 0 && weekStats.reported === weekStats.active ? 'bg-green-600' : 'bg-indigo-600'}`,
     style: {
       width: `${weekStats.active > 0 ? weekStats.reported / weekStats.active * 100 : 0}%`
     }
   })), /*#__PURE__*/React.createElement("span", {
-    className: "ml-2 font-bold text-slate-600 whitespace-nowrap"
+    className: "ml-2 font-bold text-slate-800 whitespace-nowrap"
   }, weekStats.reported, "/", weekStats.active, " \u5DF2\u56DE\u5831")), /*#__PURE__*/React.createElement("div", {
     className: "h-6 border-l border-slate-200 flex-shrink-0"
   }), /*#__PURE__*/React.createElement("div", {
@@ -950,57 +955,57 @@ function App() {
   }, /*#__PURE__*/React.createElement(StatChip, {
     label: "\u6709\u57F7\u884C",
     value: weekStats.executed,
-    className: "bg-green-100 text-green-700"
+    className: "bg-green-100 text-green-800 border-green-400"
   }), /*#__PURE__*/React.createElement(StatChip, {
     label: "Monitor",
     value: weekStats.monitor,
-    className: "bg-sky-100 text-sky-700"
+    className: "bg-sky-100 text-sky-800 border-sky-400"
   }), /*#__PURE__*/React.createElement(StatChip, {
     label: "\u672A\u57F7\u884C",
     value: weekStats.notExec,
-    className: "bg-slate-200 text-slate-600"
+    className: "bg-slate-200 text-slate-700 border-slate-400"
   }), /*#__PURE__*/React.createElement(StatChip, {
     label: "\u672A\u56DE\u5831",
     value: weekStats.pending,
-    className: weekStats.pending > 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-slate-100 text-slate-400'
+    className: weekStats.pending > 0 ? 'bg-yellow-100 text-yellow-800 border-yellow-500' : 'bg-slate-100 text-slate-500 border-slate-300'
   }), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowDeadlinePanel(true),
     title: "\u9EDE\u64CA\u6AA2\u8996\u5373\u5C07\u5230\u671F\u6E05\u55AE",
-    className: `flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 transition ${deadlineTasks.length > 0 ? 'bg-orange-100 text-orange-800 hover:bg-orange-200 ring-1 ring-orange-300' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`
+    className: `flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border transition ${deadlineTasks.length > 0 ? 'bg-orange-100 text-orange-800 hover:bg-orange-200 border-orange-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 border-slate-300'}`
   }, /*#__PURE__*/React.createElement("span", {
-    className: "opacity-60 font-medium text-[10px]"
+    className: "font-medium text-[11px]"
   }, "\u23F0 \u5373\u5C07\u5230\u671F"), /*#__PURE__*/React.createElement("span", {
     className: "text-[13px] leading-none"
   }, deadlineTasks.length), /*#__PURE__*/React.createElement("span", {
-    className: "text-[10px] opacity-50"
+    className: "text-[11px]"
   }, "\u203A"))), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 min-w-[8px]"
   }), /*#__PURE__*/React.createElement("div", {
-    className: "flex-shrink-0 flex items-center gap-2 text-slate-500"
+    className: "flex-shrink-0 flex items-center gap-2 text-slate-600"
   }, /*#__PURE__*/React.createElement("span", {
     className: "hidden xl:flex items-center"
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-3 h-2.5 mr-1 rounded-sm border",
     style: {
       backgroundImage: 'repeating-linear-gradient(45deg,#FFF6D6,#FFF6D6 3px,#FDEDB8 3px,#FDEDB8 6px)',
-      borderColor: '#D4B106'
+      borderColor: '#B45309'
     }
   }), "\u8A08\u756B\u5340\u9593"), /*#__PURE__*/React.createElement("span", {
     className: "hidden xl:flex items-center"
   }, /*#__PURE__*/React.createElement("span", {
-    className: "w-2.5 h-2.5 bg-green-500 mr-1 rounded-sm"
+    className: "w-2.5 h-2.5 bg-green-700 mr-1 rounded-sm"
   }), "\u6709\u57F7\u884C"), /*#__PURE__*/React.createElement("span", {
     className: "hidden xl:flex items-center"
   }, /*#__PURE__*/React.createElement("span", {
-    className: "w-2.5 h-2.5 bg-sky-500 mr-1 rounded-sm"
+    className: "w-2.5 h-2.5 bg-sky-700 mr-1 rounded-sm"
   }), "Monitor"), /*#__PURE__*/React.createElement("span", {
     className: "hidden xl:flex items-center"
   }, /*#__PURE__*/React.createElement("span", {
-    className: "w-2.5 h-2.5 bg-slate-400 mr-1 rounded-sm"
+    className: "w-2.5 h-2.5 bg-slate-500 mr-1 rounded-sm"
   }), "\u672A\u57F7\u884C"), /*#__PURE__*/React.createElement("span", {
     className: "hidden xl:flex items-center"
   }, /*#__PURE__*/React.createElement("span", {
-    className: "w-3 h-2.5 mr-1 rounded-sm border-2 border-orange-400 bg-white"
+    className: "w-3 h-2.5 mr-1 rounded-sm border-2 border-orange-500 bg-white"
   }), "\u23F0 \u5373\u5C07\u5230\u671F"))), /*#__PURE__*/React.createElement("div", {
     className: "bg-white px-4 py-2 border-b border-slate-200 flex flex-wrap items-center gap-2 text-xs z-30"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1030,7 +1035,7 @@ function App() {
     return /*#__PURE__*/React.createElement("button", {
       key: key,
       onClick: () => toggleTypeFilter(key),
-      className: `px-2 py-1 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-400' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-400'}`,
+      className: `px-2 py-1 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`,
       title: meta.label
     }, key, "\xB7", meta.label);
   }), typeFilter.size > 0 && /*#__PURE__*/React.createElement("button", {
@@ -1070,7 +1075,25 @@ function App() {
   }, (years.length ? years : [scheduleYear]).map(y => /*#__PURE__*/React.createElement("option", {
     key: y,
     value: y
-  }, y, " \u5E74\u5EA6"))), /*#__PURE__*/React.createElement("button", {
+  }, y, " \u5E74\u5EA6"))), /*#__PURE__*/React.createElement("div", {
+    className: "flex rounded-lg overflow-hidden border",
+    style: {
+      borderColor: NAVY
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setIsOverview(false),
+    className: `px-2.5 py-1.5 font-bold transition ${!isOverview ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`,
+    style: !isOverview ? {
+      backgroundColor: NAVY
+    } : {}
+  }, "\u9031\u6AA2\u8996"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setIsOverview(true),
+    className: `px-2.5 py-1.5 font-bold transition ${isOverview ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`,
+    style: isOverview ? {
+      backgroundColor: NAVY
+    } : {},
+    title: "\u6574\u5E74 52 \u9031\u81EA\u52D5\u7E2E\u653E\u81F3\u4E00\u500B\u756B\u9762\u5BEC(\u7121\u6C34\u5E73\u6372\u8EF8),\u6ED1\u9F20\u505C\u7559\u7518\u7279\u689D\u53EF\u770B\u7D30\u7BC0"
+  }, "\u5E74\u5EA6\u7E3D\u89BD")), !isOverview && /*#__PURE__*/React.createElement("button", {
     onClick: goToCurrentWeek,
     className: "flex items-center text-white px-2.5 py-1.5 rounded-lg font-bold shadow-sm transition hover:opacity-90",
     style: {
@@ -1086,7 +1109,7 @@ function App() {
     strokeLinejoin: "round",
     strokeWidth: 2,
     d: "M13 10V3L4 14h7v7l9-11h-7z"
-  })), "\u56DE\u5230\u672C\u9031 W", String(todayWeek).padStart(2, '0')), /*#__PURE__*/React.createElement("button", {
+  })), "\u56DE\u5230\u672C\u9031 W", String(todayWeek).padStart(2, '0')), !isOverview && /*#__PURE__*/React.createElement("button", {
     onClick: () => setIsCompact(!isCompact),
     className: "text-slate-600 bg-slate-100 hover:bg-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-200 font-medium transition"
   }, isCompact ? '寬鬆模式' : '緊湊模式'), /*#__PURE__*/React.createElement("button", {
@@ -1104,41 +1127,41 @@ function App() {
     className: "border-collapse bg-white",
     style: {
       tableLayout: 'fixed',
-      width: 490 + weeksTotal * weekW
+      width: isOverview ? '100%' : 490 + weeksTotal * weekW
     }
-  }, /*#__PURE__*/React.createElement("colgroup", null, /*#__PURE__*/React.createElement("col", {
+  }, /*#__PURE__*/React.createElement("colgroup", null, !isOverview && /*#__PURE__*/React.createElement("col", {
     style: {
       width: 28
     }
-  }), /*#__PURE__*/React.createElement("col", {
+  }), !isOverview && /*#__PURE__*/React.createElement("col", {
     style: {
       width: 42
     }
   }), /*#__PURE__*/React.createElement("col", {
     style: {
-      width: 420
+      width: isOverview ? 240 : 420
     }
   }), Array.from({
     length: weeksTotal
   }).map((_, i) => /*#__PURE__*/React.createElement("col", {
     key: i,
-    style: {
+    style: isOverview ? undefined : {
       width: weekW
     }
   }))), /*#__PURE__*/React.createElement("thead", {
     className: "sticky top-0 z-40 text-xs shadow-sm bg-slate-100"
   }, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
-    colSpan: "3",
+    colSpan: isOverview ? 1 : 3,
     className: "border-r border-b border-slate-300 bg-slate-200 sticky left-0 z-50 px-2 py-1 text-left",
     style: {
-      width: 490
+      width: isOverview ? 240 : 490
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex justify-between items-center text-[10px]"
   }, /*#__PURE__*/React.createElement("span", {
-    className: "font-bold text-slate-600"
+    className: "font-bold text-slate-700"
   }, "\u5C08\u6848\u57FA\u672C\u8CC7\u8A0A"), /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-400 font-normal"
+    className: "text-slate-600 font-normal"
   }, "\u986F\u793A ", filteredProjects.length, " / ", projects.length, " \u9805"))), months.map((m, i) => /*#__PURE__*/React.createElement("th", {
     key: i,
     colSpan: m.weeks,
@@ -1148,7 +1171,7 @@ function App() {
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "absolute inset-0 bg-gradient-to-b from-white/10 to-transparent"
-  }), m.name.slice(0, 4), "/", m.name.slice(4)))), /*#__PURE__*/React.createElement("tr", {
+  }), m.name.slice(0, 4), "/", m.name.slice(4)))), !isOverview && /*#__PURE__*/React.createElement("tr", {
     className: "bg-slate-100 text-slate-600 text-[11px]"
   }, /*#__PURE__*/React.createElement("th", {
     className: "border-r border-b border-slate-300 p-1 sticky left-0 bg-slate-100 z-50 text-center font-medium",
@@ -1178,7 +1201,7 @@ function App() {
         if (role === 'manager' || weekNum <= todayWeek) setCurrentWeek(weekNum);
       },
       title: role === 'manager' ? `點擊將系統週切換至 W${weekNum}` : weekNum <= todayWeek ? `點擊檢視 W${weekNum}(唯讀)` : undefined,
-      className: `border-r border-b border-slate-300 p-0 text-center relative ${role === 'manager' || weekNum <= todayWeek ? 'cursor-pointer hover:bg-blue-100' : ''} ${isCurrent ? 'text-white font-bold' : weekNum > todayWeek ? 'bg-slate-100 text-slate-400 font-normal' : 'bg-slate-50 font-normal'}`,
+      className: `border-r border-b border-slate-300 p-0 text-center relative ${role === 'manager' || weekNum <= todayWeek ? 'cursor-pointer hover:bg-blue-100' : ''} ${isCurrent ? 'text-white font-bold' : weekNum > todayWeek ? 'bg-slate-100 text-slate-500 font-normal' : 'bg-slate-50 text-slate-700 font-normal'}`,
       style: {
         width: weekW,
         ...(isCurrent ? {
@@ -1216,7 +1239,7 @@ function App() {
       onClick: () => toggleOwnerCollapse(group.owner),
       className: "group/header bg-blue-50 hover:bg-blue-100 cursor-pointer border-b border-blue-100 transition-colors"
     }, /*#__PURE__*/React.createElement("td", {
-      colSpan: "3",
+      colSpan: isOverview ? 1 : 3,
       className: "sticky left-0 z-40 bg-blue-50 group-hover/header:bg-blue-100 border-r border-blue-200 p-0 shadow-[2px_0_5px_rgba(0,0,0,0.02)]"
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex items-center text-blue-900 font-bold text-[13px] px-2 py-1.5 border-l-4",
@@ -1242,16 +1265,16 @@ function App() {
       className: "ml-2 px-1.5 py-0.5 bg-white text-blue-600 rounded text-[10px] font-medium border border-blue-100"
     }, group.projects.length, " \u9805"), gActive > 0 && /*#__PURE__*/React.createElement("div", {
       className: "ml-2 flex items-center gap-1.5"
-    }, /*#__PURE__*/React.createElement("div", {
+    }, !isOverview && /*#__PURE__*/React.createElement("div", {
       className: "w-16 h-1.5 bg-white rounded-full overflow-hidden border border-blue-100"
     }, /*#__PURE__*/React.createElement("div", {
-      className: `h-full rounded-full ${gReported === gActive ? 'bg-green-500' : 'bg-yellow-400'}`,
+      className: `h-full rounded-full ${gReported === gActive ? 'bg-green-600' : 'bg-yellow-400'}`,
       style: {
         width: `${gReported / gActive * 100}%`
       }
     })), /*#__PURE__*/React.createElement("span", {
-      className: `px-1.5 py-0.5 rounded text-[10px] font-bold border ${gReported === gActive ? 'bg-green-100 text-green-700 border-green-200' : 'bg-yellow-100 text-yellow-700 border-yellow-200'}`
-    }, "\u672C\u9031\u56DE\u5831 ", gReported, "/", gActive)), role === 'manager' && /*#__PURE__*/React.createElement("button", {
+      className: `px-1.5 py-0.5 rounded text-[10px] font-bold border ${gReported === gActive ? 'bg-green-100 text-green-800 border-green-200' : 'bg-yellow-100 text-yellow-800 border-yellow-300'}`
+    }, "\u672C\u9031\u56DE\u5831 ", gReported, "/", gActive)), role === 'manager' && !isOverview && /*#__PURE__*/React.createElement("button", {
       onClick: e => {
         e.stopPropagation();
         setEditingProject({
@@ -1283,22 +1306,22 @@ function App() {
         setDragState(null);
         setDragOverId(null);
       } : undefined,
-      className: `hover:bg-slate-50 group/row border-b border-slate-200 ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`
-    }, /*#__PURE__*/React.createElement("td", {
-      className: `text-center sticky left-0 bg-white group-hover/row:bg-slate-50 z-30 border-r border-slate-200 text-slate-400 font-medium ${isCompact ? 'py-1' : 'py-2'}`
-    }, idx + 1), /*#__PURE__*/React.createElement("td", {
-      className: `text-center sticky bg-white group-hover/row:bg-slate-50 z-30 border-r border-slate-200 text-slate-600 ${isCompact ? 'py-1' : 'py-2'}`,
+      className: `hover:bg-slate-50 group/row border-b border-slate-300 ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`
+    }, !isOverview && /*#__PURE__*/React.createElement("td", {
+      className: `text-center sticky left-0 bg-white group-hover/row:bg-slate-50 z-30 border-r border-slate-200 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`
+    }, idx + 1), !isOverview && /*#__PURE__*/React.createElement("td", {
+      className: `text-center sticky bg-white group-hover/row:bg-slate-50 z-30 border-r border-slate-200 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
       style: {
         left: 28
       }
     }, proj.category), /*#__PURE__*/React.createElement("td", {
       className: "sticky bg-white group-hover/row:bg-slate-50 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.03)] border-r border-slate-300 p-0",
       style: {
-        left: 70
+        left: isOverview ? 0 : 70
       }
     }, /*#__PURE__*/React.createElement("div", {
       className: "w-full h-full flex items-center px-2 overflow-hidden"
-    }, role === 'manager' && (isFilteringRows ? /*#__PURE__*/React.createElement("span", {
+    }, role === 'manager' && !isOverview && (isFilteringRows ? /*#__PURE__*/React.createElement("span", {
       className: "flex-shrink-0 mr-1 text-slate-200 select-none text-[13px] leading-none cursor-not-allowed",
       title: "\u641C\u5C0B/\u985E\u578B\u7BE9\u9078\u4E2D\u7121\u6CD5\u62D6\u66F3\u6392\u5E8F\uFF0C\u8ACB\u5148\u6E05\u9664\u7BE9\u9078"
     }, "\u283F") : /*#__PURE__*/React.createElement("span", {
@@ -1316,7 +1339,7 @@ function App() {
     }, "\u283F")), /*#__PURE__*/React.createElement("div", {
       className: `flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`
     }, proj.type.toUpperCase()), /*#__PURE__*/React.createElement("span", {
-      className: "flex-1 min-w-0 truncate font-medium text-slate-700 text-[11px]",
+      className: `flex-1 min-w-0 truncate font-semibold text-slate-900 ${isOverview ? 'text-[12.5px]' : isCompact ? 'text-[13px]' : 'text-[15px]'}`,
       title: proj.name
     }, proj.name), /*#__PURE__*/React.createElement("button", {
       onClick: e => {
@@ -1333,7 +1356,7 @@ function App() {
         className: "flex-shrink-0 ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-orange-100 text-orange-700 border border-orange-300 whitespace-nowrap",
         title: `${soon.length} 個計畫區間即將到期(最近的剩 ${remain} 週)`
       }, "\u23F0 \u5269", remain, "\u9031");
-    })(), role === 'manager' && /*#__PURE__*/React.createElement("div", {
+    })(), role === 'manager' && !isOverview && /*#__PURE__*/React.createElement("div", {
       className: "flex-shrink-0 flex items-center gap-0.5 ml-1 opacity-0 group-hover/row:opacity-100 transition-opacity"
     }, /*#__PURE__*/React.createElement("button", {
       onClick: () => setAddingInterval(proj),
@@ -1355,7 +1378,7 @@ function App() {
       colSpan: weeksTotal,
       className: "p-0 relative",
       style: {
-        height: isCompact ? 30 : 40
+        height: isOverview ? 24 : isCompact ? 30 : 40
       }
     }, /*#__PURE__*/React.createElement("div", {
       className: "absolute inset-0 flex pointer-events-none z-0"
@@ -1376,10 +1399,10 @@ function App() {
       const isPending = role === 'member' && proj.owner === currentUser && isActiveThisWeek && !weekLog;
       const deadlineSoon = isTaskDeadlineSoon(task); // 剩 ≤2 週或已過 70% 時程 → 橘框 + ⏰(未回報紅框優先)
 
-      const barClass = 'text-slate-700';
+      const barClass = 'text-slate-900';
       const barStyle = {
         backgroundImage: 'repeating-linear-gradient(45deg, #FFF6D6, #FFF6D6 6px, #FDEDB8 6px, #FDEDB8 12px)',
-        borderColor: 'rgba(212,177,6,0.7)'
+        borderColor: 'rgba(180,83,9,0.75)' // 加深(範本 B):淡黃條在白底上需要更明確的輪廓
       };
       const textClass = weekLog ? 'font-bold' : 'font-medium opacity-90';
       const spanWeeks = task.end - task.start + 1;
@@ -1402,8 +1425,8 @@ function App() {
         style: {
           left: `${leftPercent}%`,
           width: `${widthPercent}%`,
-          top: 4,
-          bottom: isCompact ? 8 : 10,
+          top: isOverview ? 4 : 4,
+          bottom: isOverview ? 4 : isCompact ? 8 : 10,
           ...barStyle
         }
       }, Object.entries(logs).map(([w, log]) => {
@@ -1420,8 +1443,8 @@ function App() {
           },
           title: `W${w}: ${STATUS_META[log.status]?.label}`
         });
-      }), /*#__PURE__*/React.createElement("span", {
-        className: `relative z-10 truncate px-1.5 whitespace-nowrap ${isCompact ? 'text-[9px]' : 'text-[11px]'} ${textClass}`,
+      }), !isOverview && /*#__PURE__*/React.createElement("span", {
+        className: `relative z-10 truncate px-1.5 whitespace-nowrap ${isCompact ? 'text-[10px]' : 'text-[12px]'} ${textClass}`,
         style: {
           textShadow: '0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.75)'
         }
@@ -1558,15 +1581,17 @@ function App() {
     className: "fixed bottom-6 left-1/2 -translate-x-1/2 z-[300] bg-slate-900 text-white text-sm font-bold px-5 py-3 rounded-xl shadow-2xl border border-slate-700 flex items-center animate-bounce"
   }, toast));
 }
+
+// 投影友善:晶片加邊框確保輪廓、標籤文字不再用透明度淡化(投影機對比打折,淡字會消失)
 function StatChip({
   label,
   value,
   className
 }) {
   return /*#__PURE__*/React.createElement("span", {
-    className: `flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 ${className}`
+    className: `flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border ${className}`
   }, /*#__PURE__*/React.createElement("span", {
-    className: "opacity-60 font-medium text-[10px]"
+    className: "font-medium text-[11px]"
   }, label), /*#__PURE__*/React.createElement("span", {
     className: "text-[13px] leading-none"
   }, value));
@@ -1926,9 +1951,15 @@ function ExtraNoteModal({
       className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden",
       onClick: e => e.stopPropagation()
     }, /*#__PURE__*/React.createElement("div", {
-      className: "px-6 py-4 bg-slate-600 text-white flex justify-between items-center"
+      className: "px-6 py-4 text-white flex justify-between items-center",
+      style: {
+        backgroundColor: '#475569'
+      }
     }, /*#__PURE__*/React.createElement("h3", {
-      className: "font-bold text-lg"
+      className: "font-bold text-lg",
+      style: {
+        color: '#FFFFFF'
+      }
     }, "\uD83D\uDD12 W", currentWeek, " \u975E\u5C08\u6848\u5DE5\u4F5C\uFF08\u552F\u8B80\uFF09"), /*#__PURE__*/React.createElement("button", {
       onClick: onClose,
       className: "text-white/60 hover:text-white"
@@ -1966,9 +1997,15 @@ function ExtraNoteModal({
       className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden",
       onClick: e => e.stopPropagation()
     }, /*#__PURE__*/React.createElement("div", {
-      className: "px-6 py-4 bg-orange-500 text-white flex justify-between items-center"
+      className: "px-6 py-4 text-white flex justify-between items-center",
+      style: {
+        backgroundColor: '#F97316'
+      }
     }, /*#__PURE__*/React.createElement("h3", {
-      className: "font-bold text-lg flex items-center"
+      className: "font-bold text-lg flex items-center",
+      style: {
+        color: '#FFFFFF'
+      }
     }, "\uD83D\uDCDD \u586B\u5BEB W", currentWeek, " \u975E\u5C08\u6848\u5DE5\u4F5C"), /*#__PURE__*/React.createElement("button", {
       onClick: onClose,
       className: "text-white/60 hover:text-white"
@@ -2033,13 +2070,22 @@ function DeliverableModal({
     className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
-    className: "px-6 py-4 bg-amber-500 text-white flex justify-between items-start"
+    className: "px-6 py-4 text-white flex justify-between items-start",
+    style: {
+      backgroundColor: '#F59E0B'
+    }
   }, /*#__PURE__*/React.createElement("div", {
     className: "pr-3"
   }, /*#__PURE__*/React.createElement("h3", {
-    className: "font-bold text-lg"
+    className: "font-bold text-lg",
+    style: {
+      color: '#FFFFFF'
+    }
   }, "\uD83C\uDFAF \u5177\u9AD4\u7522\u51FA\u9805\u76EE"), /*#__PURE__*/React.createElement("p", {
-    className: "text-xs text-amber-100 mt-0.5 truncate max-w-[360px]"
+    className: "text-xs mt-0.5 truncate max-w-[360px]",
+    style: {
+      color: '#FEF3C7'
+    }
   }, proj.name, "\uFF08\u8CA0\u8CAC\u4EBA\uFF1A", proj.owner, "\uFF09")), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     className: "text-white/70 hover:text-white flex-shrink-0"
@@ -2113,9 +2159,15 @@ function WeeklyPlanModal({
       className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden",
       onClick: e => e.stopPropagation()
     }, /*#__PURE__*/React.createElement("div", {
-      className: "px-6 py-4 bg-slate-600 text-white flex justify-between items-center"
+      className: "px-6 py-4 text-white flex justify-between items-center",
+      style: {
+        backgroundColor: '#475569'
+      }
     }, /*#__PURE__*/React.createElement("h3", {
-      className: "font-bold text-lg"
+      className: "font-bold text-lg",
+      style: {
+        color: '#FFFFFF'
+      }
     }, "\uD83D\uDD12 W", currentWeek, " \u4E0B\u9031\u9810\u8A08\u5DE5\u4F5C\uFF08\u552F\u8B80\uFF09"), /*#__PURE__*/React.createElement("button", {
       onClick: onClose,
       className: "text-white/60 hover:text-white"
@@ -2150,9 +2202,15 @@ function WeeklyPlanModal({
     className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
-    className: "px-6 py-4 bg-indigo-500 text-white flex justify-between items-center"
+    className: "px-6 py-4 text-white flex justify-between items-center",
+    style: {
+      backgroundColor: '#6366F1'
+    }
   }, /*#__PURE__*/React.createElement("h3", {
-    className: "font-bold text-lg flex items-center"
+    className: "font-bold text-lg flex items-center",
+    style: {
+      color: '#FFFFFF'
+    }
   }, "\uD83D\uDCC5 \u586B\u5BEB W", currentWeek, " \u4E0B\u9031\u9810\u8A08\u57F7\u884C\u5DE5\u4F5C"), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     className: "text-white/60 hover:text-white"
@@ -2211,11 +2269,20 @@ function DeadlinePanel({
     className: "w-full max-w-sm bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
-    className: "px-5 py-4 text-white flex justify-between items-center bg-orange-600"
+    className: "px-5 py-4 text-white flex justify-between items-center",
+    style: {
+      backgroundColor: '#EA580C'
+    }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
-    className: "font-bold text-lg"
+    className: "font-bold text-lg",
+    style: {
+      color: '#FFFFFF'
+    }
   }, "\u23F0 \u5373\u5C07\u5230\u671F\u6E05\u55AE"), /*#__PURE__*/React.createElement("p", {
-    className: "text-xs text-orange-100 mt-0.5"
+    className: "text-xs mt-0.5",
+    style: {
+      color: '#FFEDD5'
+    }
   }, "\u5269\u9918 \u22642 \u9031\u6216\u6642\u7A0B\u5DF2\u904E 70% \u7684\u8A08\u756B\u5340\u9593")), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     className: "text-white/70 hover:text-white p-1"
@@ -2802,11 +2869,17 @@ function ConfirmModal({
     className: "bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
-    className: "px-6 py-4 bg-red-600 text-white flex items-center"
+    className: "px-6 py-4 text-white flex items-center",
+    style: {
+      backgroundColor: '#DC2626'
+    }
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-xl mr-2"
   }, "\u26A0\uFE0F"), /*#__PURE__*/React.createElement("h3", {
-    className: "font-bold text-lg"
+    className: "font-bold text-lg",
+    style: {
+      color: '#FFFFFF'
+    }
   }, info.title)), /*#__PURE__*/React.createElement("div", {
     className: "p-6"
   }, /*#__PURE__*/React.createElement("p", {

@@ -41,18 +41,20 @@ const groupWeeksToMonths = (weeks) => {
   return out;
 };
 
+// 類型標籤:邊框用 400/500 深階(投影機對比打折,300 級邊框在布幕上會消失)
 const PROJECT_TYPES = {
-  'a': { label: '一級專案/KPI', chip: 'bg-pink-100 text-pink-800 border-pink-300', dot: 'bg-pink-400' },
-  'b': { label: '重大貢獻及亮點', chip: 'bg-yellow-100 text-yellow-800 border-yellow-300', dot: 'bg-yellow-400' },
-  'c': { label: '日常管理', chip: 'bg-teal-100 text-teal-800 border-teal-300', dot: 'bg-teal-400' },
-  'd': { label: '其他加分項', chip: 'bg-orange-100 text-orange-800 border-orange-300', dot: 'bg-orange-400' },
-  'e': { label: '主管交辦', chip: 'bg-purple-100 text-purple-800 border-purple-300', dot: 'bg-purple-400' }
+  'a': { label: '一級專案/KPI', chip: 'bg-pink-100 text-pink-800 border-pink-400', dot: 'bg-pink-500' },
+  'b': { label: '重大貢獻及亮點', chip: 'bg-yellow-100 text-yellow-800 border-yellow-500', dot: 'bg-yellow-500' },
+  'c': { label: '日常管理', chip: 'bg-teal-100 text-teal-800 border-teal-400', dot: 'bg-teal-500' },
+  'd': { label: '其他加分項', chip: 'bg-orange-100 text-orange-800 border-orange-400', dot: 'bg-orange-500' },
+  'e': { label: '主管交辦', chip: 'bg-purple-100 text-purple-800 border-purple-400', dot: 'bg-purple-500' }
 };
 
+// 狀態色加深(範本 B 高對比):白字在色塊上達 WCAG AA,年長使用者更易辨識
 const STATUS_META = {
-  executed:     { label: '有執行', icon: '✅', bar: 'bg-green-500 border-green-600 text-white', tag: 'bg-green-100 text-green-700', dot: 'bg-green-500' },
-  monitor:      { label: 'Monitor', icon: '👁️', bar: 'bg-sky-500 border-sky-600 text-white', tag: 'bg-sky-100 text-sky-700', dot: 'bg-sky-500' },
-  not_executed: { label: '未執行', icon: '⏸️', bar: 'bg-slate-400 border-slate-500 text-white', tag: 'bg-slate-200 text-slate-600', dot: 'bg-slate-400' }
+  executed:     { label: '有執行', icon: '✅', bar: 'bg-green-700 border-green-800 text-white', tag: 'bg-green-100 text-green-800', dot: 'bg-green-700' },
+  monitor:      { label: 'Monitor', icon: '👁️', bar: 'bg-sky-700 border-sky-800 text-white', tag: 'bg-sky-100 text-sky-800', dot: 'bg-sky-700' },
+  not_executed: { label: '未執行', icon: '⏸️', bar: 'bg-slate-500 border-slate-600 text-white', tag: 'bg-slate-200 text-slate-700', dot: 'bg-slate-500' }
 };
 
 // --- 2. 資料來源:改由後端 API 讀寫 Gantt 資料庫 (取代原本寫死的 INITIAL_PROJECTS) ---
@@ -125,8 +127,9 @@ function App() {
   const [months, setMonths] = useState(MONTHS);
   const weeksTotal = useMemo(() => months.reduce((s, m) => s + m.weeks, 0), [months]);
 
-  // UI 狀態
-  const [isCompact, setIsCompact] = useState(true);
+  // UI 狀態(範本 B:預設寬鬆模式,字級較大對年長者友善)
+  const [isCompact, setIsCompact] = useState(false);
+  const [isOverview, setIsOverview] = useState(false);   // 年度總覽:52 週自動縮放進一個畫面寬,無水平捲軸(唯讀瀏覽視角)
   const [collapsedOwners, setCollapsedOwners] = useState(new Set());
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState(new Set());       // 空 = 全部
@@ -615,17 +618,17 @@ function App() {
 
           {currentUser && (
             <div className="px-3 py-1 rounded-full border border-white/10 flex items-center shadow-inner" style={{ backgroundColor: '#001338' }}>
-              <span className="text-white/60 mr-2 text-xs font-medium">系統週數</span>
+              <span className="text-white/85 mr-2 text-xs font-medium">系統週數</span>
               {role === 'manager' ? (
                 <div className="flex items-center space-x-1.5">
                   <button onClick={() => setCurrentWeek(p => Math.max(1, p - 1))} className="w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" title="上一週">‹</button>
-                  <span className="font-bold text-sm tracking-wider text-center" style={{ color: GOLD, minWidth: 100 }}>W{String(currentWeek).padStart(2, '0')}<span className="text-white/40 font-normal text-[10px] ml-1">{weekToMonth(currentWeek, months)}</span></span>
+                  <span className="font-bold text-sm tracking-wider text-center" style={{ color: GOLD, minWidth: 100 }}>W{String(currentWeek).padStart(2, '0')}<span className="text-white/75 font-normal text-[10px] ml-1">{weekToMonth(currentWeek, months)}</span></span>
                   <button onClick={() => setCurrentWeek(p => Math.min(weeksTotal, p + 1))} className="w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" title="下一週">›</button>
                 </div>
               ) : (
                 <div className="flex items-center space-x-1.5">
                   <button onClick={() => setCurrentWeek(p => Math.max(1, p - 1))} className="w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" title="檢視前一週(唯讀)">‹</button>
-                  <span className="font-bold text-sm tracking-wider text-center" style={{ color: GOLD, minWidth: 100 }}>W{String(currentWeek).padStart(2, '0')}<span className="text-white/40 font-normal text-[10px] ml-1">{weekToMonth(currentWeek, months)}</span></span>
+                  <span className="font-bold text-sm tracking-wider text-center" style={{ color: GOLD, minWidth: 100 }}>W{String(currentWeek).padStart(2, '0')}<span className="text-white/75 font-normal text-[10px] ml-1">{weekToMonth(currentWeek, months)}</span></span>
                   <button onClick={() => setCurrentWeek(p => Math.min(todayWeek, p + 1))} disabled={currentWeek >= todayWeek}
                     className={`w-5 h-5 flex items-center justify-center rounded-full text-xs font-bold transition ${currentWeek >= todayWeek ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-white/10 hover:bg-white/30'}`} title="檢視後一週">›</button>
                 </div>
@@ -680,7 +683,7 @@ function App() {
             <div className="flex items-center space-x-3 border-l border-white/20 pl-3 ml-1">
               <div className="text-right leading-tight">
                 <div className="font-bold text-sm">{currentUser}</div>
-                <div className="text-[10px] text-white/50">{role === 'manager' ? '主管' : '成員'}{empId ? ` · 工號 ${empId}` : ''}</div>
+                <div className="text-[10px] text-white/80">{role === 'manager' ? '主管' : '成員'}{empId ? ` · 工號 ${empId}` : ''}</div>
               </div>
               <button onClick={handleLogout} className="p-1.5 hover:bg-red-500/80 rounded-lg transition text-white/70 hover:text-white bg-white/5" title="登出">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
@@ -700,38 +703,38 @@ function App() {
         <div className="flex-1 flex flex-col overflow-hidden bg-white relative">
           <div className="px-4 py-2 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white flex items-center gap-3 text-xs overflow-x-auto">
             <div className="flex items-center flex-shrink-0">
-              <span className="font-black text-slate-800 text-sm">W{String(currentWeek).padStart(2, '0')}</span>
-              <span className="text-slate-400 ml-1 text-[10px]">{weekToMonth(currentWeek, months)} 概況</span>
+              <span className="font-black text-slate-900 text-sm">W{String(currentWeek).padStart(2, '0')}</span>
+              <span className="text-slate-600 ml-1 text-[10px]">{weekToMonth(currentWeek, months)} 概況</span>
             </div>
             {/* 回報率進度條 */}
             <div className="flex items-center flex-shrink-0 min-w-[150px]">
-              <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-500 ${weekStats.active > 0 && weekStats.reported === weekStats.active ? 'bg-green-500' : 'bg-indigo-500'}`}
+              <div className="flex-1 h-2 bg-slate-300 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-500 ${weekStats.active > 0 && weekStats.reported === weekStats.active ? 'bg-green-600' : 'bg-indigo-600'}`}
                   style={{ width: `${weekStats.active > 0 ? (weekStats.reported / weekStats.active) * 100 : 0}%` }}></div>
               </div>
-              <span className="ml-2 font-bold text-slate-600 whitespace-nowrap">{weekStats.reported}/{weekStats.active} 已回報</span>
+              <span className="ml-2 font-bold text-slate-800 whitespace-nowrap">{weekStats.reported}/{weekStats.active} 已回報</span>
             </div>
             <div className="h-6 border-l border-slate-200 flex-shrink-0"></div>
             {/* 狀態分佈 */}
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              <StatChip label="有執行" value={weekStats.executed} className="bg-green-100 text-green-700" />
-              <StatChip label="Monitor" value={weekStats.monitor} className="bg-sky-100 text-sky-700" />
-              <StatChip label="未執行" value={weekStats.notExec} className="bg-slate-200 text-slate-600" />
-              <StatChip label="未回報" value={weekStats.pending} className={weekStats.pending > 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-slate-100 text-slate-400'} />
+              <StatChip label="有執行" value={weekStats.executed} className="bg-green-100 text-green-800 border-green-400" />
+              <StatChip label="Monitor" value={weekStats.monitor} className="bg-sky-100 text-sky-800 border-sky-400" />
+              <StatChip label="未執行" value={weekStats.notExec} className="bg-slate-200 text-slate-700 border-slate-400" />
+              <StatChip label="未回報" value={weekStats.pending} className={weekStats.pending > 0 ? 'bg-yellow-100 text-yellow-800 border-yellow-500' : 'bg-slate-100 text-slate-500 border-slate-300'} />
               <button onClick={() => setShowDeadlinePanel(true)} title="點擊檢視即將到期清單"
-                className={`flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 transition ${deadlineTasks.length > 0 ? 'bg-orange-100 text-orange-800 hover:bg-orange-200 ring-1 ring-orange-300' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
-                <span className="opacity-60 font-medium text-[10px]">⏰ 即將到期</span>
+                className={`flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border transition ${deadlineTasks.length > 0 ? 'bg-orange-100 text-orange-800 hover:bg-orange-200 border-orange-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 border-slate-300'}`}>
+                <span className="font-medium text-[11px]">⏰ 即將到期</span>
                 <span className="text-[13px] leading-none">{deadlineTasks.length}</span>
-                <span className="text-[10px] opacity-50">›</span>
+                <span className="text-[11px]">›</span>
               </button>
             </div>
             <div className="flex-1 min-w-[8px]"></div>
-            <div className="flex-shrink-0 flex items-center gap-2 text-slate-500">
-              <span className="hidden xl:flex items-center"><span className="w-3 h-2.5 mr-1 rounded-sm border" style={{ backgroundImage: 'repeating-linear-gradient(45deg,#FFF6D6,#FFF6D6 3px,#FDEDB8 3px,#FDEDB8 6px)', borderColor: '#D4B106' }}></span>計畫區間</span>
-              <span className="hidden xl:flex items-center"><span className="w-2.5 h-2.5 bg-green-500 mr-1 rounded-sm"></span>有執行</span>
-              <span className="hidden xl:flex items-center"><span className="w-2.5 h-2.5 bg-sky-500 mr-1 rounded-sm"></span>Monitor</span>
-              <span className="hidden xl:flex items-center"><span className="w-2.5 h-2.5 bg-slate-400 mr-1 rounded-sm"></span>未執行</span>
-              <span className="hidden xl:flex items-center"><span className="w-3 h-2.5 mr-1 rounded-sm border-2 border-orange-400 bg-white"></span>⏰ 即將到期</span>
+            <div className="flex-shrink-0 flex items-center gap-2 text-slate-600">
+              <span className="hidden xl:flex items-center"><span className="w-3 h-2.5 mr-1 rounded-sm border" style={{ backgroundImage: 'repeating-linear-gradient(45deg,#FFF6D6,#FFF6D6 3px,#FDEDB8 3px,#FDEDB8 6px)', borderColor: '#B45309' }}></span>計畫區間</span>
+              <span className="hidden xl:flex items-center"><span className="w-2.5 h-2.5 bg-green-700 mr-1 rounded-sm"></span>有執行</span>
+              <span className="hidden xl:flex items-center"><span className="w-2.5 h-2.5 bg-sky-700 mr-1 rounded-sm"></span>Monitor</span>
+              <span className="hidden xl:flex items-center"><span className="w-2.5 h-2.5 bg-slate-500 mr-1 rounded-sm"></span>未執行</span>
+              <span className="hidden xl:flex items-center"><span className="w-3 h-2.5 mr-1 rounded-sm border-2 border-orange-500 bg-white"></span>⏰ 即將到期</span>
             </div>
           </div>
 
@@ -748,7 +751,7 @@ function App() {
                 const on = typeFilter.has(key);
                 return (
                   <button key={key} onClick={() => toggleTypeFilter(key)}
-                    className={`px-2 py-1 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-400' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-400'}`}
+                    className={`px-2 py-1 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`}
                     title={meta.label}>
                     {key}·{meta.label}
                   </button>
@@ -781,32 +784,47 @@ function App() {
               {(years.length ? years : [scheduleYear]).map(y => <option key={y} value={y}>{y} 年度</option>)}
             </select>
 
-            <button onClick={goToCurrentWeek} className="flex items-center text-white px-2.5 py-1.5 rounded-lg font-bold shadow-sm transition hover:opacity-90" style={{ backgroundColor: NAVY }}>
-              <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-              回到本週 W{String(todayWeek).padStart(2, '0')}
-            </button>
-            <button onClick={() => setIsCompact(!isCompact)} className="text-slate-600 bg-slate-100 hover:bg-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-200 font-medium transition">
-              {isCompact ? '寬鬆模式' : '緊湊模式'}
-            </button>
+            {/* 檢視切換:週檢視=可打卡操作(可水平捲動);年度總覽=52 週縮放進一頁供主管瀏覽全貌 */}
+            <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: NAVY }}>
+              <button onClick={() => setIsOverview(false)}
+                className={`px-2.5 py-1.5 font-bold transition ${!isOverview ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
+                style={!isOverview ? { backgroundColor: NAVY } : {}}>週檢視</button>
+              <button onClick={() => setIsOverview(true)}
+                className={`px-2.5 py-1.5 font-bold transition ${isOverview ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
+                style={isOverview ? { backgroundColor: NAVY } : {}}
+                title="整年 52 週自動縮放至一個畫面寬(無水平捲軸),滑鼠停留甘特條可看細節">年度總覽</button>
+            </div>
+            {!isOverview && (
+              <button onClick={goToCurrentWeek} className="flex items-center text-white px-2.5 py-1.5 rounded-lg font-bold shadow-sm transition hover:opacity-90" style={{ backgroundColor: NAVY }}>
+                <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                回到本週 W{String(todayWeek).padStart(2, '0')}
+              </button>
+            )}
+            {!isOverview && (
+              <button onClick={() => setIsCompact(!isCompact)} className="text-slate-600 bg-slate-100 hover:bg-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-200 font-medium transition">
+                {isCompact ? '寬鬆模式' : '緊湊模式'}
+              </button>
+            )}
             <button onClick={() => setCollapsedOwners(new Set())} className="text-blue-600 hover:text-blue-800 font-medium">展開全部</button>
             <span className="text-slate-300">|</span>
             <button onClick={() => setCollapsedOwners(new Set(users))} className="text-blue-600 hover:text-blue-800 font-medium">收合全部</button>
           </div>
 
           <div ref={ganttRef} className="flex-1 overflow-auto bg-slate-50 relative">
-            <table className="border-collapse bg-white" style={{ tableLayout: 'fixed', width: 490 + weeksTotal * weekW }}>
+            {/* 年度總覽:表格寬=100%、名稱單欄 240px、週欄由 fixed layout 自動均分 → 整年無水平捲軸且隨視窗縮放 */}
+            <table className="border-collapse bg-white" style={{ tableLayout: 'fixed', width: isOverview ? '100%' : 490 + weeksTotal * weekW }}>
               <colgroup>
-                <col style={{ width: 28 }} />
-                <col style={{ width: 42 }} />
-                <col style={{ width: 420 }} />
-                {Array.from({ length: weeksTotal }).map((_, i) => <col key={i} style={{ width: weekW }} />)}
+                {!isOverview && <col style={{ width: 28 }} />}
+                {!isOverview && <col style={{ width: 42 }} />}
+                <col style={{ width: isOverview ? 240 : 420 }} />
+                {Array.from({ length: weeksTotal }).map((_, i) => <col key={i} style={isOverview ? undefined : { width: weekW }} />)}
               </colgroup>
               <thead className="sticky top-0 z-40 text-xs shadow-sm bg-slate-100">
                 <tr>
-                  <th colSpan="3" className="border-r border-b border-slate-300 bg-slate-200 sticky left-0 z-50 px-2 py-1 text-left" style={{ width: 490 }}>
+                  <th colSpan={isOverview ? 1 : 3} className="border-r border-b border-slate-300 bg-slate-200 sticky left-0 z-50 px-2 py-1 text-left" style={{ width: isOverview ? 240 : 490 }}>
                     <div className="flex justify-between items-center text-[10px]">
-                      <span className="font-bold text-slate-600">專案基本資訊</span>
-                      <span className="text-slate-400 font-normal">顯示 {filteredProjects.length} / {projects.length} 項</span>
+                      <span className="font-bold text-slate-700">專案基本資訊</span>
+                      <span className="text-slate-600 font-normal">顯示 {filteredProjects.length} / {projects.length} 項</span>
                     </div>
                   </th>
                   {months.map((m, i) => (
@@ -816,7 +834,7 @@ function App() {
                     </th>
                   ))}
                 </tr>
-                <tr className="bg-slate-100 text-slate-600 text-[11px]">
+                {!isOverview && <tr className="bg-slate-100 text-slate-600 text-[11px]">
                   <th className="border-r border-b border-slate-300 p-1 sticky left-0 bg-slate-100 z-50 text-center font-medium" style={{ width: 28 }}>No</th>
                   <th className="border-r border-b border-slate-300 p-1 sticky bg-slate-100 z-50 text-center font-medium" style={{ width: 42, left: 28 }}>分類</th>
                   <th className="border-r border-b border-slate-300 p-1 sticky bg-slate-100 z-50 shadow-[2px_0_5px_rgba(0,0,0,0.05)] text-left pl-3 font-medium" style={{ width: 420, left: 70 }}>專案名稱 (Project Name)</th>
@@ -827,14 +845,14 @@ function App() {
                       <th key={i}
                         onClick={() => { if (role === 'manager' || weekNum <= todayWeek) setCurrentWeek(weekNum); }}
                         title={role === 'manager' ? `點擊將系統週切換至 W${weekNum}` : (weekNum <= todayWeek ? `點擊檢視 W${weekNum}(唯讀)` : undefined)}
-                        className={`border-r border-b border-slate-300 p-0 text-center relative ${(role === 'manager' || weekNum <= todayWeek) ? 'cursor-pointer hover:bg-blue-100' : ''} ${isCurrent ? 'text-white font-bold' : weekNum > todayWeek ? 'bg-slate-100 text-slate-400 font-normal' : 'bg-slate-50 font-normal'}`}
+                        className={`border-r border-b border-slate-300 p-0 text-center relative ${(role === 'manager' || weekNum <= todayWeek) ? 'cursor-pointer hover:bg-blue-100' : ''} ${isCurrent ? 'text-white font-bold' : weekNum > todayWeek ? 'bg-slate-100 text-slate-500 font-normal' : 'bg-slate-50 text-slate-700 font-normal'}`}
                         style={{ width: weekW, ...(isCurrent ? { backgroundColor: NAVY } : {}) }}>
                         {isCurrent && <div className="absolute -bottom-px left-0 right-0 h-0.5" style={{ backgroundColor: GOLD }}></div>}
                         <div className="py-1 z-10 relative">{isCompact ? weekNum : `W${String(weekNum).padStart(2, '0')}`}</div>
                       </th>
                     );
                   })}
-                </tr>
+                </tr>}
               </thead>
 
               <tbody className="text-xs">
@@ -856,7 +874,7 @@ function App() {
                     <React.Fragment key={group.owner}>
                       {/* --- 修改點 1: 移除群組標題背景的 /95 透明度，使用純色 bg-blue-50 --- */}
                       <tr onClick={() => toggleOwnerCollapse(group.owner)} className="group/header bg-blue-50 hover:bg-blue-100 cursor-pointer border-b border-blue-100 transition-colors">
-                        <td colSpan="3" className="sticky left-0 z-40 bg-blue-50 group-hover/header:bg-blue-100 border-r border-blue-200 p-0 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                        <td colSpan={isOverview ? 1 : 3} className="sticky left-0 z-40 bg-blue-50 group-hover/header:bg-blue-100 border-r border-blue-200 p-0 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
                           <div className="flex items-center text-blue-900 font-bold text-[13px] px-2 py-1.5 border-l-4" style={{ borderColor: NAVY }}>
                             <svg className={`w-4 h-4 mr-1 text-blue-500 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                             <div className="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs mr-2 flex-shrink-0" style={{ backgroundColor: NAVY }}>{group.owner[0]}</div>
@@ -864,15 +882,17 @@ function App() {
                             <span className="ml-2 px-1.5 py-0.5 bg-white text-blue-600 rounded text-[10px] font-medium border border-blue-100">{group.projects.length} 項</span>
                             {gActive > 0 && (
                               <div className="ml-2 flex items-center gap-1.5">
-                                <div className="w-16 h-1.5 bg-white rounded-full overflow-hidden border border-blue-100">
-                                  <div className={`h-full rounded-full ${gReported === gActive ? 'bg-green-500' : 'bg-yellow-400'}`} style={{ width: `${(gReported / gActive) * 100}%` }}></div>
-                                </div>
-                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${gReported === gActive ? 'bg-green-100 text-green-700 border-green-200' : 'bg-yellow-100 text-yellow-700 border-yellow-200'}`}>
+                                {!isOverview && (
+                                  <div className="w-16 h-1.5 bg-white rounded-full overflow-hidden border border-blue-100">
+                                    <div className={`h-full rounded-full ${gReported === gActive ? 'bg-green-600' : 'bg-yellow-400'}`} style={{ width: `${(gReported / gActive) * 100}%` }}></div>
+                                  </div>
+                                )}
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${gReported === gActive ? 'bg-green-100 text-green-800 border-green-200' : 'bg-yellow-100 text-yellow-800 border-yellow-300'}`}>
                                   本週回報 {gReported}/{gActive}
                                 </span>
                               </div>
                             )}
-                            {role === 'manager' && (
+                            {role === 'manager' && !isOverview && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); setEditingProject({ mode: 'add', owner: group.owner }); }}
                                 className="ml-auto flex-shrink-0 flex items-center gap-1 bg-white text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-300 rounded px-2 py-0.5 text-[10px] font-bold transition shadow-sm"
@@ -895,13 +915,13 @@ function App() {
                         <tr key={proj.id}
                           onDragOver={role === 'manager' && dragState && dragState.owner === group.owner ? (e) => { e.preventDefault(); if (dragOverId !== proj.id) setDragOverId(proj.id); } : undefined}
                           onDrop={role === 'manager' && dragState ? (e) => { e.preventDefault(); handleReorderProjects(group.owner, dragState.id, proj.id); setDragState(null); setDragOverId(null); } : undefined}
-                          className={`hover:bg-slate-50 group/row border-b border-slate-200 ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`}>
-                          <td className={`text-center sticky left-0 bg-white group-hover/row:bg-slate-50 z-30 border-r border-slate-200 text-slate-400 font-medium ${isCompact ? 'py-1' : 'py-2'}`}>{idx + 1}</td>
-                          <td className={`text-center sticky bg-white group-hover/row:bg-slate-50 z-30 border-r border-slate-200 text-slate-600 ${isCompact ? 'py-1' : 'py-2'}`} style={{ left: 28 }}>{proj.category}</td>
+                          className={`hover:bg-slate-50 group/row border-b border-slate-300 ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`}>
+                          {!isOverview && <td className={`text-center sticky left-0 bg-white group-hover/row:bg-slate-50 z-30 border-r border-slate-200 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`}>{idx + 1}</td>}
+                          {!isOverview && <td className={`text-center sticky bg-white group-hover/row:bg-slate-50 z-30 border-r border-slate-200 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ left: 28 }}>{proj.category}</td>}
                           {/* --- 修改點 2: 將 bg-white 實色直接套用到 <td> 本身，避免裡層高度撐不滿而露空 --- */}
-                          <td className="sticky bg-white group-hover/row:bg-slate-50 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.03)] border-r border-slate-300 p-0" style={{ left: 70 }}>
+                          <td className="sticky bg-white group-hover/row:bg-slate-50 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.03)] border-r border-slate-300 p-0" style={{ left: isOverview ? 0 : 70 }}>
                             <div className="w-full h-full flex items-center px-2 overflow-hidden">
-                              {role === 'manager' && (
+                              {role === 'manager' && !isOverview && (
                                 isFilteringRows ? (
                                   <span className="flex-shrink-0 mr-1 text-slate-200 select-none text-[13px] leading-none cursor-not-allowed"
                                     title="搜尋/類型篩選中無法拖曳排序，請先清除篩選">⠿</span>
@@ -915,7 +935,8 @@ function App() {
                                 )
                               )}
                               <div className={`flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`}>{proj.type.toUpperCase()}</div>
-                              <span className="flex-1 min-w-0 truncate font-medium text-slate-700 text-[11px]" title={proj.name}>{proj.name}</span>
+                              {/* 範本 B:專案名稱近全黑+加粗,寬鬆模式 15px(預設)/緊湊 13px/總覽 12.5px */}
+                              <span className={`flex-1 min-w-0 truncate font-semibold text-slate-900 ${isOverview ? 'text-[12.5px]' : isCompact ? 'text-[13px]' : 'text-[15px]'}`} title={proj.name}>{proj.name}</span>
                               {/* 具體產出項目(專案執行完畢後的成果)入口:已填=實色,未填=淡色;負責人與主管可編輯,其他人唯讀 */}
                               <button
                                 onClick={(e) => { e.stopPropagation(); setDeliverableProj(proj); }}
@@ -933,7 +954,7 @@ function App() {
                                   </span>
                                 );
                               })()}
-                              {role === 'manager' && (
+                              {role === 'manager' && !isOverview && (
                                 <div className="flex-shrink-0 flex items-center gap-0.5 ml-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
                                   <button onClick={() => setAddingInterval(proj)}
                                     className="w-5 h-5 flex items-center justify-center rounded text-green-600 hover:bg-green-100 font-bold" title="新增計畫區間">＋</button>
@@ -946,7 +967,7 @@ function App() {
                             </div>
                           </td>
 
-                          <td colSpan={weeksTotal} className="p-0 relative" style={{ height: isCompact ? 30 : 40 }}>
+                          <td colSpan={weeksTotal} className="p-0 relative" style={{ height: isOverview ? 24 : isCompact ? 30 : 40 }}>
                             <div className="absolute inset-0 flex pointer-events-none z-0">
                               {Array.from({ length: weeksTotal }).map((_, i) => (
                                 <div key={i} className={`flex-1 border-r border-slate-200 ${i + 1 === currentWeek ? 'bg-red-50/70' : ''}`}></div>
@@ -960,10 +981,10 @@ function App() {
                               const isPending = role === 'member' && proj.owner === currentUser && isActiveThisWeek && !weekLog;
                               const deadlineSoon = isTaskDeadlineSoon(task);   // 剩 ≤2 週或已過 70% 時程 → 橘框 + ⏰(未回報紅框優先)
 
-                              const barClass = 'text-slate-700';
+                              const barClass = 'text-slate-900';
                               const barStyle = {
                                 backgroundImage: 'repeating-linear-gradient(45deg, #FFF6D6, #FFF6D6 6px, #FDEDB8 6px, #FDEDB8 12px)',
-                                borderColor: 'rgba(212,177,6,0.7)'
+                                borderColor: 'rgba(180,83,9,0.75)'   // 加深(範本 B):淡黃條在白底上需要更明確的輪廓
                               };
                               const textClass = weekLog ? 'font-bold' : 'font-medium opacity-90';
                               const spanWeeks = task.end - task.start + 1;
@@ -980,7 +1001,7 @@ function App() {
                                     onMouseMove={moveTooltip}
                                     onMouseLeave={hideTooltip}
                                     className={`absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 z-10 border rounded-sm shadow-sm ${barClass} ${isPending ? 'ring-2 ring-red-400 ring-offset-1' : deadlineSoon ? 'ring-2 ring-orange-400 ring-offset-1' : ''}`}
-                                    style={{ left: `${leftPercent}%`, width: `${widthPercent}%`, top: 4, bottom: isCompact ? 8 : 10, ...barStyle }}>
+                                    style={{ left: `${leftPercent}%`, width: `${widthPercent}%`, top: isOverview ? 4 : 4, bottom: isOverview ? 4 : isCompact ? 8 : 10, ...barStyle }}>
                                     
                                     {Object.entries(logs).map(([w, log]) => {
                                       const wn = Number(w);
@@ -998,10 +1019,13 @@ function App() {
                                       );
                                     })}
                                     
-                                    <span className={`relative z-10 truncate px-1.5 whitespace-nowrap ${isCompact ? 'text-[9px]' : 'text-[11px]'} ${textClass}`}
-                                      style={{ textShadow: '0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.75)' }}>
-                                      {isPending && '❗'}{deadlineSoon && '⏰'}{!isCompact && weekLog?.note ? `${task.name} ➔ ${weekLog.note}` : task.name}
-                                    </span>
+                                    {/* 年度總覽:條上不顯字(壓縮後塞不下),以色塊+tooltip 傳達;週檢視字級加大 */}
+                                    {!isOverview && (
+                                      <span className={`relative z-10 truncate px-1.5 whitespace-nowrap ${isCompact ? 'text-[10px]' : 'text-[12px]'} ${textClass}`}
+                                        style={{ textShadow: '0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.75)' }}>
+                                        {isPending && '❗'}{deadlineSoon && '⏰'}{!isCompact && weekLog?.note ? `${task.name} ➔ ${weekLog.note}` : task.name}
+                                      </span>
+                                    )}
                                   </div>
 
                                 </React.Fragment>
@@ -1151,10 +1175,11 @@ function App() {
   );
 }
 
+// 投影友善:晶片加邊框確保輪廓、標籤文字不再用透明度淡化(投影機對比打折,淡字會消失)
 function StatChip({ label, value, className }) {
   return (
-    <span className={`flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 ${className}`}>
-      <span className="opacity-60 font-medium text-[10px]">{label}</span>
+    <span className={`flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border ${className}`}>
+      <span className="font-medium text-[11px]">{label}</span>
       <span className="text-[13px] leading-none">{value}</span>
     </span>
   );
@@ -1394,8 +1419,8 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, onClose, onSave })
     return (
       <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
-          <div className="px-6 py-4 bg-slate-600 text-white flex justify-between items-center">
-            <h3 className="font-bold text-lg">🔒 W{currentWeek} 非專案工作（唯讀）</h3>
+          <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#475569' }}>
+            <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🔒 W{currentWeek} 非專案工作（唯讀）</h3>
             <button onClick={onClose} className="text-white/60 hover:text-white"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
           </div>
           <div className="p-6">
@@ -1417,8 +1442,8 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, onClose, onSave })
     // 注意:全站慣例 — 所有彈出視窗/面板的遮罩都「不」綁 onClick 關閉(避免誤點視窗外遺失輸入),一律用「取消」「×」或送出按鈕關閉;新增 Modal 請沿用
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 bg-orange-500 text-white flex justify-between items-center">
-          <h3 className="font-bold text-lg flex items-center">📝 填寫 W{currentWeek} 非專案工作</h3>
+        <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#F97316' }}>
+          <h3 className="font-bold text-lg flex items-center" style={{ color: '#FFFFFF' }}>📝 填寫 W{currentWeek} 非專案工作</h3>
           <button onClick={onClose} className="text-white/60 hover:text-white"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
         <div className="p-6">
@@ -1456,10 +1481,10 @@ function DeliverableModal({ proj, role, currentUser, onClose, onSave }) {
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 bg-amber-500 text-white flex justify-between items-start">
+        <div className="px-6 py-4 text-white flex justify-between items-start" style={{ backgroundColor: '#F59E0B' }}>
           <div className="pr-3">
-            <h3 className="font-bold text-lg">🎯 具體產出項目</h3>
-            <p className="text-xs text-amber-100 mt-0.5 truncate max-w-[360px]">{proj.name}（負責人：{proj.owner}）</p>
+            <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🎯 具體產出項目</h3>
+            <p className="text-xs mt-0.5 truncate max-w-[360px]" style={{ color: '#FEF3C7' }}>{proj.name}（負責人：{proj.owner}）</p>
           </div>
           <button onClick={onClose} className="text-white/70 hover:text-white flex-shrink-0"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
@@ -1510,8 +1535,8 @@ function WeeklyPlanModal({ currentWeek, initialNote, readOnly, onClose, onSave }
     return (
       <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
-          <div className="px-6 py-4 bg-slate-600 text-white flex justify-between items-center">
-            <h3 className="font-bold text-lg">🔒 W{currentWeek} 下週預計工作（唯讀）</h3>
+          <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#475569' }}>
+            <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🔒 W{currentWeek} 下週預計工作（唯讀）</h3>
             <button onClick={onClose} className="text-white/60 hover:text-white"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
           </div>
           <div className="p-6">
@@ -1532,8 +1557,8 @@ function WeeklyPlanModal({ currentWeek, initialNote, readOnly, onClose, onSave }
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 bg-indigo-500 text-white flex justify-between items-center">
-          <h3 className="font-bold text-lg flex items-center">📅 填寫 W{currentWeek} 下週預計執行工作</h3>
+        <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#6366F1' }}>
+          <h3 className="font-bold text-lg flex items-center" style={{ color: '#FFFFFF' }}>📅 填寫 W{currentWeek} 下週預計執行工作</h3>
           <button onClick={onClose} className="text-white/60 hover:text-white"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
         <div className="p-6">
@@ -1568,10 +1593,11 @@ function DeadlinePanel({ items, onClose, onSelect }) {
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end">
       <div className="w-full max-w-sm bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-4 text-white flex justify-between items-center bg-orange-600">
+        {/* 標題列顏色一律用行內樣式:企業內網若快取到舊版 app.css,新 class 不存在會變白底白字 */}
+        <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#EA580C' }}>
           <div>
-            <h3 className="font-bold text-lg">⏰ 即將到期清單</h3>
-            <p className="text-xs text-orange-100 mt-0.5">剩餘 ≤2 週或時程已過 70% 的計畫區間</p>
+            <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>⏰ 即將到期清單</h3>
+            <p className="text-xs mt-0.5" style={{ color: '#FFEDD5' }}>剩餘 ≤2 週或時程已過 70% 的計畫區間</p>
           </div>
           <button onClick={onClose} className="text-white/70 hover:text-white p-1"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
@@ -1932,9 +1958,9 @@ function ConfirmModal({ info, onCancel }) {
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[150] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 bg-red-600 text-white flex items-center">
+        <div className="px-6 py-4 text-white flex items-center" style={{ backgroundColor: '#DC2626' }}>
           <span className="text-xl mr-2">⚠️</span>
-          <h3 className="font-bold text-lg">{info.title}</h3>
+          <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>{info.title}</h3>
         </div>
         <div className="p-6">
           <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{info.message}</p>

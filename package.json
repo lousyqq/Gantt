@@ -6,7 +6,7 @@
   "scripts": {
     "build:js": "babel ClientApp/app.jsx --presets @babel/preset-react --out-file wwwroot/app.js",
     "build:css": "tailwindcss -i ClientApp/input.css -o wwwroot/app.css --minify",
-    "build": "npm run build:js && npm run build:css",
+    "build": "npm run build:js && npm run build:css && node scripts/stamp-assets.js",
     "watch:js": "babel ClientApp/app.jsx --presets @babel/preset-react --out-file wwwroot/app.js --watch",
     "watch:css": "tailwindcss -i ClientApp/input.css -o wwwroot/app.css --watch"
   },
