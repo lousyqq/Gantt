@@ -469,6 +469,16 @@ function App() {
   const [months, setMonths] = useState(MONTHS);
   const weeksTotal = useMemo(() => months.reduce((s, m) => s + m.weeks, 0), [months]);
 
+  // 分頁標題帶目前週次(多分頁好辨識);非今年年度再帶年份;未登入維持原名
+  React.useEffect(() => {
+    if (!currentUser) {
+      document.title = 'MSD 專案追蹤總表';
+      return;
+    }
+    const prefix = scheduleYear !== new Date().getFullYear() ? `${scheduleYear} ` : '';
+    document.title = `${prefix}W${String(currentWeek).padStart(2, '0')}｜MSD 專案追蹤總表`;
+  }, [currentUser, currentWeek, scheduleYear]);
+
   // UI 狀態(範本 B:預設寬鬆模式,字級較大對年長者友善)
   const [isCompact, setIsCompact] = useState(false);
   const [isOverview, setIsOverview] = useState(false); // 年度總覽:52 週自動縮放進一個畫面寬,無水平捲軸(唯讀瀏覽視角)
@@ -1957,10 +1967,7 @@ function App() {
       title: "\u62D6\u66F3\u4EE5\u8ABF\u6574\u6392\u5E8F"
     }, "\u283F")), /*#__PURE__*/React.createElement("div", {
       className: `flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`
-    }, proj.type.toUpperCase()), starredIds.has(proj.id) && /*#__PURE__*/React.createElement("span", {
-      className: "flex-shrink-0 mr-1 text-amber-500 font-bold",
-      title: "\u4E3B\u7BA1\u91CD\u9EDE\u95DC\u6CE8\u9805\u76EE"
-    }, "\u2605"), /*#__PURE__*/React.createElement("span", {
+    }, proj.type.toUpperCase()), /*#__PURE__*/React.createElement("span", {
       className: `flex-1 min-w-0 truncate font-semibold text-slate-900 ${isOverview ? 'text-[12.5px]' : isCompact ? 'text-[13px]' : 'text-[15px]'}`,
       title: proj.name
     }, proj.name), /*#__PURE__*/React.createElement("button", {
@@ -3276,13 +3283,31 @@ function WeeklyReportDashboard({
   const [expandedUsers, setExpandedUsers] = useState(new Set(!isManager ? [currentUser] : []));
 
   // 下載後端產生的 Excel 週報(.xlsx:專案執行 + 非專案事項 兩個工作表)
-  const exportExcel = () => {
-    const a = document.createElement('a');
-    a.href = `${API_BASE}/api/weekly-report-excel?year=${year}&week=${currentWeek}`;
-    a.download = '';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  // 改用 fetch→blob:按鈕可顯示「產生中…」並防重複點擊,失敗時給明確回饋(原 <a download> 無從得知進度)
+  const [exporting, setExporting] = useState(false);
+  const [exportFailed, setExportFailed] = useState(false);
+  const exportExcel = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setExportFailed(false);
+    try {
+      const res = await fetch(`${API_BASE}/api/weekly-report-excel?year=${year}&week=${currentWeek}`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `WeeklyReport_${year}_W${String(currentWeek).padStart(2, '0')}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportFailed(true);
+      setTimeout(() => setExportFailed(false), 5000);
+    } finally {
+      setExporting(false);
+    }
   };
   const summary = useMemo(() => users.map(user => {
     const activeTasks = [],
@@ -3300,13 +3325,18 @@ function WeeklyReportDashboard({
         });
       }
     }));
+    // 本週得分=已回報任務分數加總(回報預設 1 分,主管可調 0.3~1);未回報=0;滿分=本週排定任務數
+    const weekScore = Math.round(activeTasks.reduce((sum, {
+      log
+    }) => sum + Number(log.score ?? 1), 0) * 10) / 10;
     return {
       user,
       activeTasks,
       pendingTasks,
       extraNote: extraNotes[user]?.[currentWeek],
       weekPlan: weeklyPlans[user]?.[currentWeek],
-      total: activeTasks.length + pendingTasks.length
+      total: activeTasks.length + pendingTasks.length,
+      weekScore
     };
   }), [users, projects, taskLogs, extraNotes, weeklyPlans, currentWeek]);
 
@@ -3320,7 +3350,7 @@ function WeeklyReportDashboard({
   // 產生單一成員的週報文字
   const buildSingleUserReport = s => {
     const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} 週報 — ${s.user}】`, ''];
-    lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}）`);
+    lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}・得分 ${s.weekScore}/${s.total}）`);
     s.activeTasks.forEach(({
       proj,
       task,
@@ -3339,7 +3369,7 @@ function WeeklyReportDashboard({
     const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} ${showTeamView ? '團隊週報' : '週報 — ' + currentUser}】`, ''];
     visibleSummary.forEach(s => {
       if (s.activeTasks.length === 0 && !s.extraNote && !s.weekPlan) return;
-      lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}）`);
+      lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}・得分 ${s.weekScore}/${s.total}）`);
       s.activeTasks.forEach(({
         proj,
         task,
@@ -3452,9 +3482,10 @@ function WeeklyReportDashboard({
     className: "flex items-center space-x-2"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: exportExcel,
-    className: "px-3 py-1.5 rounded-lg text-xs font-bold transition border bg-green-600 hover:bg-green-500 border-green-400/60 text-white",
+    disabled: exporting,
+    className: `px-3 py-1.5 rounded-lg text-xs font-bold transition border text-white disabled:opacity-70 ${exportFailed ? 'bg-red-600 hover:bg-red-500 border-red-400/60' : 'bg-green-600 hover:bg-green-500 border-green-400/60'}`,
     title: "\u4E0B\u8F09 Excel \u9031\u5831(.xlsx)"
-  }, "\u2B07\uFE0F \u532F\u51FA Excel"), /*#__PURE__*/React.createElement("button", {
+  }, exporting ? '⏳ 產生中…' : exportFailed ? '❌ 匯出失敗，點擊重試' : '⬇️ 匯出 Excel'), /*#__PURE__*/React.createElement("button", {
     onClick: copyReport,
     className: `px-3 py-1.5 rounded-lg text-xs font-bold transition border ${copied ? 'bg-green-500 border-green-400 text-white' : 'bg-white/10 hover:bg-white/20 border-white/20 text-white'}`
   }, copied ? '✓ 已複製' : '📋 複製週報文字'), /*#__PURE__*/React.createElement("button", {
@@ -3522,7 +3553,7 @@ function WeeklyReportDashboard({
     }, user[0]), /*#__PURE__*/React.createElement("span", {
       className: "mr-3"
     }, user), total > 0 && /*#__PURE__*/React.createElement("div", {
-      className: "flex items-center flex-1 max-w-[180px]"
+      className: "flex items-center flex-1 max-w-[260px]"
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden"
     }, /*#__PURE__*/React.createElement("div", {
@@ -3531,8 +3562,11 @@ function WeeklyReportDashboard({
         width: `${rate}%`
       }
     })), /*#__PURE__*/React.createElement("span", {
-      className: "ml-2 text-[10px] font-bold text-slate-500"
-    }, activeTasks.length, "/", total, " \u56DE\u5831")), !isExpanded && showTeamView && /*#__PURE__*/React.createElement("div", {
+      className: "ml-2 text-[10px] font-bold text-slate-500 whitespace-nowrap"
+    }, activeTasks.length, "/", total, " \u56DE\u5831"), /*#__PURE__*/React.createElement("span", {
+      className: `ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${s.weekScore >= total ? 'bg-green-100 text-green-800 border-green-400' : 'bg-indigo-100 text-indigo-800 border-indigo-400'}`,
+      title: `本週得分＝各任務打卡分數加總（回報預設 1 分、主管可調 0.3~1；未回報 0 分）／滿分＝本週排定任務數`
+    }, "\uD83C\uDFC6 ", s.weekScore, "/", total, " \u5206")), !isExpanded && showTeamView && /*#__PURE__*/React.createElement("div", {
       className: "ml-auto flex items-center gap-1.5 text-[10px]"
     }, activeTasks.length > 0 && /*#__PURE__*/React.createElement("span", {
       className: "bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold border border-green-300"
