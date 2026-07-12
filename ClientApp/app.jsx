@@ -98,6 +98,27 @@ async function apiPost(path, body) {
   return res.json();
 }
 
+// 平滑捲動+保底:部分環境(嵌入式瀏覽器/舊核心)的 smooth 動畫會靜默失效,
+// 250ms 內未位移就改用瞬間捲動,確保「回到本週/方向鍵平移/到期定位」在任何瀏覽器都有效
+const smoothScrollLeftTo = (el, left) => {
+  if (!el) return;
+  const from = el.scrollLeft;
+  const target = Math.max(0, left);
+  el.scrollTo({ left: target, behavior: 'smooth' });
+  setTimeout(() => {
+    if (Math.abs(el.scrollLeft - from) < 1 && Math.abs(target - from) >= 1) el.scrollTo(target, el.scrollTop);
+  }, 250);
+};
+
+// 彈窗「未儲存內容」旗標:表單型視窗(打卡/非專案/下週預計/產出/專案/區間)輸入時設 true、
+// 視窗卸載時自動清除;ESC 關窗前檢查,避免打到一半的內容被默默丟棄
+let MODAL_DIRTY = false;
+const markModalDirty = () => { MODAL_DIRTY = true; };
+// 表單型視窗掛載時呼叫:卸載(不論儲存或取消)自動重置旗標
+const useModalDirtyReset = () => {
+  React.useEffect(() => () => { MODAL_DIRTY = false; }, []);
+};
+
 // 週 -> 月份標籤
 const weekToMonth = (w, months = MONTHS) => {
   let acc = 0;
@@ -107,6 +128,238 @@ const weekToMonth = (w, months = MONTHS) => {
   }
   return '';
 };
+
+// 成果清單面板：單一列極簡矩陣，與甘特圖欄位順序一致，且全欄位支援點擊排序
+function ResultsView({ projects, role, currentUser, onEditDeliverable, starredIds = new Set(), toggleStar }) {
+  const [filterMode, setFilterMode] = useState('all');   // 'all' | 'starred' | 'hasMp' | 'hasDeliverable' | 'missing'
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); // key: 'category' | 'name' | 'owner' | 'deliverable' | 'mpSaving'
+
+  // 點擊表頭切換排序欄位與方向
+  const handleSortHeader = (key) => {
+    setSortConfig(prev => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: key === 'mpSaving' ? 'desc' : 'asc' };
+    });
+  };
+
+  // 根據篩選與排序整理專案列表
+  const displayedProjects = useMemo(() => {
+    let list = [...projects];
+    if (filterMode === 'starred') list = list.filter(p => starredIds.has(p.id));
+    else if (filterMode === 'hasMp') list = list.filter(p => p.mpSaving);
+    else if (filterMode === 'hasDeliverable') list = list.filter(p => p.deliverable);
+    else if (filterMode === 'missing') list = list.filter(p => !p.deliverable && !p.mpSaving);
+
+    if (sortConfig.key) {
+      const { key, direction } = sortConfig;
+      const factor = direction === 'asc' ? 1 : -1;
+
+      list.sort((a, b) => {
+        if (key === 'mpSaving') {
+          const parseMp = (val) => {
+            if (!val) return -1;
+            const num = parseFloat(String(val).replace(/[^0-9.-]+/g, ""));
+            return isNaN(num) ? -1 : num;
+          };
+          return (parseMp(a.mpSaving) - parseMp(b.mpSaving)) * factor;
+        } else if (key === 'category') {
+          return String(a.category || '').localeCompare(String(b.category || ''), 'zh-TW') * factor;
+        } else if (key === 'type') {
+          return String(a.type || '').localeCompare(String(b.type || ''), 'zh-TW') * factor;
+        } else if (key === 'name') {
+          return String(a.name || '').localeCompare(String(b.name || ''), 'zh-TW') * factor;
+        } else if (key === 'owner') {
+          return String(a.owner || '').localeCompare(String(b.owner || ''), 'zh-TW') * factor;
+        } else if (key === 'deliverable') {
+          const hasA = a.deliverable ? 1 : 0;
+          const hasB = b.deliverable ? 1 : 0;
+          if (hasA !== hasB) return (hasA - hasB) * factor;
+          return String(a.deliverable || '').localeCompare(String(b.deliverable || ''), 'zh-TW') * factor;
+        }
+        return 0;
+      });
+    }
+    return list;
+  }, [projects, filterMode, sortConfig]);
+
+  // 表頭渲染輔助函式（強制 whitespace-nowrap 不換行）
+  const renderSortHeader = (label, key, widthClass, extraClass = "") => {
+    const isSorted = sortConfig.key === key;
+    const dirIcon = !isSorted ? '↕' : sortConfig.direction === 'asc' ? '▲' : '▼';
+    return (
+      <th
+        onClick={() => handleSortHeader(key)}
+        className={`px-3 py-2 cursor-pointer select-none transition hover:bg-slate-200 whitespace-nowrap ${isSorted ? 'bg-blue-100/80 text-blue-900 border-b-2 border-blue-600' : 'text-slate-700'} ${widthClass} ${extraClass}`}
+        title={`點擊依「${label}」${!isSorted ? '排序' : sortConfig.direction === 'asc' ? '改為降冪排序' : '改為升冪排序'}`}
+      >
+        <div className="flex items-center justify-between gap-1">
+          <span className="whitespace-nowrap">{label}</span>
+          <span className={`text-[11px] px-1 rounded flex-shrink-0 ${isSorted ? 'bg-blue-600 text-white font-black' : 'text-slate-400 font-normal'}`}>
+            {dirIcon}
+          </span>
+        </div>
+      </th>
+    );
+  };
+
+  return (
+    <div className="px-8 py-6 max-w-[1560px] w-full mx-auto space-y-5">
+      {/* 頂部 KPI 互動統計篩選卡片 (二合一：點擊直接過濾列表) */}
+      <div className="flex flex-col gap-3">
+        <div>
+          <span className="text-xs font-bold text-slate-500">點擊下方 KPI 指標卡片，即可快速切換檢視與過濾清單：</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <button onClick={() => setFilterMode('all')}
+            className={`p-4 rounded-xl border text-left transition flex items-center gap-3 ${filterMode === 'all' ? 'bg-[#001F5B] text-white border-[#001F5B] shadow-md ring-2 ring-offset-2 ring-[#001F5B]/30' : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}>
+            <div className={`w-11 h-11 rounded-full flex items-center justify-center text-lg font-bold ${filterMode === 'all' ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>📁</div>
+            <div>
+              <div className={`text-xs font-bold ${filterMode === 'all' ? 'text-blue-200' : 'text-slate-500'}`}>全部專案</div>
+              <div className="text-xl font-black">{projects.length} <span className={`text-xs font-medium ${filterMode === 'all' ? 'text-blue-200' : 'text-slate-500'}`}>案</span></div>
+            </div>
+          </button>
+
+          <button onClick={() => setFilterMode('starred')}
+            className={`p-4 rounded-xl border text-left transition flex items-center gap-3 ${filterMode === 'starred' ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-offset-2 ring-amber-500/30' : 'bg-white text-slate-800 border-slate-200 hover:border-amber-300 hover:bg-amber-50/40'}`}>
+            <div className={`w-11 h-11 rounded-full flex items-center justify-center text-lg font-bold ${filterMode === 'starred' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-600'}`}>⭐</div>
+            <div>
+              <div className={`text-xs font-bold ${filterMode === 'starred' ? 'text-amber-100' : 'text-slate-500'}`}>重點關注項目</div>
+              <div className="text-xl font-black">{projects.filter(p => starredIds.has(p.id)).length} <span className={`text-xs font-medium ${filterMode === 'starred' ? 'text-amber-100' : 'text-slate-500'}`}>案</span></div>
+            </div>
+          </button>
+
+          <button onClick={() => setFilterMode('hasMp')}
+            className={`p-4 rounded-xl border text-left transition flex items-center gap-3 ${filterMode === 'hasMp' ? 'bg-emerald-600 text-white border-emerald-600 shadow-md ring-2 ring-offset-2 ring-emerald-600/30' : 'bg-white text-slate-800 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40'}`}>
+            <div className={`w-11 h-11 rounded-full flex items-center justify-center text-lg font-bold ${filterMode === 'hasMp' ? 'bg-white/10 text-white' : 'bg-emerald-100 text-emerald-600'}`}>💡</div>
+            <div>
+              <div className={`text-xs font-bold ${filterMode === 'hasMp' ? 'text-emerald-100' : 'text-slate-500'}`}>具備 MP Saving</div>
+              <div className="text-xl font-black">{projects.filter(p => p.mpSaving).length} <span className={`text-xs font-medium ${filterMode === 'hasMp' ? 'text-emerald-100' : 'text-slate-500'}`}>案</span></div>
+            </div>
+          </button>
+
+          <button onClick={() => setFilterMode('hasDeliverable')}
+            className={`p-4 rounded-xl border text-left transition flex items-center gap-3 ${filterMode === 'hasDeliverable' ? 'bg-amber-600 text-white border-amber-600 shadow-md ring-2 ring-offset-2 ring-amber-600/30' : 'bg-white text-slate-800 border-slate-200 hover:border-amber-300 hover:bg-amber-50/40'}`}>
+            <div className={`w-11 h-11 rounded-full flex items-center justify-center text-lg font-bold ${filterMode === 'hasDeliverable' ? 'bg-white/10 text-white' : 'bg-amber-100 text-amber-600'}`}>🎯</div>
+            <div>
+              <div className={`text-xs font-bold ${filterMode === 'hasDeliverable' ? 'text-amber-100' : 'text-slate-500'}`}>有具體產出成果</div>
+              <div className="text-xl font-black">{projects.filter(p => p.deliverable).length} <span className={`text-xs font-medium ${filterMode === 'hasDeliverable' ? 'text-amber-100' : 'text-slate-500'}`}>/ {projects.length} 案</span></div>
+            </div>
+          </button>
+
+          <button onClick={() => setFilterMode('missing')}
+            className={`p-4 rounded-xl border text-left transition flex items-center gap-3 ${filterMode === 'missing' ? 'bg-red-600 text-white border-red-600 shadow-md ring-2 ring-offset-2 ring-red-600/30' : 'bg-white text-slate-800 border-slate-200 hover:border-red-300 hover:bg-red-50/40'}`}>
+            <div className={`w-11 h-11 rounded-full flex items-center justify-center text-lg font-bold ${filterMode === 'missing' ? 'bg-white/10 text-white' : 'bg-red-100 text-red-600'}`}>⚠️</div>
+            <div>
+              <div className={`text-xs font-bold ${filterMode === 'missing' ? 'text-red-100' : 'text-slate-500'}`}>待補充產出效益</div>
+              <div className="text-xl font-black">{projects.filter(p => !p.deliverable && !p.mpSaving).length} <span className={`text-xs font-medium ${filterMode === 'missing' ? 'text-red-100' : 'text-slate-500'}`}>案</span></div>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {sortConfig.key && (
+        <div className="flex items-center justify-between bg-blue-50 border border-blue-200 px-4 py-2 rounded-xl text-xs font-bold text-blue-900 shadow-sm">
+          <span>目前已套用欄位排序 ({sortConfig.direction === 'asc' ? '升冪 ▲' : '降冪 ▼'})</span>
+          <button onClick={() => setSortConfig({ key: null, direction: 'asc' })}
+            className="px-3 py-1 rounded-lg bg-white hover:bg-blue-100 text-blue-700 border border-blue-300 font-bold transition shadow-sm">
+            清除排序
+          </button>
+        </div>
+      )}
+
+      {/* 與甘特圖順序完全一致的單行列專案表 (No -> 分類 -> 類型 -> 專案名稱 -> 負責人 -> 產出 -> MP Saving -> 操作) */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <table className="w-full text-left border-collapse table-fixed">
+          <thead>
+            <tr className="bg-slate-100 text-xs font-bold border-b border-slate-200 h-10">
+              <th className="px-2 w-10 text-center text-slate-500 whitespace-nowrap">No</th>
+              {renderSortHeader("分類", "category", "w-20")}
+              {renderSortHeader("類型", "type", "w-14 text-center")}
+              {renderSortHeader("專案名稱", "name", "w-[420px]")}
+              {renderSortHeader("負責人", "owner", "w-24")}
+              {renderSortHeader("預計交付具體產出成果", "deliverable", "w-auto")}
+              {renderSortHeader("MP Saving", "mpSaving", "w-36")}
+              <th className="px-3 w-20 text-center text-slate-500 whitespace-nowrap">操作</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 text-xs">
+            {displayedProjects.map((proj, idx) => {
+              const canEdit = role === 'manager' || proj.owner === currentUser;
+              const cleanDeliverable = proj.deliverable ? String(proj.deliverable).replace(/[\r\n]+/g, ' ') : '';
+              return (
+                <tr key={proj.id} className="h-11 hover:bg-blue-50/40 transition">
+                  <td className="px-3 text-center text-slate-400 font-medium whitespace-nowrap truncate">{idx + 1}</td>
+                  <td className="px-3 whitespace-nowrap truncate text-slate-700 font-medium" title={proj.category}>
+                    {proj.category || '--'}
+                  </td>
+                  <td className="px-1 text-center whitespace-nowrap">
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-extrabold border ${PROJECT_TYPES[proj.type]?.chip || 'bg-slate-100 text-slate-600 border-slate-300'}`} title={PROJECT_TYPES[proj.type]?.label}>
+                      {proj.type?.toUpperCase() || '--'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 font-bold text-slate-900" title={proj.name}>
+                    <div className="flex items-start">
+                      {role === 'manager' ? (
+                        <button
+                          onClick={(e) => toggleStar && toggleStar(proj.id, e)}
+                          className={`flex-shrink-0 mr-1.5 mt-0.5 text-base transition transform hover:scale-125 ${starredIds.has(proj.id) ? 'text-amber-500' : 'text-slate-300 hover:text-amber-400'}`}
+                          title={starredIds.has(proj.id) ? '取消重點關注標記' : '標記為重點關注項目'}
+                        >
+                          {starredIds.has(proj.id) ? '★' : '☆'}
+                        </button>
+                      ) : starredIds.has(proj.id) ? (
+                        <span className="flex-shrink-0 mr-1.5 mt-0.5 text-base text-amber-500" title="重點關注項目">★</span>
+                      ) : null}
+                      <span className="whitespace-normal break-words leading-relaxed">{proj.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-3 whitespace-nowrap">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold whitespace-nowrap">
+                      {proj.owner}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2">
+                    {cleanDeliverable ? (
+                      <div className="text-slate-800 font-medium whitespace-normal break-words leading-relaxed">
+                        {cleanDeliverable}
+                      </div>
+                    ) : (
+                      <span className="text-slate-300 font-light">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 whitespace-nowrap">
+                    {proj.mpSaving ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 whitespace-nowrap">
+                        {proj.mpSaving}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300 font-light">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 text-center whitespace-nowrap">
+                    <button onClick={() => onEditDeliverable(proj)}
+                      className={`px-2.5 py-1 rounded-md font-bold transition border ${canEdit ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-300'}`}>
+                      {canEdit ? '編輯' : '檢視'}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {displayedProjects.length === 0 && (
+              <tr>
+                <td colSpan={8} className="py-8 text-center text-slate-400 font-medium">
+                  符合篩選條件的專案項目為空
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -130,11 +383,41 @@ function App() {
   // UI 狀態(範本 B:預設寬鬆模式,字級較大對年長者友善)
   const [isCompact, setIsCompact] = useState(false);
   const [isOverview, setIsOverview] = useState(false);   // 年度總覽:52 週自動縮放進一個畫面寬,無水平捲軸(唯讀瀏覽視角)
+  const [isResults, setIsResults] = useState(false);     // 成果清單:集中檢閱所有專案具體成果項目與 MP 節省統計
   const [collapsedOwners, setCollapsedOwners] = useState(new Set());
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState(new Set());       // 空 = 全部
   const [ownerFilter, setOwnerFilter] = useState('all');
   const [onlyMine, setOnlyMine] = useState(false);
+  // 重點關注標記：從 bootstrap 資料初始化（DB 持久化），不再使用 localStorage
+  const [starredIds, setStarredIds] = useState(() => new Set());
+  const toggleStar = useCallback(async (projId, e) => {
+    if (e) e.stopPropagation();
+    // 立即同步判定目標值，避免 React state 批次更新回呼延遲導致 newStarred 為 undefined
+    const newStarred = !starredIds.has(projId);
+    setStarredIds(prev => {
+      const next = new Set(prev);
+      if (newStarred) next.add(projId); else next.delete(projId);
+      return next;
+    });
+    // 同步更新 projects 內的 isStarred，確保重整後 starredIds 能正確重建
+    setProjects(prev => prev.map(p => p.id === projId ? { ...p, isStarred: newStarred } : p));
+    try {
+      await apiPost('/api/project/star', {
+        projectId: projId, starred: newStarred,
+        actor: currentUser, actorRole: role
+      });
+    } catch (err) {
+      // 若後端失敗，rollback 畫面狀態
+      setStarredIds(prev => {
+        const next = new Set(prev);
+        if (newStarred) next.delete(projId); else next.add(projId);
+        return next;
+      });
+      setProjects(prev => prev.map(p => p.id === projId ? { ...p, isStarred: !newStarred } : p));
+      alert('標記失敗：' + (err.message || '無法連線資料庫'));
+    }
+  }, [currentUser, role, starredIds]);
   const [tooltip, setTooltip] = useState(null);                  // {x, y, proj, task, weekLog, history}
   const ganttRef = useRef(null);
 
@@ -142,6 +425,7 @@ function App() {
   const [taskLogs, setTaskLogs] = useState({});
   const [extraNotes, setExtraNotes] = useState({});
   const [weeklyPlans, setWeeklyPlans] = useState({});   // weeklyPlans[user][week] = 下週預計執行工作(填寫於該週)
+  const [allowRetroCheckin, setAllowRetroCheckin] = useState(false); // 主管全域開關：允許成員回報/調正歷史進度
 
   // 重新抓取資料但不顯示整頁 Loading (供編輯後靜默刷新)
   const refreshData = useCallback(async () => {
@@ -153,9 +437,12 @@ function App() {
     }
     setUsers((data.users || []).filter(u => u.role === 'member').map(u => u.name));
     setProjects(data.projects || []);
+    // 從 DB 資料同步重點關注標記（isStarred 存於 DB，全員共享）
+    setStarredIds(new Set((data.projects || []).filter(p => p.isStarred || p.IsStarred).map(p => p.id ?? p.Id)));
     setTaskLogs(data.taskLogs || {});
     setExtraNotes(data.extraNotes || {});
     setWeeklyPlans(data.weeklyPlans || {});
+    if (typeof data.allowRetroCheckin === 'boolean') setAllowRetroCheckin(data.allowRetroCheckin);
     if (data.years && data.years.length) setYears(data.years);
     if (data.weeks && data.weeks.length) setMonths(groupWeeksToMonths(data.weeks));
   }, [scheduleYear]);
@@ -178,12 +465,20 @@ function App() {
   const [selectedTaskInfo, setSelectedTaskInfo] = useState(null);
   const [showExtraNoteModal, setShowExtraNoteModal] = useState(false);
   const [showWeeklyPlanModal, setShowWeeklyPlanModal] = useState(false);   // 下週預計執行工作
-  const [toast, setToast] = useState(null);
+  // Toast:成功 2.5 秒;錯誤(訊息以 ❌ 開頭自動判定)停 6 秒且可手動關閉;
+  // opts.action={label,onClick} 顯示動作鈕(如刪除後的「復原」),此時停留 opts.duration(預設 10 秒)
+  const [toast, setToast] = useState(null);   // { msg, isError, action? }
   const toastTimer = useRef(null);
-  const showToast = (msg) => {
-    setToast(msg);
+  const showToast = (msg, opts = {}) => {
+    const isError = opts.type === 'error' || msg.startsWith('❌');
+    setToast({ msg, isError, action: opts.action || null });
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2500);
+    const duration = opts.duration ?? (opts.action ? 10000 : isError ? 6000 : 2500);
+    toastTimer.current = setTimeout(() => setToast(null), duration);
+  };
+  const dismissToast = () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(null);
   };
   const [showWeeklyReport, setShowWeeklyReport] = useState(false);
   const [showPendingPanel, setShowPendingPanel] = useState(false);
@@ -195,19 +490,43 @@ function App() {
   const todayWeek = getTodayWeek(scheduleYear, weeksTotal);   // 本週(相對於選定年度)
   const isViewingPast = currentWeek !== todayWeek;  // 是否在檢視非本週
 
+  // 每次登入角色時：預設開啟各成員的週檢視、展開清單頁面；成員預設顯示個人專案，主管預設為全部成員
+  // 登入身分寫入 localStorage:重新整理/重開分頁不再被登出(登出時清除;內網固定使用者,風險可接受)
   const handleLogin = (user, selectedRole) => {
+    try { localStorage.setItem('gantt_login', JSON.stringify({ user, role: selectedRole })); } catch (e) {}
     setCurrentUser(user);
     setRole(selectedRole);
+    setIsOverview(false);
+    setIsResults(false);
     setCurrentWeek(getTodayWeek(scheduleYear, weeksTotal));
+    setCollapsedOwners(new Set());
     setOnlyMine(selectedRole === 'member');
     setOwnerFilter('all');
     setSearchText('');
     setTypeFilter(new Set());
+    setShowPendingPanel(false);
+    setShowWeeklyReport(false);
+    setShowAuditPanel(false);
+    setShowMemberPanel(false);
+    setShowDeadlinePanel(false);
   };
 
   const handleLogout = () => {
-    setCurrentUser(null); setRole(null);
-    setShowPendingPanel(false); setShowWeeklyReport(false);
+    try { localStorage.removeItem('gantt_login'); } catch (e) {}
+    setCurrentUser(null);
+    setRole(null);
+    setIsOverview(false);
+    setIsResults(false);
+    setCollapsedOwners(new Set());
+    setOnlyMine(false);
+    setOwnerFilter('all');
+    setSearchText('');
+    setTypeFilter(new Set());
+    setShowPendingPanel(false);
+    setShowWeeklyReport(false);
+    setShowAuditPanel(false);
+    setShowMemberPanel(false);
+    setShowDeadlinePanel(false);
   };
 
   const toggleOwnerCollapse = (owner) => {
@@ -233,13 +552,28 @@ function App() {
     if (!el) return;
     const LEFT_W = 490;
     const target = LEFT_W + (wk - 1) * weekW - (el.clientWidth - LEFT_W) / 2;
-    el.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
+    smoothScrollLeftTo(el, target);
   }, [weekW]);
 
   const goToCurrentWeek = () => {
     const tw = getTodayWeek(scheduleYear, weeksTotal);   // 動態取得今天的實際週(W27、下週為 W28…)
     setCurrentWeek(tw);                 // 將選取週強制切回本週
     setScrollTargetWeek(tw);            // 觸發 effect,於畫面更新後捲動定位
+  };
+
+  const toggleRetroCheckin = async () => {
+    if (role !== 'manager') return;
+    try {
+      await apiPost('/api/settings/retro-checkin', {
+        allow: !allowRetroCheckin,
+        actor: currentUser,
+        actorRole: role
+      });
+      setAllowRetroCheckin(!allowRetroCheckin);
+      showToast(!allowRetroCheckin ? '🔓 已開放全體成員回報/調正歷史進度' : '🔒 已恢復僅限當週打卡');
+    } catch (e) {
+      showToast('❌ 切換失敗：' + (e.message || '連線錯誤'));
+    }
   };
 
   // 選取週更新後才捲動,確保「選取週」與「畫面位置」同步
@@ -284,7 +618,7 @@ function App() {
         [currentUser]: { ...prev[currentUser], [currentWeek]: note }
       }));
       setShowExtraNoteModal(false);
-      showToast(`✅ W${String(currentWeek).padStart(2, '0')} 非專案事項已送出`);
+      showToast(note ? `✅ W${String(currentWeek).padStart(2, '0')} 非專案事項已送出` : `✅ W${String(currentWeek).padStart(2, '0')} 非專案事項已清空`);
     } catch (e) {
       showToast('❌ 儲存失敗：' + (e.message || '無法連線資料庫'));
     }
@@ -301,22 +635,22 @@ function App() {
         [currentUser]: { ...prev[currentUser], [currentWeek]: note }
       }));
       setShowWeeklyPlanModal(false);
-      showToast(`✅ W${String(currentWeek).padStart(2, '0')} 下週預計工作已送出`);
+      showToast(note ? `✅ W${String(currentWeek).padStart(2, '0')} 下週預計工作已送出` : `🗑️ W${String(currentWeek).padStart(2, '0')} 下週預計工作已清空`);
     } catch (e) {
       showToast('❌ 儲存失敗：' + (e.message || '無法連線資料庫'));
     }
   };
 
-  // 具體產出項目 = 專案「全部執行完畢後」的交付成果(專案層級,非單一區間);負責人本人或主管可編輯,權限由 SP 再驗一次
+  // 具體產出項目與 MP 人力節省效益
   const [deliverableProj, setDeliverableProj] = useState(null);   // 開啟中的產出項目視窗(甘特列 🎯 進入)
-  const handleSaveDeliverable = async (projId, deliverable) => {
+  const handleSaveDeliverable = async (projId, deliverable, mpSaving) => {
     try {
       await apiPost('/api/project/deliverable', {
-        projectId: projId, deliverable, actor: currentUser, actorRole: role
+        projectId: projId, deliverable, mpSaving, actor: currentUser, actorRole: role
       });
-      setProjects(prev => prev.map(p => p.id === projId ? { ...p, deliverable } : p));
+      setProjects(prev => prev.map(p => p.id === projId ? { ...p, deliverable, mpSaving } : p));
       setDeliverableProj(null);
-      showToast('✅ 具體產出項目已更新');
+      showToast('✅ 具體產出與效益已儲存');
     } catch (e) {
       showToast('❌ 儲存失敗：' + (e.message || '無法連線資料庫'));
     }
@@ -365,12 +699,92 @@ function App() {
   const [dragOverId, setDragOverId] = useState(null);
   const [confirmInfo, setConfirmInfo] = useState(null);         // {title, message, onConfirm} — 自製刪除確認視窗(取代 window.confirm)
 
+  // 資料載入完成後還原上次登入身分(重新整理免重登);成員名單已無此人(被移除/改名)則清除紀錄
+  React.useEffect(() => {
+    if (dataLoading || dataError || currentUser) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem('gantt_login') || 'null');
+      if (!saved || !saved.user || !saved.role) return;
+      if (saved.role === 'manager' || users.includes(saved.user)) {
+        handleLogin(saved.user, saved.role);
+      } else {
+        localStorage.removeItem('gantt_login');
+      }
+    } catch (e) {}
+  }, [dataLoading, dataError, currentUser, users]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // 多人共用時每 60 秒靜默刷新,讓其他人的變更自動出現(拖曳中暫停以免干擾;失敗靜默忽略,下輪再試)
   React.useEffect(() => {
     if (!currentUser || dragState) return;
     const timer = setInterval(() => { refreshData().catch(() => {}); }, 60000);
     return () => clearInterval(timer);
   }, [currentUser, dragState, refreshData]);
+
+  // --- 全域鍵盤導航（方向鍵平移甘特圖、Home/H 回本週、ESC 關閉最上層彈窗） ---
+  React.useEffect(() => {
+    if (!currentUser) return;
+    const handler = (e) => {
+      // 中文組字中略過
+      if (e.isComposing) return;
+      // 焦點在表單元素時略過（搜尋框、輸入框等）
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      // ESC：關閉最上層 Modal/Panel（優先序由內到外）;
+      // 表單型視窗有未儲存內容(MODAL_DIRTY)時,先跳確認避免默默丟失輸入
+      if (e.key === 'Escape') {
+        const closeGuard = (closer) => {
+          if (MODAL_DIRTY) {
+            setConfirmInfo({
+              title: '放棄未儲存的內容？',
+              message: '視窗內有尚未儲存的修改，關閉後將會遺失。',
+              confirmLabel: '放棄並關閉',
+              onConfirm: () => { MODAL_DIRTY = false; setConfirmInfo(null); closer(); }
+            });
+          } else closer();
+        };
+        if (confirmInfo) { setConfirmInfo(null); e.preventDefault(); return; }
+        if (selectedTaskInfo) { closeGuard(() => setSelectedTaskInfo(null)); e.preventDefault(); return; }
+        if (deliverableProj) { closeGuard(() => setDeliverableProj(null)); e.preventDefault(); return; }
+        if (editingProject) { closeGuard(() => setEditingProject(null)); e.preventDefault(); return; }
+        if (addingInterval) { closeGuard(() => setAddingInterval(null)); e.preventDefault(); return; }
+        if (showExtraNoteModal) { closeGuard(() => setShowExtraNoteModal(false)); e.preventDefault(); return; }
+        if (showWeeklyPlanModal) { closeGuard(() => setShowWeeklyPlanModal(false)); e.preventDefault(); return; }
+        if (showWeeklyReport) { setShowWeeklyReport(false); e.preventDefault(); return; }
+        if (showPendingPanel) { setShowPendingPanel(false); e.preventDefault(); return; }
+        if (showAuditPanel) { setShowAuditPanel(false); e.preventDefault(); return; }
+        if (showMemberPanel) { setShowMemberPanel(false); e.preventDefault(); return; }
+        if (showDeadlinePanel) { setShowDeadlinePanel(false); e.preventDefault(); return; }
+        return;
+      }
+
+      // 以下導航快捷鍵：任何 Modal/Panel 開啟時不觸發
+      const isAnyModalOpen = !!(confirmInfo || selectedTaskInfo || deliverableProj || editingProject || addingInterval || showExtraNoteModal || showWeeklyPlanModal || showWeeklyReport || showPendingPanel || showAuditPanel || showMemberPanel || showDeadlinePanel);
+      if (isAnyModalOpen) return;
+
+      // Home 或 H：回到本週
+      if (e.key === 'Home' || e.key === 'h' || e.key === 'H') {
+        e.preventDefault();
+        goToCurrentWeek();
+        return;
+      }
+
+      // 方向鍵：僅在週檢視模式下平移甘特圖
+      if (!isOverview && !isResults) {
+        const el = ganttRef.current;
+        if (!el) return;
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          smoothScrollLeftTo(el, el.scrollLeft - (e.shiftKey ? weekW : weekW * 4));
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          smoothScrollLeftTo(el, el.scrollLeft + (e.shiftKey ? weekW : weekW * 4));
+        }
+      }
+    };
+    window.addEventListener('keydown', handler, true);   // capture phase
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [currentUser, weekW, isOverview, isResults, confirmInfo, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showAuditPanel, showMemberPanel, showDeadlinePanel, goToCurrentWeek]);
 
   const existingCategories = useMemo(
     () => [...new Set(projects.map(p => p.category).filter(Boolean))].sort(),
@@ -410,7 +824,21 @@ function App() {
         try {
           await apiPost('/api/project/delete', { projectId: proj.id, actor: currentUser, actorRole: role });
           await refreshData();
-          showToast('✅ 專案已刪除');
+          // 10 秒內可一鍵復原(軟刪除還原,含其計畫區間)
+          showToast(`✅ 專案「${proj.name}」已刪除`, {
+            action: {
+              label: '復原',
+              onClick: async () => {
+                try {
+                  await apiPost('/api/project/restore', { projectId: proj.id, actor: currentUser, actorRole: role });
+                  await refreshData();
+                  showToast('✅ 專案已復原');
+                } catch (e) {
+                  showToast('❌ 復原失敗：' + (e.message || '無法連線資料庫'));
+                }
+              }
+            }
+          });
         } catch (e) {
           showToast('❌ 刪除失敗：' + (e.message || '無法連線資料庫'));
         }
@@ -442,7 +870,20 @@ function App() {
           await apiPost('/api/task/delete', { taskCode: task.id, actor: currentUser, actorRole: role });
           await refreshData();
           setSelectedTaskInfo(null);
-          showToast('✅ 計畫區間已刪除');
+          showToast(`✅ 計畫區間「${task.name}」已刪除`, {
+            action: {
+              label: '復原',
+              onClick: async () => {
+                try {
+                  await apiPost('/api/task/restore', { taskCode: task.id, actor: currentUser, actorRole: role });
+                  await refreshData();
+                  showToast('✅ 計畫區間已復原');
+                } catch (e) {
+                  showToast('❌ 復原失敗：' + (e.message || '無法連線資料庫'));
+                }
+              }
+            }
+          });
         } catch (e) {
           showToast('❌ 刪除失敗：' + (e.message || '無法連線資料庫'));
         }
@@ -520,7 +961,7 @@ function App() {
   const filteredProjects = useMemo(() => {
     const kw = searchText.trim().toLowerCase();
     return projects.filter(p => {
-      if (onlyMine && role === 'member' && p.owner !== currentUser) return false;
+      if (!isResults && onlyMine && role === 'member' && p.owner !== currentUser) return false;
       if (!onlyMine && ownerFilter !== 'all' && p.owner !== ownerFilter) return false;
       if (typeFilter.size > 0 && !typeFilter.has(p.type)) return false;
       if (kw) {
@@ -529,7 +970,7 @@ function App() {
       }
       return true;
     });
-  }, [projects, searchText, typeFilter, ownerFilter, onlyMine, role, currentUser]);
+  }, [projects, searchText, typeFilter, ownerFilter, onlyMine, role, currentUser, isResults]);
 
   // 主管未啟用搜尋/類型篩選時，沒有專案的成員(如剛加入的新同仁)也要顯示群組列,才能為其新增專案
   const groupedProjects = useMemo(() =>
@@ -591,6 +1032,17 @@ function App() {
     return list;
   }, [projects, taskLogs, todayWeek, role, currentUser]);
 
+  const myCompletedTasks = useMemo(() => {
+    if (role !== 'member') return [];
+    const list = [];
+    projects.filter(p => p.owner === currentUser).forEach(p => p.tasks.forEach(t => {
+      if (t.start <= todayWeek && t.end >= todayWeek && taskLogs[t.id]?.[todayWeek]) {
+        list.push({ proj: p, task: t, log: taskLogs[t.id][todayWeek] });
+      }
+    }));
+    return list;
+  }, [projects, taskLogs, todayWeek, role, currentUser]);
+
   // 「下週預計工作」也是強制回報項目:未填寫時計入待回報數,回報完最後一項任務會自動跳出填寫視窗
   const planPendingThisWeek = role === 'member' && !!currentUser && !weeklyPlans[currentUser]?.[todayWeek];
   const totalPendingCount = myPendingTasks.length + (planPendingThisWeek ? 1 : 0);
@@ -646,23 +1098,14 @@ function App() {
         {currentUser && (
           <div className="flex items-center space-x-2">
             {role === 'member' && (
-              <>
-                <button onClick={() => setShowPendingPanel(true)}
-                  className="relative bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition flex items-center border border-white/20">
-                  🔔 本週待回報
-                  {totalPendingCount > 0 && (
-                    <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold border-2 border-white/40 shadow">{totalPendingCount}</span>
-                  )}
-                </button>
-                <button onClick={() => setShowExtraNoteModal(true)}
-                  className={`relative px-3 py-1.5 rounded-md text-xs font-bold shadow transition border ${isViewingPast ? 'bg-slate-500 hover:bg-slate-400 border-slate-400/50 text-white' : extraNotes[currentUser]?.[currentWeek] ? 'bg-green-600 hover:bg-green-500 border-green-400/50 text-white' : 'bg-orange-500 hover:bg-orange-400 border-orange-400/50 text-white'}`}>
-                  {isViewingPast ? `🔒 檢視 W${String(currentWeek).padStart(2, '0')} 非專案事項` : extraNotes[currentUser]?.[currentWeek] ? '✓ 非專案事項(已填寫)' : '📝 非專案事項(未填寫)'}
-                </button>
-                <button onClick={() => setShowWeeklyPlanModal(true)}
-                  className={`relative px-3 py-1.5 rounded-md text-xs font-bold shadow transition border ${isViewingPast ? 'bg-slate-500 hover:bg-slate-400 border-slate-400/50 text-white' : weeklyPlans[currentUser]?.[currentWeek] ? 'bg-green-600 hover:bg-green-500 border-green-400/50 text-white' : 'bg-indigo-500 hover:bg-indigo-400 border-indigo-400/50 text-white'}`}>
-                  {isViewingPast ? `🔒 檢視 W${String(currentWeek).padStart(2, '0')} 下週預計` : weeklyPlans[currentUser]?.[currentWeek] ? '✓ 下週預計(已填寫)' : '📅 下週預計(未填寫)'}
-                </button>
-              </>
+              // 本週回報的三件事(任務打卡/下週預計/非專案事項)合併為單一入口;紅點=未回報任務+未填下週預計(非專案為選填不計)
+              <button onClick={() => setShowPendingPanel(true)}
+                className="relative bg-amber-500 hover:bg-amber-600 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold shadow-md transition flex items-center gap-1.5 border border-amber-400">
+                <span>📋 本週回報中心</span>
+                {totalPendingCount > 0 && (
+                  <span className="bg-red-600 text-white text-[11px] px-1.5 py-0.5 rounded-full font-black shadow leading-none">{totalPendingCount}</span>
+                )}
+              </button>
             )}
             {role === 'manager' && (
               <>
@@ -701,48 +1144,68 @@ function App() {
         <LoginScreen onLogin={handleLogin} users={users} year={scheduleYear} empId={empId} />
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden bg-white relative">
-          <div className="px-4 py-2 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white flex items-center gap-3 text-xs overflow-x-auto">
-            <div className="flex items-center flex-shrink-0">
-              <span className="font-black text-slate-900 text-sm">W{String(currentWeek).padStart(2, '0')}</span>
-              <span className="text-slate-600 ml-1 text-[10px]">{weekToMonth(currentWeek, months)} 概況</span>
-            </div>
-            {/* 回報率進度條 */}
-            <div className="flex items-center flex-shrink-0 min-w-[150px]">
-              <div className="flex-1 h-2 bg-slate-300 rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-500 ${weekStats.active > 0 && weekStats.reported === weekStats.active ? 'bg-green-600' : 'bg-indigo-600'}`}
-                  style={{ width: `${weekStats.active > 0 ? (weekStats.reported / weekStats.active) * 100 : 0}%` }}></div>
+          {isResults ? (
+            <div className="px-4 py-2 border-b border-slate-200 bg-gradient-to-r from-amber-50/80 via-white to-white flex items-center justify-between text-xs overflow-x-auto">
+              <div className="flex items-center gap-3">
+                <span className="font-black text-amber-800 text-sm">🎯 {scheduleYear} 年度成果與 MP 效益清單</span>
+                <span className="text-slate-500">檢視所有專案完工預計交付之具體產出與累計節省之 MP 人力</span>
               </div>
-              <span className="ml-2 font-bold text-slate-800 whitespace-nowrap">{weekStats.reported}/{weekStats.active} 已回報</span>
+              <div className="flex items-center gap-4">
+                <div className="bg-amber-100/80 border border-amber-300 text-amber-900 px-3 py-1 rounded-full font-bold">
+                  已填寫產出項目：{projects.filter(p => p.deliverable).length} / {projects.length} 案
+                </div>
+                <div className="bg-emerald-100/80 border border-emerald-300 text-emerald-900 px-3 py-1 rounded-full font-bold">
+                  💡 MP Saving：{projects.filter(p => p.mpSaving).length} 案
+                </div>
+              </div>
             </div>
-            <div className="h-6 border-l border-slate-200 flex-shrink-0"></div>
-            {/* 狀態分佈 */}
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              <StatChip label="有執行" value={weekStats.executed} className="bg-green-100 text-green-800 border-green-400" />
-              <StatChip label="Monitor" value={weekStats.monitor} className="bg-sky-100 text-sky-800 border-sky-400" />
-              <StatChip label="未執行" value={weekStats.notExec} className="bg-slate-200 text-slate-700 border-slate-400" />
-              <StatChip label="未回報" value={weekStats.pending} className={weekStats.pending > 0 ? 'bg-yellow-100 text-yellow-800 border-yellow-500' : 'bg-slate-100 text-slate-500 border-slate-300'} />
-              <button onClick={() => setShowDeadlinePanel(true)} title="點擊檢視即將到期清單"
-                className={`flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border transition ${deadlineTasks.length > 0 ? 'bg-orange-100 text-orange-800 hover:bg-orange-200 border-orange-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 border-slate-300'}`}>
-                <span className="font-medium text-[11px]">⏰ 即將到期</span>
-                <span className="text-[13px] leading-none">{deadlineTasks.length}</span>
-                <span className="text-[11px]">›</span>
-              </button>
+          ) : (
+            <div className="px-4 py-2 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white flex items-center gap-3 text-xs overflow-x-auto">
+              <div className="flex items-center flex-shrink-0">
+                <span className="font-black text-slate-900 text-sm">W{String(currentWeek).padStart(2, '0')}</span>
+                <span className="text-slate-600 ml-1 text-[10px]">{weekToMonth(currentWeek, months)} 概況</span>
+              </div>
+              {/* 回報率進度條 */}
+              <div className="flex items-center flex-shrink-0 min-w-[150px]">
+                <div className="flex-1 h-2 bg-slate-300 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all duration-500 ${weekStats.active > 0 && weekStats.reported === weekStats.active ? 'bg-green-600' : 'bg-indigo-600'}`}
+                    style={{ width: `${weekStats.active > 0 ? (weekStats.reported / weekStats.active) * 100 : 0}%` }}></div>
+                </div>
+                <span className="ml-2 font-bold text-slate-800 whitespace-nowrap">{weekStats.reported}/{weekStats.active} 已回報</span>
+              </div>
+              <div className="h-6 border-l border-slate-200 flex-shrink-0"></div>
+              {/* 狀態分佈 */}
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <StatChip label="有執行" value={weekStats.executed} className="bg-green-100 text-green-800 border-green-400" />
+                <StatChip label="Monitor" value={weekStats.monitor} className="bg-sky-100 text-sky-800 border-sky-400" />
+                <StatChip label="未執行" value={weekStats.notExec} className="bg-slate-200 text-slate-700 border-slate-400" />
+                <StatChip label="未回報" value={weekStats.pending} className={weekStats.pending > 0 ? 'bg-yellow-100 text-yellow-800 border-yellow-500' : 'bg-slate-100 text-slate-500 border-slate-300'} />
+                <button onClick={() => setShowDeadlinePanel(true)} title="點擊檢視即將到期清單"
+                  className={`flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border transition ${deadlineTasks.length > 0 ? 'bg-orange-100 text-orange-800 hover:bg-orange-200 border-orange-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 border-slate-300'}`}>
+                  <span className="font-medium text-[11px]">⏰ 即將到期</span>
+                  <span className="text-[13px] leading-none">{deadlineTasks.length}</span>
+                  <span className="text-[11px]">›</span>
+                </button>
+              </div>
+              <div className="flex-1 min-w-[8px]"></div>
+              {/* 常駐精簡圖例(不用 hidden xl:flex,窄螢幕也要看得到):標籤精簡+title 補完整說明;
+                  「⏰即將到期」不放圖例(左側同名按鈕已表達,避免同列重複出現) */}
+              <div className="flex-shrink-0 flex items-center gap-2 text-[11px] text-slate-600 border border-slate-200 rounded-lg bg-white px-2 py-0.5">
+                <span className="flex items-center" title="黃色斜紋條＝計畫區間(排定的起訖週)"><span className="w-3 h-2.5 mr-1 rounded-sm border" style={{ backgroundImage: 'repeating-linear-gradient(45deg,#FFF6D6,#FFF6D6 3px,#FDEDB8 3px,#FDEDB8 6px)', borderColor: '#B45309' }}></span>計畫</span>
+                <span className="flex items-center" title="綠色＝該週回報「有執行」"><span className="w-2.5 h-2.5 bg-green-700 mr-1 rounded-sm"></span>有執行</span>
+                <span className="flex items-center" title="藍色＝該週回報「Monitor(例行監控)」"><span className="w-2.5 h-2.5 bg-sky-700 mr-1 rounded-sm"></span>Monitor</span>
+                <span className="flex items-center" title="灰色＝該週回報「未執行」"><span className="w-2.5 h-2.5 bg-slate-500 mr-1 rounded-sm"></span>未執行</span>
+                <span className="flex items-center" title="紅框＋❗＝本週排定但尚未回報的任務"><span className="w-3 h-2.5 mr-1 rounded-sm border-2 border-red-400 bg-white"></span>❗待回報</span>
+              </div>
             </div>
-            <div className="flex-1 min-w-[8px]"></div>
-            <div className="flex-shrink-0 flex items-center gap-2 text-slate-600">
-              <span className="hidden xl:flex items-center"><span className="w-3 h-2.5 mr-1 rounded-sm border" style={{ backgroundImage: 'repeating-linear-gradient(45deg,#FFF6D6,#FFF6D6 3px,#FDEDB8 3px,#FDEDB8 6px)', borderColor: '#B45309' }}></span>計畫區間</span>
-              <span className="hidden xl:flex items-center"><span className="w-2.5 h-2.5 bg-green-700 mr-1 rounded-sm"></span>有執行</span>
-              <span className="hidden xl:flex items-center"><span className="w-2.5 h-2.5 bg-sky-700 mr-1 rounded-sm"></span>Monitor</span>
-              <span className="hidden xl:flex items-center"><span className="w-2.5 h-2.5 bg-slate-500 mr-1 rounded-sm"></span>未執行</span>
-              <span className="hidden xl:flex items-center"><span className="w-3 h-2.5 mr-1 rounded-sm border-2 border-orange-500 bg-white"></span>⏰ 即將到期</span>
-            </div>
-          </div>
+          )}
 
-          <div className="bg-white px-4 py-2 border-b border-slate-200 flex flex-wrap items-center gap-2 text-xs z-30">
+          {/* 工具列:單列不斷行(nowrap+水平捲動保險),操作元件縮小一號(內容區才是主角) */}
+          <div className="bg-white px-4 py-1.5 border-b border-slate-200 flex flex-nowrap items-center gap-1.5 text-[11px] z-30 overflow-x-auto [&>*]:flex-shrink-0">
             <div className="relative">
               <svg className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" /></svg>
-              <input value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="搜尋專案 / 任務 / 分類…"
-                className="pl-7 pr-6 py-1.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition w-52" />
+              <input value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="搜尋專案 / 任務…"
+                className="pl-7 pr-6 py-1 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition w-44 focus:w-52" />
               {searchText && <button onClick={() => setSearchText('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold px-1">×</button>}
             </div>
 
@@ -751,7 +1214,7 @@ function App() {
                 const on = typeFilter.has(key);
                 return (
                   <button key={key} onClick={() => toggleTypeFilter(key)}
-                    className={`px-2 py-1 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`}
+                    className={`px-1.5 py-0.5 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`}
                     title={meta.label}>
                     {key}·{meta.label}
                   </button>
@@ -763,13 +1226,13 @@ function App() {
             <div className="h-5 border-l border-slate-200"></div>
 
             {role === 'member' ? (
-              <label className="flex items-center space-x-1.5 cursor-pointer select-none bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5">
+              <label className="flex items-center space-x-1.5 cursor-pointer select-none bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
                 <input type="checkbox" checked={onlyMine} onChange={e => setOnlyMine(e.target.checked)} className="w-3.5 h-3.5 rounded text-blue-600" />
                 <span className="font-medium text-slate-700">只看我的專案</span>
               </label>
             ) : (
               <select value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}
-                className="border border-slate-300 rounded-lg px-2 py-1.5 outline-none bg-white font-medium text-slate-700">
+                className="border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white font-medium text-slate-700">
                 <option value="all">全部成員</option>
                 {users.map(u => <option key={u} value={u}>{u}</option>)}
               </select>
@@ -780,39 +1243,78 @@ function App() {
             <select value={scheduleYear}
               onChange={e => { const y = parseInt(e.target.value); setScheduleYear(y); setCurrentWeek(getTodayWeek(y)); }}
               title="切換排程年度(年度資料由 DB 的 ScheduleWeeks 決定)"
-              className="border border-slate-300 rounded-lg px-2 py-1.5 outline-none bg-white font-bold text-slate-700">
+              className="border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white font-bold text-slate-700">
               {(years.length ? years : [scheduleYear]).map(y => <option key={y} value={y}>{y} 年度</option>)}
             </select>
 
             {/* 檢視切換:週檢視=可打卡操作(可水平捲動);年度總覽=52 週縮放進一頁供主管瀏覽全貌 */}
+            {/* 檢視切換: 週檢視=可打卡操作; 年度總覽=整年全景; 成果清單=具體產出與MP總表 */}
             <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: NAVY }}>
-              <button onClick={() => setIsOverview(false)}
-                className={`px-2.5 py-1.5 font-bold transition ${!isOverview ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
-                style={!isOverview ? { backgroundColor: NAVY } : {}}>週檢視</button>
-              <button onClick={() => setIsOverview(true)}
-                className={`px-2.5 py-1.5 font-bold transition ${isOverview ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
-                style={isOverview ? { backgroundColor: NAVY } : {}}
+              <button onClick={() => { setIsOverview(false); setIsResults(false); }}
+                className={`px-2 py-1 font-bold transition ${!isOverview && !isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
+                style={!isOverview && !isResults ? { backgroundColor: NAVY } : {}}>週檢視</button>
+              <button onClick={() => { setIsOverview(true); setIsResults(false); }}
+                className={`px-2 py-1 font-bold transition ${isOverview && !isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
+                style={isOverview && !isResults ? { backgroundColor: NAVY } : {}}
                 title="整年 52 週自動縮放至一個畫面寬(無水平捲軸),滑鼠停留甘特條可看細節">年度總覽</button>
+              <button onClick={() => { setIsOverview(false); setIsResults(true); }}
+                className={`px-2 py-1 font-bold transition ${isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
+                style={isResults ? { backgroundColor: NAVY } : {}}
+                title="檢視全年度所有專案的具體產出項目與 MP Saving 統計">成果清單</button>
             </div>
-            {!isOverview && (
-              <button onClick={goToCurrentWeek} className="flex items-center text-white px-2.5 py-1.5 rounded-lg font-bold shadow-sm transition hover:opacity-90" style={{ backgroundColor: NAVY }}>
+            {!isOverview && !isResults && (
+              <button onClick={goToCurrentWeek} title={`回到本週 W${String(todayWeek).padStart(2, '0')} 並置中`}
+                className="flex items-center text-white px-2 py-1 rounded-lg font-bold shadow-sm transition hover:opacity-90" style={{ backgroundColor: NAVY }}>
                 <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                回到本週 W{String(todayWeek).padStart(2, '0')}
+                回到本週
               </button>
             )}
-            {!isOverview && (
-              <button onClick={() => setIsCompact(!isCompact)} className="text-slate-600 bg-slate-100 hover:bg-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-200 font-medium transition">
+            <div className="h-5 w-px bg-slate-300/80 mx-1 flex-shrink-0"></div>
+            {!isOverview && !isResults && (
+              <button onClick={() => setIsCompact(!isCompact)} className="text-slate-600 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-200 font-medium transition">
                 {isCompact ? '寬鬆模式' : '緊湊模式'}
               </button>
             )}
-            <button onClick={() => setCollapsedOwners(new Set())} className="text-blue-600 hover:text-blue-800 font-medium">展開全部</button>
+            {role === 'manager' && (
+              // 長文字縮短:完整說明放 title;開啟時下方另有整條琥珀色警示列,資訊不會漏
+              <button onClick={toggleRetroCheckin}
+                className={`px-2 py-1 rounded-lg font-bold border shadow-sm transition flex items-center gap-1 ${allowRetroCheckin ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'}`}
+                title={allowRetroCheckin ? '目前開放全體成員回報/調正今年度的所有歷史週次紀錄，點擊關閉' : '目前成員僅能回報當週，點擊開放歷史補登'}>
+                <span>{allowRetroCheckin ? '🔓 補登 ON' : '🔒 僅限當週'}</span>
+              </button>
+            )}
+            <div className="h-5 w-px bg-slate-300/80 mx-1 flex-shrink-0"></div>
+            <button onClick={() => setCollapsedOwners(new Set())} title="展開全部成員群組" className="text-blue-600 hover:text-blue-800 font-medium">展開</button>
             <span className="text-slate-300">|</span>
-            <button onClick={() => setCollapsedOwners(new Set(users))} className="text-blue-600 hover:text-blue-800 font-medium">收合全部</button>
+            <button onClick={() => setCollapsedOwners(new Set(users))} title="收合全部成員群組" className="text-blue-600 hover:text-blue-800 font-medium">收合</button>
           </div>
 
+          {allowRetroCheckin && (
+            <div className="bg-amber-50 border-b border-amber-300 px-4 py-2 flex items-center justify-between text-xs text-amber-900 font-bold z-30">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">⚠️</span>
+                <span>系統已開啟「全體成員歷史進度補登與調正」豁免期：目前可對 W{String(todayWeek).padStart(2, '0')} 以前之所有歷史週次進行任務與非專案回報。</span>
+              </div>
+              {role === 'manager' && (
+                <button onClick={toggleRetroCheckin} className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold shadow-sm transition">
+                  關閉豁免期
+                </button>
+              )}
+            </div>
+          )}
+
           <div ref={ganttRef} className="flex-1 overflow-auto bg-slate-50 relative">
-            {/* 年度總覽:表格寬=100%、名稱單欄 240px、週欄由 fixed layout 自動均分 → 整年無水平捲軸且隨視窗縮放 */}
-            <table className="border-collapse bg-white" style={{ tableLayout: 'fixed', width: isOverview ? '100%' : 490 + weeksTotal * weekW }}>
+            {isResults ? (
+              <ResultsView
+                projects={filteredProjects}
+                role={role}
+                currentUser={currentUser}
+                onEditDeliverable={(proj) => setDeliverableProj(proj)}
+                starredIds={starredIds}
+                toggleStar={toggleStar}
+              />
+            ) : (
+              <table className="border-collapse bg-white" style={{ tableLayout: 'fixed', width: isOverview ? '100%' : 490 + weeksTotal * weekW }}>
               <colgroup>
                 {!isOverview && <col style={{ width: 28 }} />}
                 {!isOverview && <col style={{ width: 42 }} />}
@@ -835,9 +1337,9 @@ function App() {
                   ))}
                 </tr>
                 {!isOverview && <tr className="bg-slate-100 text-slate-600 text-[11px]">
-                  <th className="border-r border-b border-slate-300 p-1 sticky left-0 bg-slate-100 z-50 text-center font-medium" style={{ width: 28 }}>No</th>
-                  <th className="border-r border-b border-slate-300 p-1 sticky bg-slate-100 z-50 text-center font-medium" style={{ width: 42, left: 28 }}>分類</th>
-                  <th className="border-r border-b border-slate-300 p-1 sticky bg-slate-100 z-50 shadow-[2px_0_5px_rgba(0,0,0,0.05)] text-left pl-3 font-medium" style={{ width: 420, left: 70 }}>專案名稱 (Project Name)</th>
+                  <th className="border-r border-b border-slate-300 p-1 sticky left-0 z-50 text-center font-medium" style={{ width: 28, minWidth: 28, maxWidth: 28, backgroundColor: '#F1F5F9' }}>No</th>
+                  <th className="border-r border-b border-slate-300 p-1 sticky z-50 text-center font-medium" style={{ width: 42, minWidth: 42, maxWidth: 42, left: 28, backgroundColor: '#F1F5F9' }}>分類</th>
+                  <th className="border-r border-b border-slate-300 p-1 sticky z-50 shadow-[3px_0_6px_rgba(0,0,0,0.08)] text-left pl-3 font-medium" style={{ width: 420, minWidth: 420, maxWidth: 420, left: 70, backgroundColor: '#F1F5F9' }}>專案名稱 (Project Name)</th>
                   {Array.from({ length: weeksTotal }).map((_, i) => {
                     const weekNum = i + 1;
                     const isCurrent = weekNum === currentWeek;
@@ -873,8 +1375,8 @@ function App() {
                   return (
                     <React.Fragment key={group.owner}>
                       {/* --- 修改點 1: 移除群組標題背景的 /95 透明度，使用純色 bg-blue-50 --- */}
-                      <tr onClick={() => toggleOwnerCollapse(group.owner)} className="group/header bg-blue-50 hover:bg-blue-100 cursor-pointer border-b border-blue-100 transition-colors">
-                        <td colSpan={isOverview ? 1 : 3} className="sticky left-0 z-40 bg-blue-50 group-hover/header:bg-blue-100 border-r border-blue-200 p-0 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                      <tr onClick={() => toggleOwnerCollapse(group.owner)} className="group/header bg-[#EFF6FF] hover:bg-[#DBEAFE] cursor-pointer border-b border-blue-100 transition-colors">
+                        <td colSpan={isOverview ? 1 : 3} className="sticky left-0 z-40 border-r border-blue-200 p-0 shadow-[3px_0_6px_rgba(0,0,0,0.06)]" style={{ width: isOverview ? 240 : 490, minWidth: isOverview ? 240 : 490, maxWidth: isOverview ? 240 : 490, backgroundColor: '#EFF6FF' }}>
                           <div className="flex items-center text-blue-900 font-bold text-[13px] px-2 py-1.5 border-l-4" style={{ borderColor: NAVY }}>
                             <svg className={`w-4 h-4 mr-1 text-blue-500 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                             <div className="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs mr-2 flex-shrink-0" style={{ backgroundColor: NAVY }}>{group.owner[0]}</div>
@@ -915,11 +1417,11 @@ function App() {
                         <tr key={proj.id}
                           onDragOver={role === 'manager' && dragState && dragState.owner === group.owner ? (e) => { e.preventDefault(); if (dragOverId !== proj.id) setDragOverId(proj.id); } : undefined}
                           onDrop={role === 'manager' && dragState ? (e) => { e.preventDefault(); handleReorderProjects(group.owner, dragState.id, proj.id); setDragState(null); setDragOverId(null); } : undefined}
-                          className={`hover:bg-slate-50 group/row border-b border-slate-300 ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`}>
-                          {!isOverview && <td className={`text-center sticky left-0 bg-white group-hover/row:bg-slate-50 z-30 border-r border-slate-200 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`}>{idx + 1}</td>}
-                          {!isOverview && <td className={`text-center sticky bg-white group-hover/row:bg-slate-50 z-30 border-r border-slate-200 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ left: 28 }}>{proj.category}</td>}
-                          {/* --- 修改點 2: 將 bg-white 實色直接套用到 <td> 本身，避免裡層高度撐不滿而露空 --- */}
-                          <td className="sticky bg-white group-hover/row:bg-slate-50 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.03)] border-r border-slate-300 p-0" style={{ left: isOverview ? 0 : 70 }}>
+                          className={`group/row border-b border-slate-300 transition-colors ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`}>
+                          {!isOverview && <td className={`text-center sticky left-0 bg-white group-hover/row:bg-[#EFF6FF] transition-colors z-30 border-r border-slate-200 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ width: 28, minWidth: 28, maxWidth: 28 }}>{idx + 1}</td>}
+                          {!isOverview && <td className={`text-center sticky bg-white group-hover/row:bg-[#EFF6FF] transition-colors z-30 border-r border-slate-200 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ width: 42, minWidth: 42, maxWidth: 42, left: 28 }}>{proj.category}</td>}
+                          {/* --- 嚴格設定 100% 純實色背景與絕對寬度，防止橫向捲動時甘特條穿透或重疊 --- */}
+                          <td className="sticky bg-white group-hover/row:bg-[#EFF6FF] transition-colors z-30 shadow-[4px_0_8px_rgba(0,0,0,0.08)] border-r border-slate-300 p-0" style={{ width: isOverview ? 240 : 420, minWidth: isOverview ? 240 : 420, maxWidth: isOverview ? 240 : 420, left: isOverview ? 0 : 70 }}>
                             <div className="w-full h-full flex items-center px-2 overflow-hidden">
                               {role === 'manager' && !isOverview && (
                                 isFilteringRows ? (
@@ -935,6 +1437,9 @@ function App() {
                                 )
                               )}
                               <div className={`flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`}>{proj.type.toUpperCase()}</div>
+                              {starredIds.has(proj.id) && (
+                                <span className="flex-shrink-0 mr-1 text-amber-500 font-bold" title="主管重點關注項目">★</span>
+                              )}
                               {/* 範本 B:專案名稱近全黑+加粗,寬鬆模式 15px(預設)/緊湊 13px/總覽 12.5px */}
                               <span className={`flex-1 min-w-0 truncate font-semibold text-slate-900 ${isOverview ? 'text-[12.5px]' : isCompact ? 'text-[13px]' : 'text-[15px]'}`} title={proj.name}>{proj.name}</span>
                               {/* 具體產出項目(專案執行完畢後的成果)入口:已填=實色,未填=淡色;負責人與主管可編輯,其他人唯讀 */}
@@ -1009,21 +1514,22 @@ function App() {
                                       const isCur = wn === currentWeek;
                                       return (
                                         <div key={w}
-                                          className={`absolute inset-y-0 pointer-events-none ${STATUS_META[log.status]?.dot || 'bg-blue-500'} ${isCur ? 'opacity-95' : 'opacity-60'}`}
+                                          className={`absolute bottom-0 pointer-events-none ${STATUS_META[log.status]?.dot || 'bg-blue-500'}`}
                                           style={{
                                             left: `${((wn - task.start) / spanWeeks) * 100}%`,
                                             width: `${100 / spanWeeks}%`,
-                                            boxShadow: isCur ? 'inset 0 0 0 1.5px rgba(255,255,255,0.6)' : 'none'
+                                            height: isCur ? '5px' : '4px',
+                                            opacity: isCur ? 0.95 : 0.75
                                           }}
-                                          title={`W${w}: ${STATUS_META[log.status]?.label}`}></div>
+                                          title={`W${w}: ${STATUS_META[log.status]?.label}${log.reporterRole === 'manager' ? ' (主管補登)' : ''}`}></div>
                                       );
                                     })}
                                     
-                                    {/* 年度總覽:條上不顯字(壓縮後塞不下),以色塊+tooltip 傳達;週檢視字級加大 */}
+                                    {/* 年度總覽:條上不顯字(壓縮後塞不下),以色塊+tooltip 傳達;週檢視純粹顯示任務名稱 */}
                                     {!isOverview && (
                                       <span className={`relative z-10 truncate px-1.5 whitespace-nowrap ${isCompact ? 'text-[10px]' : 'text-[12px]'} ${textClass}`}
                                         style={{ textShadow: '0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.75)' }}>
-                                        {isPending && '❗'}{deadlineSoon && '⏰'}{!isCompact && weekLog?.note ? `${task.name} ➔ ${weekLog.note}` : task.name}
+                                        {isPending && '❗'}{deadlineSoon && '⏰'}{task.name}
                                       </span>
                                     )}
                                   </div>
@@ -1039,6 +1545,7 @@ function App() {
                 })}
               </tbody>
             </table>
+            )}
           </div>
         </div>
       )}
@@ -1050,6 +1557,7 @@ function App() {
             <div className="font-bold text-[13px] mb-1 text-yellow-200">{tooltip.proj.name}</div>
             <div className="text-slate-300 mb-0.5">👤 {tooltip.proj.owner}　·　{tooltip.proj.category}</div>
             {tooltip.proj.deliverable && <div className="text-amber-200/90 mb-0.5">🎯 {tooltip.proj.deliverable}</div>}
+            {tooltip.proj.mpSaving && <div className="text-emerald-300 font-bold mb-0.5">💡 MP 節省：{tooltip.proj.mpSaving}</div>}
             <div className="text-slate-300">📅 {tooltip.task.name}</div>
             <div className="text-slate-400">W{tooltip.task.start} – W{tooltip.task.end}（{weekToMonth(tooltip.task.start, months)} ~ {weekToMonth(tooltip.task.end, months)}）</div>
             {isTaskDeadlineSoon(tooltip.task) && (
@@ -1060,7 +1568,10 @@ function App() {
             )}
             {tooltip.weekLog && (
               <div className="mt-2 pt-2 border-t border-slate-700">
-                <div className="font-bold mb-0.5">{STATUS_META[tooltip.weekLog.status]?.icon} 本週 W{currentWeek}：{STATUS_META[tooltip.weekLog.status]?.label}</div>
+                <div className="font-bold mb-0.5">
+                  {STATUS_META[tooltip.weekLog.status]?.icon} 本週 W{currentWeek}：{STATUS_META[tooltip.weekLog.status]?.label}
+                  {tooltip.weekLog.reporterRole === 'manager' && <span className="ml-1 text-yellow-300 text-[11px]">✏️(主管補登)</span>}
+                </div>
                 {tooltip.weekLog.note && <div className="text-slate-300 whitespace-pre-wrap">{tooltip.weekLog.note}</div>}
               </div>
             )}
@@ -1077,7 +1588,7 @@ function App() {
       {selectedTaskInfo && (
         <TaskModal
           info={selectedTaskInfo} role={role} currentUser={currentUser} currentWeek={currentWeek} todayWeek={todayWeek}
-          weeksTotal={weeksTotal}
+          weeksTotal={weeksTotal} allowRetroCheckin={allowRetroCheckin}
           onClose={() => setSelectedTaskInfo(null)} onSaveLog={handleSaveLog} onUpdateTaskDetails={handleUpdateTaskDetails}
           onDeleteTask={handleDeleteTask} onUpdateScore={handleUpdateScore}
         />
@@ -1085,14 +1596,14 @@ function App() {
       {showExtraNoteModal && (
         <ExtraNoteModal
           currentWeek={currentWeek} initialNote={extraNotes[currentUser]?.[currentWeek] || ''}
-          readOnly={isViewingPast}
+          readOnly={isViewingPast && !allowRetroCheckin}
           onClose={() => setShowExtraNoteModal(false)} onSave={handleSaveExtraNote}
         />
       )}
       {showWeeklyPlanModal && (
         <WeeklyPlanModal
           currentWeek={currentWeek} initialNote={weeklyPlans[currentUser]?.[currentWeek] || ''}
-          readOnly={isViewingPast}
+          readOnly={isViewingPast && !allowRetroCheckin}
           onClose={() => setShowWeeklyPlanModal(false)} onSave={handleSaveWeeklyPlan}
         />
       )}
@@ -1113,24 +1624,33 @@ function App() {
       )}
       {showPendingPanel && (
         <PendingPanel
-          pending={myPendingTasks} currentWeek={todayWeek} planPending={planPendingThisWeek}
+          pending={myPendingTasks}
+          completed={myCompletedTasks}
+          currentWeek={todayWeek}
+          planPending={planPendingThisWeek}
+          extraFilled={!!extraNotes[currentUser]?.[todayWeek]}
           onFillPlan={() => {
             setShowPendingPanel(false);
             setCurrentWeek(todayWeek);
             setShowWeeklyPlanModal(true);
           }}
-          onClose={() => setShowPendingPanel(false)}
-          onSelect={(item) => {
+          onFillExtra={() => {
             setShowPendingPanel(false);
             setCurrentWeek(todayWeek);
-            setSelectedTaskInfo({ proj: item.proj, task: item.task, isActiveThisWeek: true, weekLog: undefined });
+            setShowExtraNoteModal(true);
+          }}
+          onClose={() => setShowPendingPanel(false)}
+          onSelect={(item, log) => {
+            setShowPendingPanel(false);
+            setCurrentWeek(todayWeek);
+            setSelectedTaskInfo({ proj: item.proj, task: item.task, isActiveThisWeek: true, weekLog: log });
           }}
         />
       )}
       {showWeeklyReport && (
         <WeeklyReportDashboard
           currentWeek={currentWeek} year={scheduleYear} users={users} projects={projects} taskLogs={taskLogs} extraNotes={extraNotes}
-          weeklyPlans={weeklyPlans}
+          weeklyPlans={weeklyPlans} currentUser={currentUser} role={role}
           onClose={() => setShowWeeklyReport(false)}
         />
       )}
@@ -1167,8 +1687,17 @@ function App() {
       )}
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[300] bg-slate-900 text-white text-sm font-bold px-5 py-3 rounded-xl shadow-2xl border border-slate-700 flex items-center animate-bounce">
-          {toast}
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[300] bg-slate-900 text-white text-sm font-bold px-5 py-3 rounded-xl shadow-2xl border flex items-center gap-3 ${toast.isError ? 'border-red-500' : 'border-slate-700 animate-bounce'}`}>
+          <span className="whitespace-pre-wrap">{toast.msg}</span>
+          {toast.action && (
+            <button onClick={() => { dismissToast(); toast.action.onClick(); }}
+              className="flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-slate-900 px-3 py-1 rounded-lg text-xs font-black transition">
+              ↩ {toast.action.label}
+            </button>
+          )}
+          {(toast.isError || toast.action) && (
+            <button onClick={dismissToast} className="flex-shrink-0 text-white/50 hover:text-white font-bold px-1" title="關閉">✕</button>
+          )}
         </div>
       )}
     </div>
@@ -1252,12 +1781,12 @@ const SCORE_OPTIONS = [
   { value: 1, label: '主動承擔' }
 ];
 
-function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal = WEEKS_TOTAL, onClose, onSaveLog, onUpdateTaskDetails, onDeleteTask, onUpdateScore }) {
+function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal = WEEKS_TOTAL, allowRetroCheckin, onClose, onSaveLog, onUpdateTaskDetails, onDeleteTask, onUpdateScore }) {
   const { proj, task, isActiveThisWeek, weekLog } = info;
   const isManager = role === 'manager';
   const isMyTask = proj.owner === currentUser;
   const isReportingWeek = currentWeek === todayWeek;
-  const canClockIn = role === 'member' && isMyTask && isActiveThisWeek && isReportingWeek;
+  const canClockIn = (isManager && isActiveThisWeek) || (role === 'member' && isMyTask && isActiveThisWeek && (isReportingWeek || (allowRetroCheckin && currentWeek <= todayWeek)));
   const score = weekLog ? Number(weekLog.score ?? 1) : 0;
 
   const [status, setStatus] = useState(weekLog?.status || null);
@@ -1265,20 +1794,26 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
   const [taskName, setTaskName] = useState(task.name);
   const [startWeek, setStartWeek] = useState(task.start);
   const [endWeek, setEndWeek] = useState(task.end);
+  const [saving, setSaving] = useState(false);   // 防連點:送出中鎖定按鈕
+  useModalDirtyReset();
   const [scheduleError, setScheduleError] = useState('');
   const [noteError, setNoteError] = useState('');
 
-  const submitLog = () => {
+  const submitLog = async () => {
+    if (saving) return;
     if (!status) { setNoteError('請先選擇本週狀態'); return; }
     if (status === 'executed' && !note.trim()) { setNoteError('請填寫實際工作內容，才能讓團隊了解進度'); return; }
-    onSaveLog(task.id, status, note.trim());
+    setSaving(true);
+    try { await onSaveLog(task.id, status, note.trim()); } finally { setSaving(false); }
   };
 
-  const submitSchedule = () => {
+  const submitSchedule = async () => {
+    if (saving) return;
     const s = parseInt(startWeek), e = parseInt(endWeek);
     if (!taskName.trim()) { setScheduleError('任務名稱不可空白'); return; }
     if (isNaN(s) || isNaN(e) || s < 1 || e > weeksTotal || s > e) { setScheduleError(`週次需介於 1–${weeksTotal}，且開始週不可晚於結束週`); return; }
-    onUpdateTaskDetails(proj.id, task.id, taskName.trim(), s, e);
+    setSaving(true);
+    try { await onUpdateTaskDetails(proj.id, task.id, taskName.trim(), s, e); } finally { setSaving(false); }
   };
 
   return (
@@ -1301,24 +1836,24 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
               <label className="text-sm font-bold text-slate-800">專案排程與預計事項</label>
               {isManager && <span className="text-[10px] bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded font-bold">主管可編輯</span>}
             </div>
-            <input type="text" value={taskName} onChange={e => { setTaskName(e.target.value); setScheduleError(''); }} disabled={!isManager}
+            <input type="text" value={taskName} onChange={e => { setTaskName(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
               className="w-full border border-slate-300 rounded-md p-2 text-sm mb-3 text-center disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" />
             <div className="flex space-x-3 items-center">
               <div className="w-1/2">
                 <label className="text-[10px] text-slate-400 font-bold">開始週</label>
-                <input type="number" min="1" max="52" value={startWeek} onChange={e => { setStartWeek(e.target.value); setScheduleError(''); }} disabled={!isManager}
+                <input type="number" min="1" max={weeksTotal} value={startWeek} onChange={e => { setStartWeek(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
                   className="w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" />
               </div>
               <div className="w-1/2">
                 <label className="text-[10px] text-slate-400 font-bold">結束週</label>
-                <input type="number" min="1" max="52" value={endWeek} onChange={e => { setEndWeek(e.target.value); setScheduleError(''); }} disabled={!isManager}
+                <input type="number" min="1" max={weeksTotal} value={endWeek} onChange={e => { setEndWeek(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
                   className="w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" />
               </div>
             </div>
             {scheduleError && <div className="mt-2 text-xs text-red-600 font-bold">{scheduleError}</div>}
             {isManager && (
               <div className="mt-3 flex gap-2">
-                <button onClick={submitSchedule} className="flex-1 text-white px-4 py-1.5 rounded text-sm font-bold transition hover:opacity-90" style={{ backgroundColor: '#001F5B' }}>儲存排程</button>
+                <button onClick={submitSchedule} disabled={saving} className="flex-1 text-white px-4 py-1.5 rounded text-sm font-bold transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: '#001F5B' }}>{saving ? '儲存中…' : '儲存排程'}</button>
                 <button onClick={() => onDeleteTask(proj, task)}
                   className="flex-shrink-0 px-3 py-1.5 rounded text-sm font-bold text-red-600 bg-red-50 border border-red-200 hover:bg-red-100 transition"
                   title="刪除此計畫區間（軟刪除，可由資料庫還原）">🗑 刪除區間</button>
@@ -1338,6 +1873,12 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
             </h4>
             {canClockIn ? (
               <div className={`p-4 rounded-xl border transition-colors ${status && status !== 'not_executed' ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
+                {isManager && !isMyTask && (
+                  <div className="mb-3 bg-amber-100 border border-amber-400 text-amber-900 rounded-lg px-3.5 py-2.5 text-xs font-bold flex items-center">
+                    <span className="mr-2 text-sm">👑</span>
+                    <span>主管特權模式：正在為成員核實或調補 W{String(currentWeek).padStart(2, '0')} 執行紀錄</span>
+                  </div>
+                )}
                 <div className="mb-3">
                   <div className="font-bold text-slate-800 text-sm">本週此任務的執行狀態</div>
                   <div className="text-xs text-slate-500 mt-0.5">回報後會在該週甘特條標示對應顏色（有執行=綠、Monitor=藍、未執行=灰）。Monitor 為例行監控工作，可不填說明。</div>
@@ -1346,14 +1887,14 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                 <div className="space-y-3">
                   <div className="grid grid-cols-3 gap-2">
                     {Object.entries(STATUS_META).map(([key, meta]) => (
-                      <button key={key} onClick={() => { setStatus(key); setNoteError(''); }}
+                      <button key={key} onClick={() => { setStatus(key); setNoteError(''); markModalDirty(); }}
                         className={`py-3 rounded-lg border text-sm font-bold transition ${status === key ? meta.tag + ' ring-2 ring-offset-1 ring-slate-300' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-400'}`}>
                         {meta.icon} {meta.label}
                       </button>
                     ))}
                   </div>
                   {status && (
-                    <textarea value={note} onChange={e => { setNote(e.target.value); setNoteError(''); }}
+                    <textarea value={note} onChange={e => { setNote(e.target.value); setNoteError(''); markModalDirty(); }}
                       placeholder={status === 'not_executed' ? '可備註未執行原因（選填）' : status === 'monitor' ? '例行監控項目，可備註（選填）' : '說明本週實際工作內容…'}
                       className={`w-full border rounded-lg p-3 text-sm h-24 outline-none resize-none focus:border-blue-500 ${noteError ? 'border-red-400' : 'border-slate-300'}`}></textarea>
                   )}
@@ -1361,8 +1902,22 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                 </div>
                 <div className="flex justify-end space-x-3 pt-4">
                   <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 bg-white border border-slate-300 rounded-lg font-bold hover:bg-slate-50">取消</button>
-                  <button onClick={submitLog} className="px-6 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-md">儲存狀態</button>
+                  <button onClick={submitLog} disabled={saving} className="px-6 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg shadow-md">{saving ? '儲存中…' : '儲存進度回報'}</button>
                 </div>
+                {isManager && weekLog && (
+                  <div className="mt-4 pt-3 border-t border-slate-200">
+                    <div className="text-xs font-bold text-slate-500 mb-2">主管評分微調（點擊即時更新分數）</div>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {SCORE_OPTIONS.map(o => (
+                        <button key={o.value} onClick={() => onUpdateScore(task.id, o.value)}
+                          className={`px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`}>
+                          <div className="text-[11px] font-bold leading-tight">{o.label}</div>
+                          <div className={`text-[10px] mt-0.5 ${score === o.value ? 'text-indigo-100' : 'text-slate-400'}`}>{o.value} 分</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl text-sm">
@@ -1411,9 +1966,14 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
 function ExtraNoteModal({ currentWeek, initialNote, readOnly, onClose, onSave }) {
   const [note, setNote] = useState(initialNote);
   const [error, setError] = useState('');
-  const submit = () => {
-    if (!note.trim()) { setError('請填寫內容後再儲存'); return; }
-    onSave(note.trim());
+  const [saving, setSaving] = useState(false);
+  useModalDirtyReset();
+  // 非專案事項為「選填」:允許空白儲存(=清空本週內容),不強迫填字
+  const isClearing = !note.trim() && !!initialNote;
+  const submit = async () => {
+    if (saving) return;
+    setSaving(true);
+    try { await onSave(note.trim()); } finally { setSaving(false); }
   };
   if (readOnly) {
     return (
@@ -1458,14 +2018,18 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, onClose, onSave })
           )}
           <p className="text-sm text-slate-500 mb-4 border-l-4 border-orange-400 pl-3">
             專案外的項目（日常維運、臨時交辦、會議、教育訓練等）請填寫於此，會呈現在團隊總結看板。
+            <span className="block mt-1 text-slate-400">此欄為選填，隨時可清空內容後儲存。</span>
           </p>
-          <textarea value={note} onChange={e => { setNote(e.target.value); setError(''); }}
+          <textarea value={note} onChange={e => { setNote(e.target.value); setError(''); markModalDirty(); }}
             placeholder={"例如：\n1. 協助 OOO 機台異常處理 (1天)\n2. 參加跨部門會議…"}
             className={`w-full border rounded-lg p-3 text-sm h-40 outline-none focus:ring-2 focus:ring-orange-400 resize-none ${error ? 'border-red-400' : 'border-slate-300'}`}></textarea>
           {error && <div className="text-xs text-red-600 font-bold mt-1">{error}</div>}
           <div className="flex justify-end space-x-3 pt-4">
             <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
-            <button onClick={submit} className="px-6 py-2 text-sm bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-lg shadow-md">送出回報</button>
+            <button onClick={submit} disabled={saving}
+              className={`px-6 py-2 text-sm text-white font-bold rounded-lg shadow-md disabled:opacity-50 ${isClearing ? 'bg-slate-500 hover:bg-slate-600' : 'bg-orange-500 hover:bg-orange-600'}`}>
+              {saving ? '儲存中…' : isClearing ? '清空內容' : '送出回報'}
+            </button>
           </div>
         </div>
       </div>
@@ -1478,44 +2042,66 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, onClose, onSave })
 function DeliverableModal({ proj, role, currentUser, onClose, onSave }) {
   const canEdit = role === 'manager' || proj.owner === currentUser;
   const [text, setText] = useState(proj.deliverable || '');
+  const [mpSaving, setMpSaving] = useState(proj.mpSaving || '');
+  const [saving, setSaving] = useState(false);
+  useModalDirtyReset();
+  const submit = async () => {
+    if (saving) return;
+    setSaving(true);
+    try { await onSave(proj.id, text.trim(), mpSaving.trim()); } finally { setSaving(false); }
+  };
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex justify-between items-start" style={{ backgroundColor: '#F59E0B' }}>
           <div className="pr-3">
-            <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🎯 具體產出項目</h3>
+            <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🎯 具體產出與 MP 效益</h3>
             <p className="text-xs mt-0.5 truncate max-w-[360px]" style={{ color: '#FEF3C7' }}>{proj.name}（負責人：{proj.owner}）</p>
           </div>
           <button onClick={onClose} className="text-white/70 hover:text-white flex-shrink-0"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
         <div className="p-6">
           <p className="text-sm text-slate-500 mb-4 border-l-4 border-amber-400 pl-3">
-            請描述此專案<span className="font-bold text-slate-700">全部執行完畢後</span>預計交付的具體成果
-            （例如：系統上線、SOP 文件、驗證報告），非單週或單一區間的產出。
+            請描述此專案<span className="font-bold text-slate-700">全部執行完畢後</span>預計交付的具體成果與預期減少的人力負擔（MP 人力節省）。
           </p>
           {canEdit ? (
-            <>
+            <div className="space-y-4">
               <div className="flex justify-end mb-1">
                 <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold">{role === 'manager' ? '主管可編輯' : '負責人可編輯'}</span>
               </div>
-              <textarea value={text} onChange={e => setText(e.target.value)} autoFocus
-                placeholder="描述專案完成後要交付的最終成果…"
-                className="w-full border border-slate-300 rounded-lg p-3 text-sm h-32 outline-none focus:ring-2 focus:ring-amber-400 resize-none"></textarea>
-              <div className="flex justify-end space-x-3 pt-4">
-                <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
-                <button onClick={() => onSave(proj.id, text.trim())}
-                  className="px-6 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg shadow-md">儲存</button>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">🎯 具體產出成果項目</label>
+                <textarea value={text} onChange={e => { setText(e.target.value); markModalDirty(); }} autoFocus
+                  placeholder="描述專案完成後要交付的最終成果（系統上線、SOP 文件等）…"
+                  className="w-full border border-slate-300 rounded-lg p-3 text-sm h-28 outline-none focus:ring-2 focus:ring-amber-400 resize-none"></textarea>
               </div>
-            </>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">💡 MP Saving (選填)</label>
+                <input type="text" value={mpSaving} onChange={e => { setMpSaving(e.target.value); markModalDirty(); }}
+                  placeholder="例如：0.5 人/月、每年節省 120 小時…"
+                  className="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-400" />
+              </div>
+              <div className="flex justify-end space-x-3 pt-2">
+                <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
+                <button onClick={submit} disabled={saving}
+                  className="px-6 py-2 text-sm bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold rounded-lg shadow-md">{saving ? '儲存中…' : '儲存'}</button>
+              </div>
+            </div>
           ) : (
-            <>
+            <div className="space-y-3">
               <div className="text-sm text-slate-700 whitespace-pre-wrap bg-amber-50/70 border border-amber-200 rounded-lg p-4">
+                <div className="text-xs font-bold text-amber-800 mb-1">🎯 具體產出項目</div>
                 {proj.deliverable || <span className="text-slate-400 italic">（負責人尚未填寫）</span>}
               </div>
-              <div className="flex justify-end pt-4">
+              {proj.mpSaving && (
+                <div className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3 font-bold">
+                  💡 MP Saving：{proj.mpSaving}
+                </div>
+              )}
+              <div className="flex justify-end pt-3">
                 <button onClick={onClose} className="px-6 py-2 text-sm bg-slate-600 hover:bg-slate-700 text-white font-bold rounded-lg">關閉</button>
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -1527,9 +2113,14 @@ function DeliverableModal({ proj, role, currentUser, onClose, onSave }) {
 function WeeklyPlanModal({ currentWeek, initialNote, readOnly, onClose, onSave }) {
   const [note, setNote] = useState(initialNote);
   const [error, setError] = useState('');
-  const submit = () => {
-    if (!note.trim()) { setError('請填寫內容後再儲存'); return; }
-    onSave(note.trim());
+  const [saving, setSaving] = useState(false);
+  useModalDirtyReset();
+  // 允許清空:清空後系統將其復原為「必填尚未填寫」(扣回打卡 1 分)，待重新填寫送出後再計分
+  const isClearing = !note.trim() && !!initialNote;
+  const submit = async () => {
+    if (saving) return;
+    setSaving(true);
+    try { await onSave(note.trim()); } finally { setSaving(false); }
   };
   if (readOnly) {
     return (
@@ -1563,24 +2154,29 @@ function WeeklyPlanModal({ currentWeek, initialNote, readOnly, onClose, onSave }
         </div>
         <div className="p-6">
           {initialNote ? (
-            <div className="mb-4 bg-green-50 border border-green-300 text-green-800 rounded-lg px-3 py-2.5 text-sm font-bold flex items-center">
-              <span className="mr-2">✅</span> 本週已送出過，以下為已儲存的內容，可修改後重新送出。
+            <div className="mb-4 bg-green-50 border border-green-300 text-green-800 rounded-lg px-3 py-2.5 text-sm font-bold flex items-center justify-between">
+              <div className="flex items-center">
+                <span className="mr-2">✅</span> 本週已送出過，可修改或清空後重新填寫。
+              </div>
             </div>
           ) : (
             <div className="mb-4 bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-lg px-3 py-2.5 text-sm font-bold flex items-center">
-              <span className="mr-2">📭</span> 本週尚未填寫。
+              <span className="mr-2">📭</span> 本週尚未填寫（有填寫並送出才算完成打卡得 1 分）。
             </div>
           )}
           <p className="text-sm text-slate-500 mb-4 border-l-4 border-indigo-400 pl-3">
-            請填寫下一週（W{String(Math.min(currentWeek + 1, 53)).padStart(2, '0')}）預計進行的工作安排，會呈現在團隊總結看板與 Excel 週報。
+            請填寫下一週（W{String(Math.min(currentWeek + 1, 53)).padStart(2, '0')}）預計進行的工作安排；隨時可清空內容後送出（清空後將恢復為未填寫，有填寫才算有打卡得 1 分）。
           </p>
-          <textarea value={note} onChange={e => { setNote(e.target.value); setError(''); }}
+          <textarea value={note} onChange={e => { setNote(e.target.value); setError(''); markModalDirty(); }}
             placeholder={"例如：\n1. OOO 專案進入測試階段，預計完成驗證報告\n2. 準備季度檢討資料…"}
             className={`w-full border rounded-lg p-3 text-sm h-40 outline-none focus:ring-2 focus:ring-indigo-400 resize-none ${error ? 'border-red-400' : 'border-slate-300'}`}></textarea>
           {error && <div className="text-xs text-red-600 font-bold mt-1">{error}</div>}
           <div className="flex justify-end space-x-3 pt-4">
             <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
-            <button onClick={submit} className="px-6 py-2 text-sm bg-indigo-500 hover:bg-indigo-600 text-white font-bold rounded-lg shadow-md">送出</button>
+            <button onClick={submit} disabled={saving}
+              className={`px-6 py-2 text-sm text-white font-bold rounded-lg shadow-md disabled:opacity-50 ${isClearing ? 'bg-slate-500 hover:bg-slate-600' : 'bg-indigo-500 hover:bg-indigo-600'}`}>
+              {saving ? '儲存中…' : isClearing ? '清空重填' : '送出'}
+            </button>
           </div>
         </div>
       </div>
@@ -1632,58 +2228,174 @@ function DeadlinePanel({ items, onClose, onSelect }) {
   );
 }
 
-function PendingPanel({ pending, currentWeek, planPending = false, onFillPlan, onClose, onSelect }) {
+function PendingPanel({ pending = [], completed = [], currentWeek, planPending = false, extraFilled = false, onFillPlan, onFillExtra, onClose, onSelect }) {
+  const totalRequired = pending.length + completed.length + 1; // 任務總數 + 1項下週預計
+  const completedCount = completed.length + (planPending ? 0 : 1);
+  const percent = totalRequired > 0 ? Math.round((completedCount / totalRequired) * 100) : 100;
+  const allDone = pending.length === 0 && !planPending;
+
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end">
-      <div className="w-full max-w-sm bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#001F5B' }}>
-          <div>
-            <h3 className="font-bold text-lg">🔔 W{String(currentWeek).padStart(2, '0')} 待回報清單</h3>
-            <p className="text-xs text-blue-200 mt-0.5">本週排定任務打卡 ＋ 下週預計工作(必填)</p>
+      <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* 方案C：整合式表頭與回報進度條 */}
+        <div className="px-5 py-4 text-white flex flex-col space-y-3" style={{ backgroundColor: '#001F5B' }}>
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="font-bold text-lg flex items-center gap-2">
+                <span>📋 W{String(currentWeek).padStart(2, '0')} 本週回報中心</span>
+              </h3>
+              <p className="text-xs text-blue-200 mt-0.5">整合本週排定任務打卡 ＋ 每週必填工作預計</p>
+            </div>
+            <button onClick={onClose} className="text-white/60 hover:text-white p-1">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
           </div>
-          <button onClick={onClose} className="text-white/60 hover:text-white p-1"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+          <div className="bg-white/10 rounded-xl p-3 border border-white/20">
+            <div className="flex justify-between items-center text-xs font-bold mb-1.5">
+              <span>本週回報完成度</span>
+              <span className="text-amber-300">{completedCount} / {totalRequired} 項 ({percent}%)</span>
+            </div>
+            <div className="w-full h-2 bg-white/20 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full transition-all duration-500 ${allDone ? 'bg-emerald-400' : 'bg-amber-400'}`}
+                style={{ width: `${percent}%` }}></div>
+            </div>
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
-          {planPending && (
+
+        {/* 方案C：主內容分區清單 */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* ① 第一優先：本週待打卡任務 */}
+          <div>
+            <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-2">🔵 本週待打卡任務 ({pending.length} 項)</div>
+            {pending.length === 0 ? (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center text-emerald-800 font-bold text-xs">
+                🎉 太棒了！本週排定之專案任務已全數完成打卡
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {pending.map(({ proj, task }) => (
+                  <button key={task.id} onClick={() => onSelect({ proj, task }, undefined)}
+                    className="w-full text-left bg-yellow-50 hover:bg-yellow-100 border border-yellow-300 rounded-xl p-3.5 transition group shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0 pr-2">
+                        <div className="text-xs font-bold text-amber-900 truncate">{proj.name}</div>
+                        <div className="text-sm font-black text-slate-800 mt-0.5 truncate">{task.name}</div>
+                        <div className="text-[10px] text-slate-500 mt-1">排程 W{task.start}–W{task.end} · {proj.category}</div>
+                      </div>
+                      <div className="flex-shrink-0 text-blue-600 font-bold text-xs bg-white border border-blue-300 rounded-full px-3 py-1.5 group-hover:bg-blue-600 group-hover:text-white transition shadow-sm">
+                        打卡回報 ›
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ② 第二優先：下週預計執行工作（必填） */}
+          <div>
+            <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-2">📅 下週預計執行工作（必填）</div>
             <button onClick={onFillPlan}
-              className="w-full text-left bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 rounded-xl p-3 transition group">
+              className={`w-full text-left border rounded-xl p-3.5 transition group border-l-4 ${planPending ? 'bg-pink-50 hover:bg-pink-100 border-pink-200 border-l-red-500 shadow-sm' : 'bg-emerald-50/70 hover:bg-emerald-100/70 border-emerald-200 border-l-emerald-500'}`}>
               <div className="flex items-center justify-between">
                 <div className="min-w-0 pr-2">
-                  <div className="text-xs font-bold text-indigo-700">📅 下週預計執行工作</div>
-                  <div className="text-sm text-slate-600 mt-0.5">本週必填項目，尚未填寫</div>
-                  <div className="text-[10px] text-slate-400 mt-1">請安排下一週（W{String(Math.min(currentWeek + 1, 53)).padStart(2, '0')}）預計進行的工作</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-800">下週預計執行工作</span>
+                    {planPending ? (
+                      <span className="bg-red-600 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">必填尚未填寫</span>
+                    ) : (
+                      <span className="bg-emerald-600 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">✓ 已填寫完成</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">請安排 W{String(Math.min(currentWeek + 1, 53)).padStart(2, '0')} 週預計進行的工作內容</div>
                 </div>
-                <div className="flex-shrink-0 text-indigo-600 font-bold text-xs bg-white border border-indigo-200 rounded-full px-2.5 py-1 group-hover:bg-indigo-600 group-hover:text-white transition">填寫 ›</div>
+                <div className={`flex-shrink-0 font-bold text-xs bg-white border rounded-full px-3 py-1.5 transition ${planPending ? 'text-red-600 border-red-300 group-hover:bg-red-600 group-hover:text-white' : 'text-emerald-600 border-emerald-300 group-hover:bg-emerald-600 group-hover:text-white'}`}>
+                  {planPending ? '立即填寫 ›' : '檢閱修改 ›'}
+                </div>
               </div>
+            </button>
+          </div>
+
+          {/* ③ 第三優先：非專案事項（選填） */}
+          <div>
+            <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-2">📝 非專案事項（選填）</div>
+            <button onClick={onFillExtra}
+              className={`w-full text-left border rounded-xl p-3.5 transition group border-l-4 ${extraFilled ? 'bg-emerald-50/70 hover:bg-emerald-100/70 border-emerald-200 border-l-emerald-500' : 'bg-orange-50 hover:bg-orange-100 border-orange-200 border-l-orange-400'}`}>
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 pr-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-800">非專案事項</span>
+                    {extraFilled ? (
+                      <span className="bg-emerald-600 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">✓ 已填寫完成</span>
+                    ) : (
+                      <span className="bg-slate-400 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">選填 · 未填寫</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">日常維運、臨時交辦、會議等專案外項目（選填，不計入完成度）</div>
+                </div>
+                <div className={`flex-shrink-0 font-bold text-xs bg-white border rounded-full px-3 py-1.5 transition ${extraFilled ? 'text-emerald-600 border-emerald-300 group-hover:bg-emerald-600 group-hover:text-white' : 'text-orange-600 border-orange-300 group-hover:bg-orange-600 group-hover:text-white'}`}>
+                  {extraFilled ? '檢閱修改 ›' : '前往填寫 ›'}
+                </div>
+              </div>
+            </button>
+          </div>
+
+          {/* ④ 參考資訊：本週已完成打卡任務(唯讀性質,放最後避免把必填項目推出視野) */}
+          {completed.length > 0 && (
+            <div>
+              <div className="text-xs font-black text-slate-400 uppercase tracking-wider mb-2">🟢 本週已完成打卡任務 ({completed.length} 項)</div>
+              <div className="space-y-2">
+                {completed.map(({ proj, task, log }) => (
+                  <button key={task.id} onClick={() => onSelect({ proj, task }, log)}
+                    className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-3 transition group opacity-90">
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0 pr-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-slate-600 truncate">{proj.name}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${log.status === 'executed' ? 'bg-green-100 text-green-800' : log.status === 'monitor' ? 'bg-sky-100 text-sky-800' : 'bg-slate-200 text-slate-700'}`}>
+                            {STATUS_META[log.status]?.icon} {STATUS_META[log.status]?.label}
+                          </span>
+                        </div>
+                        <div className="text-xs font-medium text-slate-700 mt-1 truncate">{task.name}</div>
+                      </div>
+                      <div className="flex-shrink-0 text-slate-500 font-bold text-xs bg-white border border-slate-200 rounded-full px-2.5 py-1 group-hover:border-slate-400 transition">
+                        修改 ›
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 方案C：Completion Loop 底部收尾導引按鈕區塊 */}
+        <div className="p-4 bg-slate-50 border-t border-slate-200">
+          {allDone ? (
+            <button onClick={onClose}
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm rounded-xl shadow-md transition flex items-center justify-center gap-2">
+              <span>🎉 本週回報已全數完成！返回總表 ›</span>
+            </button>
+          ) : (
+            <button onClick={onClose}
+              className="w-full py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-xl transition">
+              暫存離開（尚有 {pending.length + (planPending ? 1 : 0)} 項待完成項目）
             </button>
           )}
-          {pending.length === 0 && !planPending ? (
-            <div className="text-center text-slate-400 py-16">
-              <div className="text-4xl mb-3">🎉</div>
-              <div className="font-bold text-slate-600">本週任務與下週預計已全數完成</div>
-              <div className="text-xs mt-1">辛苦了！</div>
-            </div>
-          ) : pending.map(({ proj, task }) => (
-            <button key={task.id} onClick={() => onSelect({ proj, task })}
-              className="w-full text-left bg-yellow-50 hover:bg-yellow-100 border border-yellow-200 rounded-xl p-3 transition group">
-              <div className="flex items-center justify-between">
-                <div className="min-w-0 pr-2">
-                  <div className="text-xs font-bold text-slate-700 truncate">{proj.name}</div>
-                  <div className="text-sm text-slate-600 mt-0.5 truncate">{task.name}</div>
-                  <div className="text-[10px] text-slate-400 mt-1">排程 W{task.start}–W{task.end} · {proj.category}</div>
-                </div>
-                <div className="flex-shrink-0 text-blue-600 font-bold text-xs bg-white border border-blue-200 rounded-full px-2.5 py-1 group-hover:bg-blue-600 group-hover:text-white transition">回報 ›</div>
-              </div>
-            </button>
-          ))}
         </div>
       </div>
     </div>
   );
 }
 
-function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, extraNotes, weeklyPlans = {}, onClose }) {
-  const [copied, setCopied] = useState(false);
+function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, extraNotes, weeklyPlans = {}, currentUser, role, onClose }) {
+  const isManager = role === 'manager';
+  const [copied, setCopied] = useState(false);           // 全團隊複製回饋
+  const [copiedUser, setCopiedUser] = useState(null);     // 個別成員複製回饋
+  // 成員預設勾選「只看我的週報」；主管不寫週報，固定看全團隊
+  const [onlyMine, setOnlyMine] = useState(!isManager);
+  // 展開狀態：勾選自己時預設展開；看團隊時預設折疊
+  const [expandedUsers, setExpandedUsers] = useState(new Set(!isManager ? [currentUser] : []));
 
   // 下載後端產生的 Excel 週報(.xlsx:專案執行 + 非專案事項 兩個工作表)
   const exportExcel = () => {
@@ -1712,9 +2424,31 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
     };
   }), [users, projects, taskLogs, extraNotes, weeklyPlans, currentWeek]);
 
+  // 依 onlyMine 過濾要顯示的成員摘要
+  const visibleSummary = useMemo(() => {
+    if (onlyMine && !isManager) return summary.filter(s => s.user === currentUser);
+    return summary;
+  }, [summary, onlyMine, isManager, currentUser]);
+
+  const showTeamView = isManager || !onlyMine;   // 是否為團隊瀏覽模式（多人＋折疊）
+
+  // 產生單一成員的週報文字
+  const buildSingleUserReport = (s) => {
+    const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} 週報 — ${s.user}】`, ''];
+    lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}）`);
+    s.activeTasks.forEach(({ proj, task, log }) => {
+      lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}`);
+    });
+    if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
+    if (s.weekPlan) lines.push(`  (下週預計) ${s.weekPlan.replace(/\n/g, ' / ')}`);
+    lines.push('');
+    return lines.join('\n');
+  };
+
+  // 產生可見範圍的週報文字
   const buildReportText = () => {
-    const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} 團隊週報】`, ''];
-    summary.forEach(s => {
+    const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} ${showTeamView ? '團隊週報' : '週報 — ' + currentUser}】`, ''];
+    visibleSummary.forEach(s => {
       if (s.activeTasks.length === 0 && !s.extraNote && !s.weekPlan) return;
       lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}）`);
       s.activeTasks.forEach(({ proj, task, log }) => {
@@ -1727,21 +2461,74 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
     return lines.join('\n');
   };
 
-  const copyReport = async () => {
-    const text = buildReportText();
+  // 通用複製函式
+  const doCopy = async (text, onDone) => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      onDone();
     } catch {
       const ta = document.createElement('textarea');
       ta.value = text;
       document.body.appendChild(ta);
       ta.select();
-      try { document.execCommand('copy'); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {}
+      try { document.execCommand('copy'); onDone(); } catch {}
       document.body.removeChild(ta);
     }
   };
+
+  const copyReport = () => doCopy(buildReportText(), () => {
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
+  });
+
+  const copyUserReport = (s) => doCopy(buildSingleUserReport(s), () => {
+    setCopiedUser(s.user); setTimeout(() => setCopiedUser(null), 2000);
+  });
+
+  // 全部展開 / 全部收合
+  const expandAll = () => setExpandedUsers(new Set(users));
+  const collapseAll = () => setExpandedUsers(new Set());
+  const toggleExpand = (user) => setExpandedUsers(prev => {
+    const s = new Set(prev);
+    s.has(user) ? s.delete(user) : s.add(user);
+    return s;
+  });
+
+  // 卡片展開內容
+  const renderCardBody = (activeTasks, pendingTasks, extraNote, weekPlan) => (
+    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="space-y-2.5">
+        <div className="text-xs font-bold text-slate-400 border-b border-slate-100 pb-1">📌 專案執行項目</div>
+        {activeTasks.length > 0 ? activeTasks.map(({ proj, task, log }) => (
+          <div key={task.id} className={`text-sm p-2.5 rounded-lg border ${log.status === 'not_executed' ? 'bg-slate-100 border-slate-200 opacity-80' : log.status === 'monitor' ? 'bg-sky-50/70 border-sky-200' : 'bg-green-50/60 border-green-200'}`}>
+            <div className="flex items-center justify-between">
+              <div className="font-bold text-slate-700 truncate text-xs pr-2">{proj.name}</div>
+              <div className="flex-shrink-0 flex items-center gap-1">
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_META[log.status]?.tag}`}>{STATUS_META[log.status]?.label}</span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700" title="打卡得分">{Number(log.score ?? 1)}分</span>
+              </div>
+            </div>
+            <div className="text-slate-600 my-1 font-medium text-xs">{task.name}</div>
+            {log.note && <div className="text-slate-700 text-xs bg-white p-1.5 rounded border border-slate-100 whitespace-pre-wrap">{log.note}</div>}
+          </div>
+        )) : <div className="text-sm text-slate-400 italic py-2">本週無專案投入</div>}
+        {pendingTasks.length > 0 && (
+          <div className="text-[11px] text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5">
+            尚有 {pendingTasks.length} 項本週排定任務未回報
+          </div>
+        )}
+      </div>
+      <div className="space-y-2.5 md:border-l md:border-slate-100 md:pl-4">
+        <div className="text-xs font-bold text-slate-400 border-b border-slate-100 pb-1">📝 日常營運 / 臨時交辦（非專案）</div>
+        {extraNote ? (
+          <div className="text-sm text-slate-700 bg-orange-50 p-3 rounded-lg border border-orange-200 whitespace-pre-wrap">{extraNote}</div>
+        ) : <div className="text-sm text-slate-400 italic py-2">無填寫其他項目</div>}
+        <div className="text-xs font-bold text-slate-400 border-b border-slate-100 pb-1 pt-1">📅 下週預計執行工作</div>
+        {weekPlan ? (
+          <div className="text-sm text-slate-700 bg-indigo-50 p-3 rounded-lg border border-indigo-200 whitespace-pre-wrap">{weekPlan}</div>
+        ) : <div className="text-sm text-slate-400 italic py-2">未填寫</div>}
+      </div>
+    </div>
+  );
 
   return (
     <div className="fixed inset-y-0 right-0 w-full max-w-2xl bg-slate-50 shadow-2xl z-[120] flex flex-col border-l border-slate-200">
@@ -1764,13 +2551,41 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
         </div>
       </div>
 
+      {/* 子工具列：checkbox 篩選 + 展開/收合 */}
+      <div className="bg-white px-6 py-2 border-b border-slate-200 flex items-center gap-2 flex-wrap">
+        {!isManager && (
+          <label className="flex items-center space-x-1.5 cursor-pointer select-none bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+            <input type="checkbox" checked={onlyMine}
+              onChange={e => { setOnlyMine(e.target.checked); if (!e.target.checked) setExpandedUsers(new Set()); else setExpandedUsers(new Set([currentUser])); }}
+              className="w-3.5 h-3.5 rounded text-blue-600" />
+            <span className="font-medium text-slate-700 text-[11px]">只看我的週報</span>
+          </label>
+        )}
+        {showTeamView && (
+          <>
+            {!isManager && <div className="h-4 border-l border-slate-200"></div>}
+            <button onClick={expandAll} className="text-[11px] text-blue-600 hover:text-blue-800 font-bold">展開全部</button>
+            <span className="text-slate-300">|</span>
+            <button onClick={collapseAll} className="text-[11px] text-blue-600 hover:text-blue-800 font-bold">收合全部</button>
+          </>
+        )}
+      </div>
+
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
-        {summary.map(({ user, activeTasks, pendingTasks, extraNote, weekPlan, total }) => {
+        {visibleSummary.map((s) => {
+          const { user, activeTasks, pendingTasks, extraNote, weekPlan, total } = s;
           if (activeTasks.length === 0 && !extraNote && !weekPlan && pendingTasks.length === 0) return null;
           const rate = total > 0 ? Math.round((activeTasks.length / total) * 100) : 0;
+          const isExpanded = showTeamView ? expandedUsers.has(user) : true;   // 個人模式固定展開
+          const isCopiedUser = copiedUser === user;
+
           return (
             <div key={user} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="bg-slate-100 px-4 py-2 border-b border-slate-200 font-bold text-slate-800 flex items-center">
+              <div className={`bg-slate-100 px-4 py-2 border-b border-slate-200 font-bold text-slate-800 flex items-center ${showTeamView ? 'cursor-pointer hover:bg-slate-200/70 transition' : ''}`}
+                onClick={showTeamView ? () => toggleExpand(user) : undefined}>
+                {showTeamView && (
+                  <span className="mr-1.5 text-slate-400 text-xs select-none">{isExpanded ? '▼' : '▶'}</span>
+                )}
                 <div className="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs mr-2 flex-shrink-0">{user[0]}</div>
                 <span className="mr-3">{user}</span>
                 {total > 0 && (
@@ -1781,47 +2596,37 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
                     <span className="ml-2 text-[10px] font-bold text-slate-500">{activeTasks.length}/{total} 回報</span>
                   </div>
                 )}
+                {/* 折疊時在標題列右側顯示摘要標籤 */}
+                {!isExpanded && showTeamView && (
+                  <div className="ml-auto flex items-center gap-1.5 text-[10px]">
+                    {activeTasks.length > 0 && <span className="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold border border-green-300">✅{activeTasks.filter(a => a.log.status === 'executed').length}</span>}
+                    {activeTasks.filter(a => a.log.status === 'monitor').length > 0 && <span className="bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold border border-sky-300">👁️{activeTasks.filter(a => a.log.status === 'monitor').length}</span>}
+                    {pendingTasks.length > 0 && <span className="bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-bold border border-yellow-300">❗{pendingTasks.length}</span>}
+                    {extraNote && <span className="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-bold border border-orange-300">📝</span>}
+                    {weekPlan && <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold border border-indigo-300">📅</span>}
+                  </div>
+                )}
+                {/* 個別成員複製按鈕（永遠顯示） */}
+                <button onClick={(e) => { e.stopPropagation(); copyUserReport(s); }}
+                  className={`ml-auto px-2 py-0.5 rounded text-[10px] font-bold transition border ${isCopiedUser ? 'bg-green-500 border-green-400 text-white' : 'bg-slate-200 hover:bg-slate-300 border-slate-300 text-slate-600'}`}
+                  title={`複製 ${user} 的週報文字`}>
+                  {isCopiedUser ? '✓ 已複製' : '📋 複製週報'}
+                </button>
               </div>
-              <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2.5">
-                  <div className="text-xs font-bold text-slate-400 border-b border-slate-100 pb-1">📌 專案執行項目</div>
-                  {activeTasks.length > 0 ? activeTasks.map(({ proj, task, log }) => (
-                    <div key={task.id} className={`text-sm p-2.5 rounded-lg border ${log.status === 'not_executed' ? 'bg-slate-100 border-slate-200 opacity-80' : log.status === 'monitor' ? 'bg-sky-50/70 border-sky-200' : 'bg-green-50/60 border-green-200'}`}>
-                      <div className="flex items-center justify-between">
-                        <div className="font-bold text-slate-700 truncate text-xs pr-2">{proj.name}</div>
-                        <div className="flex-shrink-0 flex items-center gap-1">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_META[log.status]?.tag}`}>{STATUS_META[log.status]?.label}</span>
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700" title="打卡得分">{Number(log.score ?? 1)}分</span>
-                        </div>
-                      </div>
-                      <div className="text-slate-600 my-1 font-medium text-xs">{task.name}</div>
-                      {log.note && <div className="text-slate-700 text-xs bg-white p-1.5 rounded border border-slate-100 whitespace-pre-wrap">{log.note}</div>}
-                    </div>
-                  )) : <div className="text-sm text-slate-400 italic py-2">本週無專案投入</div>}
-                  {pendingTasks.length > 0 && (
-                    <div className="text-[11px] text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5">
-                      尚有 {pendingTasks.length} 項本週排定任務未回報
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-2.5 md:border-l md:border-slate-100 md:pl-4">
-                  <div className="text-xs font-bold text-slate-400 border-b border-slate-100 pb-1">📝 日常營運 / 臨時交辦（非專案）</div>
-                  {extraNote ? (
-                    <div className="text-sm text-slate-700 bg-orange-50 p-3 rounded-lg border border-orange-200 whitespace-pre-wrap">{extraNote}</div>
-                  ) : <div className="text-sm text-slate-400 italic py-2">無填寫其他項目</div>}
-                  <div className="text-xs font-bold text-slate-400 border-b border-slate-100 pb-1 pt-1">📅 下週預計執行工作</div>
-                  {weekPlan ? (
-                    <div className="text-sm text-slate-700 bg-indigo-50 p-3 rounded-lg border border-indigo-200 whitespace-pre-wrap">{weekPlan}</div>
-                  ) : <div className="text-sm text-slate-400 italic py-2">未填寫</div>}
-                </div>
-              </div>
+              {isExpanded && renderCardBody(activeTasks, pendingTasks, extraNote, weekPlan)}
             </div>
           );
         })}
+        {visibleSummary.filter(s => s.activeTasks.length > 0 || s.extraNote || s.weekPlan || s.pendingTasks.length > 0).length === 0 && (
+          <div className="text-center text-slate-400 italic py-12">本週尚無回報資料</div>
+        )}
       </div>
     </div>
   );
 }
+
+
+
 
 function ProjectEditModal({ info, existingCategories, users = [], onClose, onSave }) {
   const isEdit = info.mode === 'edit';
@@ -1831,18 +2636,24 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
   const [type, setType] = useState(isEdit ? p.type : 'a');
   const [owner, setOwner] = useState(info.owner);   // 編輯時可改派負責人(如移轉給新成員)
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  useModalDirtyReset();
 
-  const submit = () => {
+  const submit = async () => {
+    if (saving) return;
     if (!name.trim()) { setError('專案名稱不可空白'); return; }
     if (!category.trim()) { setError('分類不可空白'); return; }
-    onSave({
-      mode: info.mode,
-      projectId: isEdit ? p.id : undefined,
-      owner,
-      name: name.trim(),
-      category: category.trim(),
-      type
-    });
+    setSaving(true);
+    try {
+      await onSave({
+        mode: info.mode,
+        projectId: isEdit ? p.id : undefined,
+        owner,
+        name: name.trim(),
+        category: category.trim(),
+        type
+      });
+    } finally { setSaving(false); }
   };
 
   return (
@@ -1858,12 +2669,12 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
         <div className="p-6 space-y-4">
           <div>
             <label className="text-xs font-bold text-slate-500">專案名稱</label>
-            <input type="text" value={name} onChange={e => { setName(e.target.value); setError(''); }} autoFocus
+            <input type="text" value={name} onChange={e => { setName(e.target.value); setError(''); markModalDirty(); }} autoFocus
               className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="輸入專案名稱…" />
           </div>
           <div>
             <label className="text-xs font-bold text-slate-500">分類</label>
-            <input type="text" list="category-options" value={category} onChange={e => { setCategory(e.target.value); setError(''); }}
+            <input type="text" list="category-options" value={category} onChange={e => { setCategory(e.target.value); setError(''); markModalDirty(); }}
               className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="選擇現有分類或輸入新分類…" />
             <datalist id="category-options">
               {existingCategories.map(c => <option key={c} value={c} />)}
@@ -1871,7 +2682,7 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
           </div>
           <div>
             <label className="text-xs font-bold text-slate-500">類型</label>
-            <select value={type} onChange={e => setType(e.target.value)}
+            <select value={type} onChange={e => { setType(e.target.value); markModalDirty(); }}
               className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white">
               {Object.entries(PROJECT_TYPES).map(([key, meta]) => (
                 <option key={key} value={key}>{key.toUpperCase()}·{meta.label}</option>
@@ -1881,7 +2692,7 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
           {isEdit && (
             <div>
               <label className="text-xs font-bold text-slate-500">負責人</label>
-              <select value={owner} onChange={e => setOwner(e.target.value)}
+              <select value={owner} onChange={e => { setOwner(e.target.value); markModalDirty(); }}
                 className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white">
                 {(users.includes(owner) ? users : [owner, ...users]).map(u => <option key={u} value={u}>{u}</option>)}
               </select>
@@ -1893,7 +2704,7 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
           {error && <div className="text-xs text-red-600 font-bold">{error}</div>}
           <div className="flex justify-end space-x-3 pt-2">
             <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
-            <button onClick={submit} className="px-6 py-2 text-sm text-white font-bold rounded-lg shadow-md transition hover:opacity-90" style={{ backgroundColor: '#001F5B' }}>{isEdit ? '儲存變更' : '新增專案'}</button>
+            <button onClick={submit} disabled={saving} className="px-6 py-2 text-sm text-white font-bold rounded-lg shadow-md transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: '#001F5B' }}>{saving ? '儲存中…' : isEdit ? '儲存變更' : '新增專案'}</button>
           </div>
         </div>
       </div>
@@ -1906,12 +2717,16 @@ function IntervalModal({ project, currentWeek, weeksTotal = WEEKS_TOTAL, onClose
   const [start, setStart] = useState(currentWeek);
   const [end, setEnd] = useState(currentWeek);
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  useModalDirtyReset();
 
-  const submit = () => {
+  const submit = async () => {
+    if (saving) return;
     const s = parseInt(start), e = parseInt(end);
     if (!taskName.trim()) { setError('計畫名稱不可空白'); return; }
     if (isNaN(s) || isNaN(e) || s < 1 || e > weeksTotal || s > e) { setError(`週次需介於 1–${weeksTotal}，且開始週不可晚於結束週`); return; }
-    onSave(project, taskName.trim(), s, e);
+    setSaving(true);
+    try { await onSave(project, taskName.trim(), s, e); } finally { setSaving(false); }
   };
 
   return (
@@ -1927,25 +2742,25 @@ function IntervalModal({ project, currentWeek, weeksTotal = WEEKS_TOTAL, onClose
         <div className="p-6 space-y-4">
           <div>
             <label className="text-xs font-bold text-slate-500">計畫名稱</label>
-            <input type="text" value={taskName} onChange={e => { setTaskName(e.target.value); setError(''); }} autoFocus
+            <input type="text" value={taskName} onChange={e => { setTaskName(e.target.value); setError(''); markModalDirty(); }} autoFocus
               className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="輸入此區間的計畫項目…" />
           </div>
           <div className="flex space-x-3">
             <div className="w-1/2">
               <label className="text-xs font-bold text-slate-500">開始週</label>
-              <input type="number" min="1" max="52" value={start} onChange={e => { setStart(e.target.value); setError(''); }}
+              <input type="number" min="1" max={weeksTotal} value={start} onChange={e => { setStart(e.target.value); setError(''); markModalDirty(); }}
                 className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" />
             </div>
             <div className="w-1/2">
               <label className="text-xs font-bold text-slate-500">結束週</label>
-              <input type="number" min="1" max="52" value={end} onChange={e => { setEnd(e.target.value); setError(''); }}
+              <input type="number" min="1" max={weeksTotal} value={end} onChange={e => { setEnd(e.target.value); setError(''); markModalDirty(); }}
                 className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" />
             </div>
           </div>
           {error && <div className="text-xs text-red-600 font-bold">{error}</div>}
           <div className="flex justify-end space-x-3 pt-2">
             <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
-            <button onClick={submit} className="px-6 py-2 text-sm text-white font-bold rounded-lg shadow-md transition hover:opacity-90" style={{ backgroundColor: '#001F5B' }}>新增區間</button>
+            <button onClick={submit} disabled={saving} className="px-6 py-2 text-sm text-white font-bold rounded-lg shadow-md transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: '#001F5B' }}>{saving ? '新增中…' : '新增區間'}</button>
           </div>
         </div>
       </div>
@@ -1955,6 +2770,12 @@ function IntervalModal({ project, currentWeek, weeksTotal = WEEKS_TOTAL, onClose
 
 // 自製刪除確認視窗(取代 window.confirm,樣式與系統一致)
 function ConfirmModal({ info, onCancel }) {
+  const [busy, setBusy] = useState(false);   // 防連點:確認處理中鎖定按鈕
+  const confirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { await info.onConfirm(); } finally { setBusy(false); }
+  };
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[150] flex justify-center items-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -1966,7 +2787,10 @@ function ConfirmModal({ info, onCancel }) {
           <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{info.message}</p>
           <div className="flex justify-end space-x-3 pt-5">
             <button onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
-            <button onClick={info.onConfirm} className="px-6 py-2 text-sm bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg shadow-md">確定刪除</button>
+            <button onClick={confirm} disabled={busy}
+              className="px-6 py-2 text-sm bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold rounded-lg shadow-md">
+              {busy ? '處理中…' : (info.confirmLabel || '確定刪除')}
+            </button>
           </div>
         </div>
       </div>

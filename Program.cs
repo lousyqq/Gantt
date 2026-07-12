@@ -93,7 +93,8 @@ app.MapGet("/api/bootstrap", async (int? year) =>
         var projOrder = new List<int>();
         using (var cmd = new SqlCommand(@"
             SELECT p.ProjectId, p.TypeCode, p.Category, u.UserName AS Owner, p.Name,
-                   t.TaskCode, t.TaskName, t.StartWeek, t.EndWeek, p.Deliverable
+                   t.TaskCode, t.TaskName, t.StartWeek, t.EndWeek, p.Deliverable, p.MpSaving,
+                   CAST(ISNULL(p.IsStarred, 0) AS BIT) AS IsStarred
             FROM dbo.Projects p
             JOIN dbo.Users u ON u.UserId = p.OwnerUserId
             LEFT JOIN dbo.Tasks t ON t.ProjectId = p.ProjectId AND t.IsDeleted = 0
@@ -115,6 +116,8 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                         Owner = r.GetString(3),
                         Name = r.GetString(4),
                         Deliverable = r.IsDBNull(9) ? null : r.GetString(9),
+                        MpSaving = r.IsDBNull(10) ? null : r.GetString(10),
+                        IsStarred = Convert.ToBoolean(r.GetValue(11)),
                         Tasks = new List<TaskItemDto>()
                     };
                     projMap[pid] = proj;
@@ -135,9 +138,10 @@ app.MapGet("/api/bootstrap", async (int? year) =>
         // taskLogs[taskCode][week] = { status, note, isExecuting, score }
         var taskLogs = new Dictionary<string, Dictionary<int, object>>();
         using (var cmd = new SqlCommand(@"
-            SELECT t.TaskCode, w.WeekNo, w.Status, w.Note, w.Score
+            SELECT t.TaskCode, w.WeekNo, w.Status, w.Note, w.Score, u.UserName, u.Role
             FROM dbo.WeeklyLogs w
             JOIN dbo.Tasks t ON t.TaskId = w.TaskId
+            LEFT JOIN dbo.Users u ON u.UserId = w.ReportedByUserId
             WHERE w.ScheduleYear = @y", conn))
         {
             cmd.Parameters.AddWithValue("@y", y);
@@ -149,8 +153,10 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                 string status = r.GetString(2);
                 string? note = r.IsDBNull(3) ? null : r.GetString(3);
                 decimal score = r.GetDecimal(4);
+                string? reporter = r.IsDBNull(5) ? null : r.GetString(5);
+                string? reporterRole = r.IsDBNull(6) ? null : r.GetString(6);
                 if (!taskLogs.TryGetValue(code, out var m)) { m = new(); taskLogs[code] = m; }
-                m[wk] = new { status, note, isExecuting = status != "not_executed", score };
+                m[wk] = new { status, note, isExecuting = status != "not_executed", score, reporter, reporterRole };
             }
         }
 
@@ -194,7 +200,14 @@ app.MapGet("/api/bootstrap", async (int? year) =>
             }
         }
 
-        return Results.Ok(new { year = y, years, weeks, users, projects, taskLogs, extraNotes, weeklyPlans });
+        bool allowRetroCheckin = false;
+        using (var cmd = new SqlCommand("SELECT Value FROM dbo.AppSettings WHERE KeyName = 'AllowRetroCheckin'", conn))
+        {
+            var val = await cmd.ExecuteScalarAsync();
+            allowRetroCheckin = (val as string)?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+        }
+
+        return Results.Ok(new { year = y, years, weeks, users, projects, taskLogs, extraNotes, weeklyPlans, allowRetroCheckin });
     }
     catch (Exception ex) { return Fail(ex); }
 });
@@ -273,6 +286,7 @@ app.MapPost("/api/project/deliverable", async (DeliverableReq req) =>
         using var cmd = new SqlCommand("dbo.usp_UpdateProjectDeliverable", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@ProjectId", req.ProjectId);
         cmd.Parameters.AddWithValue("@Deliverable", (object?)req.Deliverable ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@MpSaving", (object?)req.MpSaving ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
@@ -282,7 +296,26 @@ app.MapPost("/api/project/deliverable", async (DeliverableReq req) =>
     catch (Exception ex) { return Fail(ex); }
 });
 
-// 3.3) 主管調整打卡分數 — usp_UpdateLogScore(僅主管,SP 內檢查;分數限 0.3/0.5/0.8/0.9/1)
+// 3.3) 主管標記重點關注 — usp_ToggleProjectStar(僅主管,SP 內檢查)
+app.MapPost("/api/project/star", async (ProjectStarReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connStr);
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_ToggleProjectStar", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@ProjectId", req.ProjectId);
+        cmd.Parameters.AddWithValue("@Starred", req.Starred);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 3.4) 主管調整打卡分數 — usp_UpdateLogScore(僅主管,SP 內檢查;分數限 0.3/0.5/0.8/0.9/1)
 app.MapPost("/api/weekly-log/score", async (ScoreReq req) =>
 {
     try
@@ -379,6 +412,42 @@ app.MapPost("/api/project/delete", async (ProjectDeleteReq req) =>
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_DeleteProject", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@ProjectId", req.ProjectId);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 7.1) 復原軟刪除的專案(刪除 toast 的「復原」按鈕) — usp_RestoreProject
+app.MapPost("/api/project/restore", async (ProjectDeleteReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connStr);
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_RestoreProject", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@ProjectId", req.ProjectId);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 7.2) 復原軟刪除的計畫區間 — usp_RestoreTask
+app.MapPost("/api/task/restore", async (TaskDeleteReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connStr);
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_RestoreTask", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@TaskCode", req.TaskCode);
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
@@ -549,6 +618,10 @@ app.MapGet("/api/audit-log", async (int? top) =>
                             return projInfo.TryGetValue(entityId ?? "", out var pd)
                                 ? $"刪除專案「{pd.Name}」（負責人：{pd.Owner}，含其所有計畫區間；資料保留，必要時可請系統管理者還原）"
                                 : "刪除專案（含其所有計畫區間；資料保留，必要時可請系統管理者還原）";
+                        if (action == "RESTORE")
+                            return projInfo.TryGetValue(entityId ?? "", out var pr)
+                                ? $"復原已刪除的專案「{pr.Name}」（負責人：{pr.Owner}，含其計畫區間）"
+                                : "復原已刪除的專案（含其計畫區間）";
                         if (action == "UPDATE" && fieldName == "Deliverable")
                             return projInfo.TryGetValue(entityId ?? "", out var pv)
                                 ? $"更新專案「{pv.Name}」的具體產出項目：{newV}"
@@ -597,6 +670,10 @@ app.MapGet("/api/audit-log", async (int? top) =>
                             return taskInfo.TryGetValue(entityId ?? "", out var td)
                                 ? $"刪除專案「{td.Proj}」的計畫區間「{td.Task}」（資料保留，必要時可請系統管理者還原）"
                                 : "刪除計畫區間（資料保留，必要時可請系統管理者還原）";
+                        if (action == "RESTORE")
+                            return taskInfo.TryGetValue(entityId ?? "", out var tr)
+                                ? $"復原已刪除的計畫區間「{tr.Task}」（專案「{tr.Proj}」）"
+                                : "復原已刪除的計畫區間";
                         break;
                     }
                     case "User":
@@ -852,6 +929,24 @@ app.MapPost("/api/user/delete", async (UserDeleteReq req) =>
     catch (Exception ex) { return Fail(ex); }
 });
 
+// 16) 主管開關全年度歷史進度補登授權 — usp_SetAppSetting
+app.MapPost("/api/settings/retro-checkin", async (RetroCheckinReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connStr);
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_SetAppSetting", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@KeyName", "AllowRetroCheckin");
+        cmd.Parameters.AddWithValue("@Value", req.Enabled ? "true" : "false");
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
 app.Run();
 
 class ProjectDto
@@ -862,6 +957,8 @@ class ProjectDto
     public string Owner { get; set; } = "";
     public string Name { get; set; } = "";
     public string? Deliverable { get; set; }   // 具體產出項目(負責人與主管可編輯)
+    public string? MpSaving { get; set; }      // MP 人力節省(同上,與產出項目同視窗編輯)
+    public bool IsStarred { get; set; }        // 主管標記重點關注(存於 DB，全員同步可見)
     public List<TaskItemDto> Tasks { get; set; } = new();
 }
 
@@ -887,5 +984,7 @@ record UserCreateReq(string UserName, string Actor, string? ActorRole, string? A
 record UserUpdateReq(string UserName, string NewName, string Actor, string? ActorRole, string? ActorEmpId);
 record UserDeleteReq(string UserName, string Actor, string? ActorRole, string? ActorEmpId);
 record WeeklyPlanReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole, string? ActorEmpId);
-record DeliverableReq(int ProjectId, string? Deliverable, string Actor, string? ActorRole, string? ActorEmpId);
+record DeliverableReq(int ProjectId, string? Deliverable, string? MpSaving, string Actor, string? ActorRole, string? ActorEmpId);
 record ScoreReq(string TaskCode, int Year, int Week, decimal Score, string Actor, string? ActorRole, string? ActorEmpId);
+record RetroCheckinReq(bool Enabled, string Actor, string? ActorRole);
+record ProjectStarReq(int ProjectId, bool Starred, string Actor, string? ActorRole, string? ActorEmpId);
