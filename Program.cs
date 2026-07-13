@@ -180,6 +180,26 @@ app.MapGet("/api/bootstrap", async (int? year) =>
             }
         }
 
+        // weeklyComments[userName][week] = 主管週報回覆(選填;空字串=已清空,不回傳)
+        var weeklyComments = new Dictionary<string, Dictionary<int, string>>();
+        using (var cmd = new SqlCommand(@"
+            SELECT u.UserName, wc.WeekNo, wc.Comment
+            FROM dbo.WeeklyComments wc
+            JOIN dbo.Users u ON u.UserId = wc.UserId
+            WHERE wc.ScheduleYear = @y AND wc.Comment <> N''", conn))
+        {
+            cmd.Parameters.AddWithValue("@y", y);
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                string name = r.GetString(0);
+                int wk = r.GetInt32(1);
+                string cmt = r.IsDBNull(2) ? "" : r.GetString(2);
+                if (!weeklyComments.TryGetValue(name, out var m)) { m = new(); weeklyComments[name] = m; }
+                m[wk] = cmt;
+            }
+        }
+
         // weeklyPlans[userName][week] = 下週預計執行工作(填寫於該週)
         var weeklyPlans = new Dictionary<string, Dictionary<int, string>>();
         using (var cmd = new SqlCommand(@"
@@ -207,7 +227,7 @@ app.MapGet("/api/bootstrap", async (int? year) =>
             allowRetroCheckin = (val as string)?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
         }
 
-        return Results.Ok(new { year = y, years, weeks, users, projects, taskLogs, extraNotes, weeklyPlans, allowRetroCheckin });
+        return Results.Ok(new { year = y, years, weeks, users, projects, taskLogs, extraNotes, weeklyPlans, weeklyComments, allowRetroCheckin });
     }
     catch (Exception ex) { return Fail(ex); }
 });
@@ -267,6 +287,27 @@ app.MapPost("/api/weekly-plan", async (WeeklyPlanReq req) =>
         cmd.Parameters.AddWithValue("@Year", req.Year);
         cmd.Parameters.AddWithValue("@Week", req.Week);
         cmd.Parameters.AddWithValue("@Note", (object?)req.Note ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 3.1.5) 主管週報回覆 — usp_UpsertWeeklyComment(僅主管,SP 內檢查;空字串=清空回覆)
+app.MapPost("/api/weekly-comment", async (WeeklyCommentReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(connStr);
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_UpsertWeeklyComment", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@UserName", req.UserName);
+        cmd.Parameters.AddWithValue("@Year", req.Year);
+        cmd.Parameters.AddWithValue("@Week", req.Week);
+        cmd.Parameters.AddWithValue("@Comment", (object?)req.Comment ?? "");
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
@@ -594,12 +635,17 @@ app.MapGet("/api/audit-log", async (int? top) =>
                         }
                         return s;
                     }
-                    case "ExtraNote":   // entityId = 裕隆@2026W27,NewValue = 內容
-                    case "WeeklyPlan":  // 同格式;內容為「下週預計執行工作」
+                    case "ExtraNote":     // entityId = 裕隆@2026W27,NewValue = 內容
+                    case "WeeklyPlan":    // 同格式;內容為「下週預計執行工作」
+                    case "WeeklyComment": // 同格式;內容為「主管週報回覆」
                     {
                         var at = (entityId ?? "").Split('@');
                         var (y, w) = at.Length == 2 ? ParseYw(at[1]) : ("?", "?");
                         var who = at.Length > 0 ? at[0] : "?";
+                        if (entityType == "WeeklyComment")
+                            return string.IsNullOrWhiteSpace(newV)
+                                ? $"清除 {who} {y} 年第 {w} 週週報的主管回覆"
+                                : $"主管回覆 {who} {y} 年第 {w} 週週報：{newV}";
                         var what = entityType == "WeeklyPlan" ? "下週預計執行工作" : "非專案事項";
                         var s = $"填寫 {who} {y} 年第 {w} 週的{what}";
                         if (!string.IsNullOrWhiteSpace(newV)) s += $"：{newV}";
@@ -984,6 +1030,7 @@ record UserCreateReq(string UserName, string Actor, string? ActorRole, string? A
 record UserUpdateReq(string UserName, string NewName, string Actor, string? ActorRole, string? ActorEmpId);
 record UserDeleteReq(string UserName, string Actor, string? ActorRole, string? ActorEmpId);
 record WeeklyPlanReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole, string? ActorEmpId);
+record WeeklyCommentReq(string UserName, int Year, int Week, string? Comment, string Actor, string? ActorRole, string? ActorEmpId);
 record DeliverableReq(int ProjectId, string? Deliverable, string? MpSaving, string Actor, string? ActorRole, string? ActorEmpId);
 record ScoreReq(string TaskCode, int Year, int Week, decimal Score, string Actor, string? ActorRole, string? ActorEmpId);
 record RetroCheckinReq(bool Enabled, string Actor, string? ActorRole);
