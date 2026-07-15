@@ -135,10 +135,10 @@ app.MapGet("/api/bootstrap", async (int? year) =>
         }
         var projects = projOrder.Select(id => projMap[id]).ToList();
 
-        // taskLogs[taskCode][week] = { status, note, isExecuting, score }
+        // taskLogs[taskCode][week] = { status, note, isExecuting, score, reporter, reporterRole, updatedAt }
         var taskLogs = new Dictionary<string, Dictionary<int, object>>();
         using (var cmd = new SqlCommand(@"
-            SELECT t.TaskCode, w.WeekNo, w.Status, w.Note, w.Score, u.UserName, u.Role
+            SELECT t.TaskCode, w.WeekNo, w.Status, w.Note, w.Score, u.UserName, u.Role, w.UpdatedAt
             FROM dbo.WeeklyLogs w
             JOIN dbo.Tasks t ON t.TaskId = w.TaskId
             LEFT JOIN dbo.Users u ON u.UserId = w.ReportedByUserId
@@ -155,17 +155,20 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                 decimal score = r.GetDecimal(4);
                 string? reporter = r.IsDBNull(5) ? null : r.GetString(5);
                 string? reporterRole = r.IsDBNull(6) ? null : r.GetString(6);
+                string updatedAt = r.GetDateTime(7).ToString("yyyy-MM-dd HH:mm");
                 if (!taskLogs.TryGetValue(code, out var m)) { m = new(); taskLogs[code] = m; }
-                m[wk] = new { status, note, isExecuting = status != "not_executed", score, reporter, reporterRole };
+                m[wk] = new { status, note, isExecuting = status != "not_executed", score, reporter, reporterRole, updatedAt };
             }
         }
 
-        // extraNotes[userName][week] = note
+        // extraNotes[userName][week] = note；extraNoteMeta[userName][week] = { by, byRole, at }(最後編輯人/時間)
         var extraNotes = new Dictionary<string, Dictionary<int, string>>();
+        var extraNoteMeta = new Dictionary<string, Dictionary<int, object>>();
         using (var cmd = new SqlCommand(@"
-            SELECT u.UserName, e.WeekNo, e.Note
+            SELECT u.UserName, e.WeekNo, e.Note, u2.UserName, u2.Role, e.UpdatedAt
             FROM dbo.ExtraNotes e
             JOIN dbo.Users u ON u.UserId = e.UserId
+            LEFT JOIN dbo.Users u2 ON u2.UserId = e.UpdatedByUserId
             WHERE e.ScheduleYear = @y", conn))
         {
             cmd.Parameters.AddWithValue("@y", y);
@@ -177,15 +180,24 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                 string note = r.IsDBNull(2) ? "" : r.GetString(2);
                 if (!extraNotes.TryGetValue(name, out var m)) { m = new(); extraNotes[name] = m; }
                 m[wk] = note;
+                if (!extraNoteMeta.TryGetValue(name, out var mm)) { mm = new(); extraNoteMeta[name] = mm; }
+                mm[wk] = new
+                {
+                    by = r.IsDBNull(3) ? null : r.GetString(3),
+                    byRole = r.IsDBNull(4) ? null : r.GetString(4),
+                    at = r.GetDateTime(5).ToString("yyyy-MM-dd HH:mm")
+                };
             }
         }
 
-        // weeklyComments[userName][week] = 主管週報回覆(選填;空字串=已清空,不回傳)
+        // weeklyComments[userName][week] = 主管週報回覆(選填;空字串=已清空,不回傳)；weeklyCommentMeta 同步帶最後編輯人/時間
         var weeklyComments = new Dictionary<string, Dictionary<int, string>>();
+        var weeklyCommentMeta = new Dictionary<string, Dictionary<int, object>>();
         using (var cmd = new SqlCommand(@"
-            SELECT u.UserName, wc.WeekNo, wc.Comment
+            SELECT u.UserName, wc.WeekNo, wc.Comment, u2.UserName, u2.Role, wc.UpdatedAt
             FROM dbo.WeeklyComments wc
             JOIN dbo.Users u ON u.UserId = wc.UserId
+            LEFT JOIN dbo.Users u2 ON u2.UserId = wc.UpdatedByUserId
             WHERE wc.ScheduleYear = @y AND wc.Comment <> N''", conn))
         {
             cmd.Parameters.AddWithValue("@y", y);
@@ -197,15 +209,24 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                 string cmt = r.IsDBNull(2) ? "" : r.GetString(2);
                 if (!weeklyComments.TryGetValue(name, out var m)) { m = new(); weeklyComments[name] = m; }
                 m[wk] = cmt;
+                if (!weeklyCommentMeta.TryGetValue(name, out var mm)) { mm = new(); weeklyCommentMeta[name] = mm; }
+                mm[wk] = new
+                {
+                    by = r.IsDBNull(3) ? null : r.GetString(3),
+                    byRole = r.IsDBNull(4) ? null : r.GetString(4),
+                    at = r.GetDateTime(5).ToString("yyyy-MM-dd HH:mm")
+                };
             }
         }
 
-        // weeklyPlans[userName][week] = 下週預計執行工作(填寫於該週)
+        // weeklyPlans[userName][week] = 下週預計執行工作(填寫於該週)；weeklyPlanMeta 同步帶最後編輯人/時間
         var weeklyPlans = new Dictionary<string, Dictionary<int, string>>();
+        var weeklyPlanMeta = new Dictionary<string, Dictionary<int, object>>();
         using (var cmd = new SqlCommand(@"
-            SELECT u.UserName, wp.WeekNo, wp.Note
+            SELECT u.UserName, wp.WeekNo, wp.Note, u2.UserName, u2.Role, wp.UpdatedAt
             FROM dbo.WeeklyPlans wp
             JOIN dbo.Users u ON u.UserId = wp.UserId
+            LEFT JOIN dbo.Users u2 ON u2.UserId = wp.UpdatedByUserId
             WHERE wp.ScheduleYear = @y", conn))
         {
             cmd.Parameters.AddWithValue("@y", y);
@@ -217,6 +238,13 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                 string note = r.IsDBNull(2) ? "" : r.GetString(2);
                 if (!weeklyPlans.TryGetValue(name, out var m)) { m = new(); weeklyPlans[name] = m; }
                 m[wk] = note;
+                if (!weeklyPlanMeta.TryGetValue(name, out var mm)) { mm = new(); weeklyPlanMeta[name] = mm; }
+                mm[wk] = new
+                {
+                    by = r.IsDBNull(3) ? null : r.GetString(3),
+                    byRole = r.IsDBNull(4) ? null : r.GetString(4),
+                    at = r.GetDateTime(5).ToString("yyyy-MM-dd HH:mm")
+                };
             }
         }
 
@@ -227,7 +255,7 @@ app.MapGet("/api/bootstrap", async (int? year) =>
             allowRetroCheckin = (val as string)?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
         }
 
-        return Results.Ok(new { year = y, years, weeks, users, projects, taskLogs, extraNotes, weeklyPlans, weeklyComments, allowRetroCheckin });
+        return Results.Ok(new { year = y, years, weeks, users, projects, taskLogs, extraNotes, extraNoteMeta, weeklyPlans, weeklyPlanMeta, weeklyComments, weeklyCommentMeta, allowRetroCheckin });
     }
     catch (Exception ex) { return Fail(ex); }
 });
