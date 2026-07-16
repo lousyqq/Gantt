@@ -17,8 +17,10 @@ app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// 連線字串來自 appsettings.json 的 ConnectionStrings:Gantt
-string connStr = builder.Configuration.GetConnectionString("Gantt")
+// 連線字串來自 appsettings.json 的 ConnectionStrings:Gantt。
+// 每次取用時即時讀取(appsettings.json 預設 reloadOnChange:true)——部署後直接改檔即可切換測試 DB
+// (如 Initial Catalog=Gantt→Gantt2),存檔數秒內生效,無須重新發佈或回收應用程式集區。
+string ConnStr() => app.Configuration.GetConnectionString("Gantt")
     ?? throw new InvalidOperationException("找不到連線字串 ConnectionStrings:Gantt");
 
 const int DefaultYear = 2026;
@@ -62,7 +64,7 @@ app.MapGet("/api/bootstrap", async (int? year) =>
     int y = year ?? DefaultYear;
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
 
         var users = new List<object>();
@@ -265,7 +267,7 @@ app.MapPost("/api/weekly-log", async (WeeklyLogReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_UpsertWeeklyLog", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@TaskCode", req.TaskCode);
@@ -287,7 +289,7 @@ app.MapPost("/api/extra-note", async (ExtraNoteReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_UpsertExtraNote", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@UserName", req.UserName);
@@ -308,7 +310,7 @@ app.MapPost("/api/weekly-plan", async (WeeklyPlanReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_UpsertWeeklyPlan", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@UserName", req.UserName);
@@ -329,7 +331,7 @@ app.MapPost("/api/weekly-comment", async (WeeklyCommentReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_UpsertWeeklyComment", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@UserName", req.UserName);
@@ -350,7 +352,7 @@ app.MapPost("/api/project/deliverable", async (DeliverableReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_UpdateProjectDeliverable", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@ProjectId", req.ProjectId);
@@ -370,7 +372,7 @@ app.MapPost("/api/project/star", async (ProjectStarReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_ToggleProjectStar", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@ProjectId", req.ProjectId);
@@ -389,7 +391,7 @@ app.MapPost("/api/weekly-log/score", async (ScoreReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_UpdateLogScore", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@TaskCode", req.TaskCode);
@@ -410,7 +412,7 @@ app.MapPost("/api/task-schedule", async (TaskScheduleReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_UpdateTaskSchedule", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@TaskCode", req.TaskCode);
@@ -431,7 +433,7 @@ app.MapPost("/api/project", async (ProjectCreateReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_InsertProject", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@TypeCode", req.Type);
@@ -455,7 +457,7 @@ app.MapPost("/api/project/update", async (ProjectUpdateReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_UpdateProject", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@ProjectId", req.ProjectId);
@@ -477,7 +479,7 @@ app.MapPost("/api/project/delete", async (ProjectDeleteReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_DeleteProject", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@ProjectId", req.ProjectId);
@@ -495,7 +497,7 @@ app.MapPost("/api/project/restore", async (ProjectDeleteReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_RestoreProject", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@ProjectId", req.ProjectId);
@@ -513,7 +515,7 @@ app.MapPost("/api/task/restore", async (TaskDeleteReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_RestoreTask", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@TaskCode", req.TaskCode);
@@ -531,7 +533,7 @@ app.MapPost("/api/project/reorder", async (ProjectReorderReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_ReorderProjects", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@OrderedIdsJson", System.Text.Json.JsonSerializer.Serialize(req.OrderedIds ?? new List<int>()));
@@ -549,7 +551,7 @@ app.MapPost("/api/task", async (TaskCreateReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_InsertTask", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@ProjectId", req.ProjectId);
@@ -572,7 +574,7 @@ app.MapPost("/api/task/delete", async (TaskDeleteReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_DeleteTask", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@TaskCode", req.TaskCode);
@@ -592,7 +594,7 @@ app.MapGet("/api/audit-log", async (int? top) =>
     int n = Math.Clamp(top ?? 200, 1, 1000);
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
 
         // 名稱對照(含已刪除/已停用者,舊紀錄才翻得出名稱)
@@ -815,7 +817,7 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
         var userOrder = new List<string>();
         var extraD = new Dictionary<string, string>();
         var planD = new Dictionary<string, string>();
-        using (var conn = new SqlConnection(connStr))
+        using (var conn = new SqlConnection(ConnStr()))
         {
             await conn.OpenAsync();
             using (var cmd = new SqlCommand(@"
@@ -948,12 +950,100 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
     catch (Exception ex) { return Fail(ex); }
 });
 
+// 12b) 成果清單匯出 Excel — 專案項目/具體產出/MP Saving(高階主管離線瀏覽用);
+//      body 帶 projectIds(前端目前顯示的篩選+排序結果)則依序匯出,不帶或空陣列=全部(預設順序)
+app.MapPost("/api/results-excel", async (ResultsExcelReq req) =>
+{
+    int y = req.Year;
+    try
+    {
+        var all = new List<(int Id, string Owner, string Category, string Type, string Name, bool Starred, string? Deliverable, string? MpSaving)>();
+        using (var conn = new SqlConnection(ConnStr()))
+        {
+            await conn.OpenAsync();
+            using var cmd = new SqlCommand(@"
+                SELECT p.ProjectId, u.UserName, p.Category, p.TypeCode, p.Name, p.IsStarred, p.Deliverable, p.MpSaving
+                FROM dbo.Projects p
+                JOIN dbo.Users u ON u.UserId = p.OwnerUserId
+                WHERE p.IsDeleted = 0 AND p.ScheduleYear = @y
+                ORDER BY u.SortOrder, p.SortOrder, p.ProjectId", conn);
+            cmd.Parameters.AddWithValue("@y", y);
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                all.Add((r.GetInt32(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4),
+                         r.GetBoolean(5),
+                         r.IsDBNull(6) ? null : r.GetString(6),
+                         r.IsDBNull(7) ? null : r.GetString(7)));
+        }
+
+        // 依前端傳入的顯示順序輸出(套用畫面上的篩選與排序);未傳=全部
+        var rows = all;
+        if (req.ProjectIds is { Count: > 0 })
+        {
+            var byId = all.ToDictionary(p => p.Id);
+            rows = req.ProjectIds.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+        }
+
+        using var wb = new ClosedXML.Excel.XLWorkbook();
+        var ws = wb.Worksheets.Add($"{y} 成果清單");
+        string[] headers = { "No", "分類", "類型", "專案名稱", "負責人", "重點關注", "預計交付具體產出成果", "MP Saving" };
+        for (int i = 0; i < headers.Length; i++) ws.Cell(1, i + 1).Value = headers[i];
+        var head = ws.Range(1, 1, 1, headers.Length);
+        head.Style.Font.Bold = true;
+        head.Style.Font.FontColor = ClosedXML.Excel.XLColor.White;
+        head.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromArgb(0x00, 0x1F, 0x5B);
+        head.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center;
+
+        int row = 2;
+        foreach (var p in rows)
+        {
+            ws.Cell(row, 1).Value = row - 1;
+            ws.Cell(row, 2).Value = p.Category;
+            ws.Cell(row, 3).Value = p.Type.ToUpperInvariant();
+            ws.Cell(row, 4).Value = p.Name;
+            ws.Cell(row, 5).Value = p.Owner;
+            ws.Cell(row, 6).Value = p.Starred ? "★" : "";
+            ws.Cell(row, 7).Value = p.Deliverable ?? "";
+            ws.Cell(row, 8).Value = p.MpSaving ?? "";
+            if (p.Starred)
+            {
+                var st = ws.Cell(row, 6).Style;
+                st.Font.Bold = true;
+                st.Font.FontColor = ClosedXML.Excel.XLColor.FromArgb(0xB4, 0x53, 0x09);
+                st.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromArgb(0xFE, 0xF3, 0xC7);
+            }
+            row++;
+        }
+        var used = ws.Range(1, 1, Math.Max(row - 1, 1), headers.Length);
+        used.Style.Border.InsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
+        used.Style.Border.OutsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
+        ws.SheetView.FreezeRows(1);
+        ws.Column(1).Width = 5;
+        ws.Columns(2, 3).AdjustToContents();
+        ws.Column(4).Width = 48;
+        ws.Column(5).AdjustToContents();
+        ws.Column(6).AdjustToContents();
+        ws.Column(6).Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center;
+        ws.Column(7).Width = 60;
+        ws.Column(7).Style.Alignment.WrapText = true;
+        ws.Column(8).Width = 20;
+        ws.Column(8).Style.Alignment.WrapText = true;
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return Results.File(ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"Results_{y}.xlsx");
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
 // 13) 主管新增成員 — usp_InsertUser(同名成員曾被移除則重新啟用)
 app.MapPost("/api/user", async (UserCreateReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_InsertUser", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@UserName", req.UserName);
@@ -971,7 +1061,7 @@ app.MapPost("/api/user/update", async (UserUpdateReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_UpdateUser", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@UserName", req.UserName);
@@ -990,7 +1080,7 @@ app.MapPost("/api/user/delete", async (UserDeleteReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_DeleteUser", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@UserName", req.UserName);
@@ -1008,7 +1098,7 @@ app.MapPost("/api/settings/retro-checkin", async (RetroCheckinReq req) =>
 {
     try
     {
-        using var conn = new SqlConnection(connStr);
+        using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
         using var cmd = new SqlCommand("dbo.usp_SetAppSetting", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@KeyName", "AllowRetroCheckin");
@@ -1062,4 +1152,5 @@ record WeeklyCommentReq(string UserName, int Year, int Week, string? Comment, st
 record DeliverableReq(int ProjectId, string? Deliverable, string? MpSaving, string Actor, string? ActorRole, string? ActorEmpId);
 record ScoreReq(string TaskCode, int Year, int Week, decimal Score, string Actor, string? ActorRole, string? ActorEmpId);
 record RetroCheckinReq(bool Enabled, string Actor, string? ActorRole);
+record ResultsExcelReq(int Year, List<int>? ProjectIds);
 record ProjectStarReq(int ProjectId, bool Starred, string Actor, string? ActorRole, string? ActorEmpId);

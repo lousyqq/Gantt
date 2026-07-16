@@ -229,6 +229,7 @@ function ResultsView({
   projects,
   role,
   currentUser,
+  year,
   starredIds = new Set(),
   toggleStar
 }) {
@@ -237,6 +238,8 @@ function ResultsView({
     key: null,
     direction: 'asc'
   }); // key: 'category' | 'name' | 'owner' | 'deliverable' | 'mpSaving'
+  const [exporting, setExporting] = useState(false); // 匯出 Excel 防連點 + 進度回饋
+  const [exportFailed, setExportFailed] = useState(false);
 
   // 點擊表頭切換排序欄位與方向
   const handleSortHeader = key => {
@@ -292,6 +295,39 @@ function ResultsView({
     return list;
   }, [projects, filterMode, sortConfig]);
 
+  // 匯出目前顯示的清單(套用中的篩選與排序)為 Excel — 高階主管離線(車上)瀏覽用
+  const exportExcel = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setExportFailed(false);
+    try {
+      const res = await fetch(`${API_BASE}/api/results-excel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          year,
+          projectIds: displayedProjects.map(p => p.id)
+        })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `成果清單_${year}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportFailed(true);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // 表頭渲染輔助函式（強制 whitespace-nowrap 不換行）
   const renderSortHeader = (label, key, widthClass, extraClass = "") => {
     const isSorted = sortConfig.key === key;
@@ -312,9 +348,16 @@ function ResultsView({
     className: "px-6 py-3 max-w-[1560px] w-full mx-auto space-y-3"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex flex-col gap-3"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between gap-2"
+  }, /*#__PURE__*/React.createElement("span", {
     className: "text-xs font-bold text-slate-500"
-  }, "\u9EDE\u64CA\u4E0B\u65B9 KPI \u6307\u6A19\u5361\u7247\uFF0C\u5373\u53EF\u5FEB\u901F\u5207\u63DB\u6AA2\u8996\u8207\u904E\u6FFE\u6E05\u55AE\uFF1A")), /*#__PURE__*/React.createElement("div", {
+  }, "\u9EDE\u64CA\u4E0B\u65B9 KPI \u6307\u6A19\u5361\u7247\uFF0C\u5373\u53EF\u5FEB\u901F\u5207\u63DB\u6AA2\u8996\u8207\u904E\u6FFE\u6E05\u55AE\uFF1A"), /*#__PURE__*/React.createElement("button", {
+    onClick: exportExcel,
+    disabled: exporting,
+    className: `flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition border shadow-sm text-white disabled:opacity-70 ${exportFailed ? 'bg-red-600 hover:bg-red-500 border-red-700' : 'bg-green-600 hover:bg-green-500 border-green-700'}`,
+    title: `下載目前顯示的清單（含套用中的篩選與排序，共 ${displayedProjects.length} 案）為 Excel，供離線瀏覽專案項目、具體產出與 MP Saving`
+  }, exporting ? '⏳ 產生中…' : exportFailed ? '❌ 匯出失敗，點擊重試' : `⬇️ 匯出 Excel（${displayedProjects.length} 案）`)), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 md:grid-cols-5 gap-4"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setFilterMode('all'),
@@ -1889,6 +1932,7 @@ function App() {
     projects: filteredProjects,
     role: role,
     currentUser: currentUser,
+    year: scheduleYear,
     starredIds: starredIds,
     toggleStar: toggleStar
   }) : /*#__PURE__*/React.createElement("table", {
