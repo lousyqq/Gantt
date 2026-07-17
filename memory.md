@@ -1150,6 +1150,70 @@ appsettings.json 預設以 `reloadOnChange:true` 載入 → **存檔數秒內所
 過程發現 **Gantt2 尚未跑遷移 10**（bootstrap 掛在 WeeklyComments 不存在），已代跑
 `10_add_manager_weekly_comment.sql` 於 Gantt2（冪等）。Gantt2 marker 已還原 false、連線字串已還原 Gantt。
 
+---
+
+## 2026-07-17 — 頁面瀏覽權限卡控（遷移 11＋WEB 名冊模擬）
+
+**需求**：以登入者 Windows 工號比對 [WEB].[dbo].[notes_person] 名冊（遠端為跨 server VIEW）的部門，
+不符合主管設定的允許條件（DEPT_1/2/3 特定值或特定工號）即顯示無權限畫面；主管頁面可設定條件。
+
+**本機模擬**：`sim_create_WEB_notes_person.sql`（**僅開發機用，遠端勿執行**）— 建 WEB DB＋notes_person
+資料表＋截圖 34 筆範例資料（中文姓名為截圖辨識僅供測試；含 00058897 林玉婷/MSD）。
+
+**DB**（新遷移檔 `11_add_access_control.sql`，冪等，已套用本機 Gantt；**遠端需依序執行**）：
+- 新表 `dbo.AccessRules`：RuleType（DEPT_1/DEPT_2/DEPT_3/EMPNO，CHECK）×Value 唯一；Note/CreatedBy/At。
+- AppSettings 種子 `AccessControlEnabled='false'`（**預設不卡控**，避免部署當下鎖死）。
+- SP `usp_AddAccessRule`／`usp_DeleteAccessRule`：SP 內檢查主管，稽核 Action='ACCESSRULE'（NewValue 即白話）。
+- notes_person 不在本遷移範圍（遠端已存在）。
+
+**後端**（`Program.cs`）：
+- `GET /api/access-check?empId=&preview=`：開關關閉→直接放行；否則 EMPNO 白名單→放行（不查名冊）；
+  查名冊（`Access:PersonView` appsettings 可設，預設 `[WEB].[dbo].[notes_person]`，regex 消毒防注入，
+  即時讀取）→ 查無/查詢失敗(fail-closed)/部門不符→擋下，回 reason＋person 資訊。preview=1 供主管測試規則（略過總開關）。
+- `GET /api/access-rules`、`POST /api/access-rule`、`POST /api/access-rule/delete`、
+  `POST /api/settings/access-control`（沿用 usp_SetAppSetting，欄位 enabled）。
+
+**前端**（`ClientApp/app.jsx`）：
+- 進站流程：detectEmpId → `/api/access-check` → 檢查中顯示 LoadingScreen；卡控啟用且未通過 →
+  整頁 `AccessDeniedScreen`（🚫＋工號＋名冊資訊＋原因，不顯示登入與任何資料）。
+- 主管 header 新增「🔐 瀏覽權限」→ `AccessPanel`（玫瑰紅標題列 #9F1239）：
+  ①總開關（**開啟前保險**：先以主管自己工號 preview 測規則，不通過就擋下並提示，避免把自己鎖在門外）
+  ②新增規則（類型下拉＋值＋備註）③規則清單（晶片＋刪除）④工號測試盒（preview 模式，回 通過/擋下＋姓名部門）。
+- 稽核標籤：ACCESSRULE=權限(rose)、SETTING=設定；EntityType AccessRule/AppSettings 中文化。
+
+**驗證**：模擬名冊 34 筆查詢正常；面板新增 DEPT_3=MSD → 測試 00058897(林玉婷/MSD)=✅、00002892(無DEPT_3)=🚫；
+開啟卡控被保險擋下（本機工號 yu-tinglin 不符）→ 加 EMPNO=yu-tinglin 白名單後開啟成功 → 重整可進；
+刪白名單後重整=整頁無權限畫面（工號＋原因）→ SQL 關閉開關救援成功；異動紀錄顯示白話權限紀錄；console 乾淨。
+測試後狀態：開關=false（關閉）、規則保留 DEPT_3=MSD 一條（示範用，開關關閉時無作用）。
+
+---
+
+## 2026-07-17 — 瀏覽權限規則改為多欄位組合(AND)＋加入 DEPTNAME（遷移 12）
+
+**需求**：單一規則可同時以多個欄位判斷（不限只選一個欄位），並把 DEPTNAME 加入可篩選欄位。
+
+**規則語意（定案）**：一條規則＝Empno／DeptName／Dept1／Dept2／Dept3 任填 ≥1 欄；
+**同一條規則內有填的欄位「全部符合」才通過（AND）**；**多條規則之間「任一符合」即放行（OR）**。
+只填工號＝白名單直接放行（不查名冊）；含部門條件的規則在名冊查無/查詢失敗時不成立（fail-closed）。
+
+**DB**（新遷移檔 `12_access_rules_multi_field.sql`，冪等，已套用本機 Gantt；**遠端依序執行 11→12**）：
+- AccessRules 加 Empno/DeptName/Dept1/Dept2/Dept3（皆 NULL 允許），既有單欄位規則自動搬移
+  （RuleType/Value→對應新欄位）後移除舊欄位與舊約束；CHECK 至少一欄非空。
+- usp_AddAccessRule 改收五欄位參數＋重複組合檢查；usp_DeleteAccessRule 重建；
+  稽核描述自動組「DEPT_2=ESI 且 DEPT_3=IMD」白話文字。
+
+**後端**（`Program.cs`）：access-check 改為逐規則評估（大小寫不敏感、TRIM）；名冊查詢加 DEPTNAME；
+person 回傳含 deptname；AccessRuleAddReq 改五欄位。
+
+**前端**（`ClientApp/app.jsx`）：AccessPanel 新增規則表單改為 5 欄輸入格（任填 ≥1）＋備註，
+說明文案標明「同規則多欄位＝且、規則之間＝或」；規則清單以晶片串顯示「欄位＝值 且 …」；
+測試盒/無權限畫面優先顯示 DEPTNAME。RULE_FIELDS 常數取代原 RULE_TYPE_LABELS/CHIPS。
+
+**驗證**：遷移搬移正確（Dept1=12A_PTI 舊規則自動轉換）；規則「DEPT_2=ESI 且 DEPT_3=IMD」→
+00043029(IMD)=✅、00058897(MSD)=🚫（AND 生效）；再加「DEPTNAME=12A_PTI/ESI/MSD」→
+00058897=✅（規則間 OR 生效）、00019246(EMS2)=🚫；console 乾淨。測試規則已清空、開關維持關閉。
+（過程中發現名冊 00058897 一筆被動過而消失，已重跑 sim 腳本重灌 34 筆。）
+
 **教訓（工具側）**：PowerShell 5.1 `Get-Content -Raw`＋`Set-Content` 改含中文的 UTF-8(無BOM) 檔會以
 系統編碼誤讀→寫壞 JSON（驗證過程曾把 appsettings.json 中文註解弄成亂碼導致 config 解析失敗，
 已用 Write 工具重寫修復）；改此類檔案一律用 Edit/Write 工具。

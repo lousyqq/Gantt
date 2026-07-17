@@ -398,9 +398,25 @@ function App() {
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState(null);
   const [empId, setEmpId] = useState(null);   // Windows 工號(顯示用;實際寫入由 apiPost 自動附帶)
+  // 瀏覽權限卡控:null=檢查中;{enabled,allowed,reason,person}=結果。開關關閉時後端直接回 allowed=true。
+  const [accessCheck, setAccessCheck] = useState(null);
 
-  // 載入時偵測一次 Windows 工號(非網域環境取不到 → null,系統照常運作)
-  React.useEffect(() => { detectEmpId().then(setEmpId); }, []);
+  // 載入時偵測一次 Windows 工號(非網域環境取不到 → null),接著向後端驗證瀏覽權限
+  React.useEffect(() => {
+    let cancelled = false;
+    detectEmpId().then(async (id) => {
+      if (cancelled) return;
+      setEmpId(id);
+      try {
+        const r = await apiGet(`/api/access-check?empId=${encodeURIComponent(id || '')}`);
+        if (!cancelled) setAccessCheck(r);
+      } catch {
+        // 後端不可達時不在此擋(bootstrap 會另行顯示連線錯誤);卡控啟用時的失敗判斷在伺服器端(fail-closed)
+        if (!cancelled) setAccessCheck({ enabled: false, allowed: true });
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // 年度切換:可用年度與週→月對照皆來自 DB 的 ScheduleWeeks(開新年度只需 EXEC usp_EnsureScheduleYear)
   const [scheduleYear, setScheduleYear] = useState(DEFAULT_SCHEDULE_YEAR);
@@ -531,6 +547,7 @@ function App() {
   const [noteTargetUser, setNoteTargetUser] = useState(null);        // 主管代編「非專案/下週預計」的目標成員(null=編輯自己的)
   const [showAuditPanel, setShowAuditPanel] = useState(false);   // 主管:異動紀錄(AuditLog)面板
   const [showMemberPanel, setShowMemberPanel] = useState(false); // 主管:成員管理面板
+  const [showAccessPanel, setShowAccessPanel] = useState(false); // 主管:瀏覽權限卡控面板(遷移 11)
   const [showDeadlinePanel, setShowDeadlinePanel] = useState(false); // 即將到期清單面板(頂部 ⏰ 晶片點開)
 
   const weekW = isCompact ? 22 : 32;
@@ -558,6 +575,7 @@ function App() {
     setShowWeeklyReport(false);
     setShowAuditPanel(false);
     setShowMemberPanel(false);
+    setShowAccessPanel(false);
     setShowDeadlinePanel(false);
   };
 
@@ -579,6 +597,7 @@ function App() {
     setShowWeeklyReport(false);
     setShowAuditPanel(false);
     setShowMemberPanel(false);
+    setShowAccessPanel(false);
     setShowDeadlinePanel(false);
   };
 
@@ -864,12 +883,13 @@ function App() {
         if (showWeekEditPanel) { setShowWeekEditPanel(false); e.preventDefault(); return; }
         if (showAuditPanel) { setShowAuditPanel(false); e.preventDefault(); return; }
         if (showMemberPanel) { setShowMemberPanel(false); e.preventDefault(); return; }
+        if (showAccessPanel) { setShowAccessPanel(false); e.preventDefault(); return; }
         if (showDeadlinePanel) { setShowDeadlinePanel(false); e.preventDefault(); return; }
         return;
       }
 
       // 以下導航快捷鍵：任何 Modal/Panel 開啟時不觸發
-      const isAnyModalOpen = !!(confirmInfo || commentTarget || selectedTaskInfo || deliverableProj || editingProject || addingInterval || showExtraNoteModal || showWeeklyPlanModal || showWeeklyReport || showPendingPanel || showRetroPanel || showWeekEditPanel || showAuditPanel || showMemberPanel || showDeadlinePanel);
+      const isAnyModalOpen = !!(confirmInfo || commentTarget || selectedTaskInfo || deliverableProj || editingProject || addingInterval || showExtraNoteModal || showWeeklyPlanModal || showWeeklyReport || showPendingPanel || showRetroPanel || showWeekEditPanel || showAuditPanel || showMemberPanel || showAccessPanel || showDeadlinePanel);
       if (isAnyModalOpen) return;
 
       // Home 或 H：回到本週
@@ -894,7 +914,7 @@ function App() {
     };
     window.addEventListener('keydown', handler, true);   // capture phase
     return () => window.removeEventListener('keydown', handler, true);
-  }, [currentUser, weekW, isOverview, isResults, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showDeadlinePanel, goToCurrentWeek]);
+  }, [currentUser, weekW, isOverview, isResults, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showDeadlinePanel, goToCurrentWeek]);
 
   const existingCategories = useMemo(
     () => [...new Set(projects.map(p => p.category).filter(Boolean))].sort(),
@@ -1190,6 +1210,12 @@ function App() {
   const moveTooltip = (e) => setTooltip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
   const hideTooltip = () => setTooltip(null);
 
+  // 瀏覽權限卡控:檢查完成前顯示載入畫面;卡控啟用且未通過 → 整頁無權限畫面(不顯示登入與任何資料)
+  if (!accessCheck) return <div className="min-h-screen bg-slate-100 flex flex-col"><LoadingScreen /></div>;
+  if (accessCheck.enabled && !accessCheck.allowed) {
+    return <AccessDeniedScreen empId={empId} reason={accessCheck.reason} person={accessCheck.person} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans flex flex-col relative overflow-hidden">
       <header className="text-white px-4 py-2 flex justify-between items-center z-50 shadow-md" style={{ backgroundColor: NAVY }}>
@@ -1259,6 +1285,11 @@ function App() {
                 <button onClick={() => setShowMemberPanel(true)}
                   className="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20">
                   👥 成員管理
+                </button>
+                <button onClick={() => setShowAccessPanel(true)}
+                  className="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20"
+                  title="設定誰可以瀏覽本頁面：依部門(DEPT_1/2/3)或工號白名單卡控">
+                  🔐 瀏覽權限
                 </button>
                 <button onClick={() => setShowAuditPanel(true)}
                   className="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20">
@@ -1882,6 +1913,13 @@ function App() {
           onClose={() => setShowMemberPanel(false)}
         />
       )}
+      {showAccessPanel && role === 'manager' && (
+        <AccessPanel
+          currentUser={currentUser} role={role} empId={empId}
+          showToast={showToast}
+          onClose={() => setShowAccessPanel(false)}
+        />
+      )}
       {deliverableProj && (
         <DeliverableModal
           proj={deliverableProj} role={role} currentUser={currentUser}
@@ -1940,6 +1978,31 @@ function ErrorScreen({ message, onRetry }) {
         <p className="text-sm text-slate-500 mb-3">系統無法從後端讀取資料，請確認後端服務與資料庫連線後再試一次。</p>
         <div className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg p-3 mb-5 text-left whitespace-pre-wrap break-words max-h-40 overflow-y-auto">{message}</div>
         <button onClick={onRetry} className="w-full text-white font-bold py-3 rounded-xl shadow-md transition hover:opacity-90" style={{ backgroundColor: '#001F5B' }}>重新載入</button>
+      </div>
+    </div>
+  );
+}
+
+// 瀏覽權限未通過的整頁封鎖畫面(卡控啟用時取代整個 App,不顯示登入與資料)
+function AccessDeniedScreen({ empId, reason, person }) {
+  return (
+    <div className="min-h-screen flex justify-center items-center bg-slate-100 p-4">
+      <div className="bg-white p-10 rounded-2xl shadow-2xl border border-red-200 max-w-md w-full text-center">
+        <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl">🚫</div>
+        <h2 className="text-xl font-black text-slate-800 mb-2">無權限瀏覽此頁面</h2>
+        <p className="text-sm text-slate-500 mb-4">您的帳號未被授權瀏覽 MSD 專案追蹤總表。</p>
+        <div className="text-left text-sm bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4 space-y-1.5">
+          <div><span className="text-slate-400 font-bold mr-2">登入工號</span><span className="font-mono font-bold text-slate-800">{empId || '（無法取得）'}</span></div>
+          {person && (
+            <div><span className="text-slate-400 font-bold mr-2">人員名冊</span>
+              <span className="text-slate-700 font-medium">{person.name || ''} {person.ename ? `(${person.ename})` : ''}・{person.deptname || [person.dept1, person.dept2, person.dept3].filter(Boolean).join('/') || '無部門資料'}</span>
+            </div>
+          )}
+        </div>
+        {reason && (
+          <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg p-3 mb-5 text-left whitespace-pre-wrap">{reason}</div>
+        )}
+        <p className="text-xs text-slate-400">若需要瀏覽權限，請聯絡系統管理員（主管）將您的部門或工號加入允許清單。</p>
       </div>
     </div>
   );
@@ -3310,9 +3373,258 @@ const AUDIT_ACTION_META = {
   EXTRANOTE: { label: '非專案', cls: 'bg-orange-100 text-orange-700' },
   WEEKPLAN:  { label: '下週預計', cls: 'bg-indigo-100 text-indigo-700' },
   SCORE:     { label: '評分', cls: 'bg-fuchsia-100 text-fuchsia-700' },
-  COMMENT:   { label: '回覆', cls: 'bg-violet-100 text-violet-700' }
+  COMMENT:   { label: '回覆', cls: 'bg-violet-100 text-violet-700' },
+  ACCESSRULE:{ label: '權限', cls: 'bg-rose-100 text-rose-700' },
+  SETTING:   { label: '設定', cls: 'bg-slate-200 text-slate-700' }
 };
-const AUDIT_ENTITY_LABELS = { Project: '專案', Task: '任務', WeeklyLog: '週回報', ExtraNote: '非專案事項', WeeklyPlan: '下週計畫', WeeklyComment: '主管回覆', User: '成員' };
+const AUDIT_ENTITY_LABELS = { Project: '專案', Task: '任務', WeeklyLog: '週回報', ExtraNote: '非專案事項', WeeklyPlan: '下週計畫', WeeklyComment: '主管回覆', User: '成員', AccessRule: '瀏覽權限', AppSettings: '系統設定' };
+
+// 瀏覽權限規則的條件欄位定義(投影友善:400 級實線邊框+700/800 級文字)
+// 同一條規則內有填的欄位「全部符合」才通過(AND);多條規則之間「任一符合」即放行(OR)
+const RULE_FIELDS = [
+  { key: 'empno',    label: '工號',     ph: '如 00058897',        chip: 'bg-amber-100 text-amber-800 border-amber-400' },
+  { key: 'deptName', label: 'DEPTNAME', ph: '如 12A_PTI/ESI/MSD', chip: 'bg-rose-100 text-rose-800 border-rose-400' },
+  { key: 'dept1',    label: 'DEPT_1',   ph: '如 12A_PTI',         chip: 'bg-sky-100 text-sky-800 border-sky-400' },
+  { key: 'dept2',    label: 'DEPT_2',   ph: '如 ESI',             chip: 'bg-teal-100 text-teal-800 border-teal-400' },
+  { key: 'dept3',    label: 'DEPT_3',   ph: '如 MSD',             chip: 'bg-indigo-100 text-indigo-800 border-indigo-400' }
+];
+
+// 主管:瀏覽權限卡控面板 — 總開關 + 允許規則(部門/工號白名單,任一符合即放行) + 工號測試
+// 資料來源:登入者工號比對 [WEB].[dbo].[notes_person] 名冊的 DEPT_1/2/3;規則存 Gantt DB 的 AccessRules(遷移 11)
+function AccessPanel({ currentUser, role, empId, showToast, onClose }) {
+  const [enabled, setEnabled] = useState(false);
+  const [rules, setRules] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [ruleForm, setRuleForm] = useState({ empno: '', deptName: '', dept1: '', dept2: '', dept3: '' });   // 任填 ≥1 欄,填多欄=全部符合才通過(AND)
+  const [ruleNote, setRuleNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [testId, setTestId] = useState('');
+  const [testResult, setTestResult] = useState(null);
+  const [testing, setTesting] = useState(false);
+
+  const load = async () => {
+    setLoading(true); setLoadError(null);
+    try {
+      const d = await apiGet('/api/access-rules');
+      setEnabled(!!d.enabled);
+      setRules(d.rules || []);
+    } catch (e) { setLoadError(e.message || '載入失敗'); }
+    finally { setLoading(false); }
+  };
+  React.useEffect(() => { load(); }, []);
+
+  // 規則物件 → 「欄位=值 且 …」描述文字(清單顯示與 toast 用)
+  const ruleDesc = (r) => RULE_FIELDS.filter(f => r[f.key]).map(f => `${f.label}=${r[f.key]}`).join(' 且 ');
+
+  const addRule = async () => {
+    if (saving) return;
+    const cond = {};
+    RULE_FIELDS.forEach(f => { const v = (ruleForm[f.key] || '').trim(); if (v) cond[f.key] = v; });
+    if (Object.keys(cond).length === 0) { showToast('❌ 至少填寫一個條件欄位（工號或部門）'); return; }
+    setSaving(true);
+    try {
+      await apiPost('/api/access-rule', { ...cond, note: ruleNote.trim() || null, actor: currentUser, actorRole: role });
+      setRuleForm({ empno: '', deptName: '', dept1: '', dept2: '', dept3: '' });
+      setRuleNote('');
+      showToast(`✅ 已新增允許規則：${ruleDesc(cond)}`);
+      await load();
+    } catch (e) { showToast('❌ 新增失敗：' + (e.message || '無法連線資料庫')); }
+    finally { setSaving(false); }
+  };
+
+  const deleteRule = async (r) => {
+    try {
+      await apiPost('/api/access-rule/delete', { ruleId: r.id, actor: currentUser, actorRole: role });
+      showToast(`🗑️ 已刪除規則：${ruleDesc(r)}`);
+      await load();
+    } catch (e) { showToast('❌ 刪除失敗：' + (e.message || '無法連線資料庫')); }
+  };
+
+  const toggle = async () => {
+    if (toggling) return;
+    setToggling(true);
+    try {
+      if (!enabled) {
+        // 開啟前保險:先用主管自己的工號跑一次規則,不通過就擋下,避免主管把自己鎖在門外
+        const me = await apiGet(`/api/access-check?empId=${encodeURIComponent(empId || '')}&preview=true`);
+        if (!me.allowed) {
+          showToast(`❌ 無法開啟卡控：您目前的工號（${empId || '無法取得'}）不符合任何允許規則，開啟後您自己也會被擋在門外。請先把自己的部門或工號加入規則。`);
+          return;
+        }
+      }
+      await apiPost('/api/settings/access-control', { enabled: !enabled, actor: currentUser, actorRole: role });
+      setEnabled(!enabled);
+      showToast(!enabled ? '🔒 已開啟瀏覽權限卡控，之後進站的訪客將依規則驗證' : '🔓 已關閉瀏覽權限卡控，所有人皆可瀏覽');
+    } catch (e) { showToast('❌ 切換失敗：' + (e.message || '無法連線資料庫')); }
+    finally { setToggling(false); }
+  };
+
+  const runTest = async () => {
+    if (testing) return;
+    const id = testId.trim();
+    if (!id) { showToast('❌ 請輸入要測試的工號'); return; }
+    setTesting(true); setTestResult(null);
+    try {
+      setTestResult(await apiGet(`/api/access-check?empId=${encodeURIComponent(id)}&preview=true`));
+    } catch (e) { showToast('❌ 測試失敗：' + (e.message || '無法連線資料庫')); }
+    finally { setTesting(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end">
+      <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#9F1239' }}>
+          <div>
+            <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🔐 頁面瀏覽權限</h3>
+            <p className="text-xs mt-0.5" style={{ color: '#FECDD3' }}>依人員名冊部門(DEPT_1/2/3)或工號白名單卡控，任一規則符合即可瀏覽</p>
+          </div>
+          <button onClick={onClose} className="text-white/70 hover:text-white p-1"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {loading ? (
+            <div className="text-center text-slate-400 py-10">載入中…</div>
+          ) : loadError ? (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm font-bold">
+              ❌ 載入失敗：{loadError}
+              <button onClick={load} className="ml-2 underline">重試</button>
+            </div>
+          ) : (
+            <>
+              {/* ① 總開關 */}
+              <div className={`rounded-xl border p-4 ${enabled ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-black text-slate-800">{enabled ? '🔒 卡控啟用中' : '🔓 目前未卡控'}</div>
+                    <div className="text-xs text-slate-500 mt-1">{enabled ? '不符合規則的訪客會看到「無權限」畫面' : '所有人皆可瀏覽；設定好規則後再開啟'}</div>
+                  </div>
+                  <button onClick={toggle} disabled={toggling}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold border shadow-sm transition text-white disabled:opacity-60 ${enabled ? 'bg-slate-500 hover:bg-slate-600 border-slate-600' : 'bg-rose-600 hover:bg-rose-700 border-rose-700'}`}>
+                    {toggling ? '切換中…' : enabled ? '關閉卡控' : '開啟卡控'}
+                  </button>
+                </div>
+                {enabled && (
+                  <div className="mt-2.5 text-[11px] font-bold text-rose-800 bg-rose-100 border border-rose-300 rounded-lg px-2.5 py-1.5">
+                    ⚠️ 修改規則立即生效於「下一次進站/重新整理」；已在瀏覽中的使用者不會被中途踢出。
+                  </div>
+                )}
+              </div>
+
+              {/* ② 新增規則(多欄位組合:任填 ≥1 欄;填多欄=全部符合才通過) */}
+              <div>
+                <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-2">➕ 新增允許規則</div>
+                <div className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-2.5 shadow-sm">
+                  <div className="grid grid-cols-2 gap-2">
+                    {RULE_FIELDS.map(f => (
+                      <label key={f.key} className={f.key === 'deptName' ? 'col-span-1' : ''}>
+                        <span className="block text-[10px] font-bold text-slate-500 mb-0.5">{f.label}</span>
+                        <input type="text" value={ruleForm[f.key]}
+                          onChange={e => setRuleForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                          onKeyDown={e => { if (e.key === 'Enter' && !e.isComposing) addRule(); }}
+                          placeholder={f.ph}
+                          className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-rose-500" />
+                      </label>
+                    ))}
+                    <label>
+                      <span className="block text-[10px] font-bold text-slate-500 mb-0.5">備註（選填）</span>
+                      <input type="text" value={ruleNote} onChange={e => setRuleNote(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.isComposing) addRule(); }}
+                        placeholder="如：MSD 全員"
+                        className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-rose-500" />
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 text-[11px] text-slate-400 leading-snug">
+                      任填一欄以上；<span className="font-bold text-slate-600">同一條規則內填多個欄位＝全部符合才通過（且）</span>，
+                      多條規則之間任一符合即放行（或）。只填工號＝白名單直接放行（不查名冊）。
+                    </div>
+                    <button onClick={addRule} disabled={saving}
+                      className="flex-shrink-0 px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 border border-rose-700 shadow-sm disabled:opacity-60">
+                      {saving ? '儲存中…' : '新增'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* ③ 規則清單 */}
+              <div>
+                <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-2">📜 目前允許規則（{rules.length} 條，任一符合即放行）</div>
+                {rules.length === 0 ? (
+                  <div className="bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-xl p-4 text-xs font-bold">
+                    尚未設定任何規則。{enabled ? '⚠️ 卡控啟用中且無規則＝全部擋下！' : '請先新增規則再開啟卡控。'}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {rules.map(r => (
+                      <div key={r.id} className="bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm">
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1 flex-wrap min-w-0">
+                            {RULE_FIELDS.filter(f => r[f.key]).map((f, i) => (
+                              <React.Fragment key={f.key}>
+                                {i > 0 && <span className="text-[10px] font-black text-slate-400">且</span>}
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap ${f.chip}`}>
+                                  {f.label}＝{r[f.key]}
+                                </span>
+                              </React.Fragment>
+                            ))}
+                          </div>
+                          <span className="ml-auto flex-shrink-0 text-[10px] text-slate-400" title={`建立者 ${r.createdBy || '-'}`}>{r.createdAt}</span>
+                          <button onClick={() => deleteRule(r)}
+                            className="flex-shrink-0 p-1 rounded text-red-500 hover:bg-red-50 border border-transparent hover:border-red-200 transition" title="刪除此規則">
+                            🗑
+                          </button>
+                        </div>
+                        {r.note && <div className="text-xs text-slate-500 mt-1 truncate" title={r.note}>📝 {r.note}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* ④ 工號測試 */}
+              <div>
+                <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-2">🧪 以工號測試規則（不受總開關影響）</div>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
+                  <div className="flex gap-2">
+                    <input type="text" value={testId} onChange={e => { setTestId(e.target.value); setTestResult(null); }}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.isComposing) runTest(); }}
+                      placeholder={`輸入工號，如 ${empId || '00058897'}`}
+                      className="flex-1 min-w-0 border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm font-mono outline-none focus:border-rose-500" />
+                    <button onClick={runTest} disabled={testing}
+                      className="flex-shrink-0 px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-slate-700 hover:bg-slate-800 border border-slate-800 shadow-sm disabled:opacity-60">
+                      {testing ? '測試中…' : '測試'}
+                    </button>
+                  </div>
+                  {testResult && (
+                    <div className={`rounded-lg border p-3 text-xs font-bold ${testResult.allowed ? 'bg-green-50 border-green-300 text-green-800' : 'bg-red-50 border-red-300 text-red-700'}`}>
+                      <div className="text-sm">{testResult.allowed ? '✅ 可以瀏覽' : '🚫 會被擋下'}</div>
+                      {testResult.person && (
+                        <div className="mt-1 font-medium text-slate-600">
+                          {testResult.person.name}{testResult.person.ename ? `（${testResult.person.ename}）` : ''}・
+                          {testResult.person.deptname || [testResult.person.dept1, testResult.person.dept2, testResult.person.dept3].filter(Boolean).join(' / ') || '無部門資料'}
+                        </div>
+                      )}
+                      {testResult.reason && <div className="mt-1 font-medium">{testResult.reason}</div>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="p-4 bg-slate-50 border-t border-slate-200">
+          <button onClick={onClose}
+            className="w-full py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-xl transition">
+            關閉面板
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // 主管:成員管理面板(新增/移除成員;移除為軟刪除 IsActive=0,名下仍有專案時後端會擋下)
 function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose }) {

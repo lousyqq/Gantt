@@ -1094,6 +1094,192 @@ app.MapPost("/api/user/delete", async (UserDeleteReq req) =>
 });
 
 // 16) 主管開關全年度歷史進度補登授權 — usp_SetAppSetting
+// ─── 頁面瀏覽權限卡控(遷移 11) ───────────────────────────────────────
+// 登入者工號 → 比對 AccessRules(EMPNO 白名單 / 部門規則) + [WEB].[dbo].[notes_person](部門名冊);
+// 任一規則符合即放行。開關 AppSettings.AccessControlEnabled 預設 false(不卡控,避免部署當下鎖死)。
+
+// 名冊 View 名稱可由 appsettings 的 Access:PersonView 覆寫(即時讀取);僅允許 [字元/底線/點/中括號] 防注入
+string PersonView()
+{
+    var v = app.Configuration["Access:PersonView"] ?? "[WEB].[dbo].[notes_person]";
+    return System.Text.RegularExpressions.Regex.IsMatch(v, @"^[\w\[\]\.]+$") ? v : "[WEB].[dbo].[notes_person]";
+}
+
+// 檢查工號是否可瀏覽。preview=true 供主管面板測試規則(略過總開關判斷)。
+app.MapGet("/api/access-check", async (string? empId, bool? preview) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(ConnStr());
+        await conn.OpenAsync();
+        bool enabled;
+        using (var cmd = new SqlCommand("SELECT Value FROM dbo.AppSettings WHERE KeyName = 'AccessControlEnabled'", conn))
+            enabled = ((await cmd.ExecuteScalarAsync()) as string)?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+
+        if (!enabled && preview != true)
+            return Results.Ok(new { enabled, allowed = true, reason = (string?)null, person = (object?)null });
+
+        var id = (empId ?? "").Trim();
+        if (id == "")
+            return Results.Ok(new { enabled, allowed = false, reason = "無法取得您的 Windows 登入工號（非網域環境），無法驗證瀏覽權限", person = (object?)null });
+
+        // 讀取規則(遷移 12:多欄位組合;同一條規則內有填的欄位全部符合=通過(AND),規則之間任一符合即放行(OR))
+        var rules = new List<(string? Empno, string? DeptName, string? D1, string? D2, string? D3)>();
+        using (var cmd = new SqlCommand("SELECT Empno, DeptName, Dept1, Dept2, Dept3 FROM dbo.AccessRules", conn))
+        using (var r = await cmd.ExecuteReaderAsync())
+            while (await r.ReadAsync())
+                rules.Add((r.IsDBNull(0) ? null : r.GetString(0).Trim(),
+                           r.IsDBNull(1) ? null : r.GetString(1).Trim(),
+                           r.IsDBNull(2) ? null : r.GetString(2).Trim(),
+                           r.IsDBNull(3) ? null : r.GetString(3).Trim(),
+                           r.IsDBNull(4) ? null : r.GetString(4).Trim()));
+
+        // 查人員名冊(遠端為跨 server VIEW,可能查詢失敗 → 卡控中一律擋下,但「僅工號」規則不受影響)
+        bool personFound = false;
+        string? name = null, ename = null, dn = null, d1 = null, d2 = null, d3 = null, lookupError = null;
+        try
+        {
+            using var cmd = new SqlCommand($"SELECT TOP 1 NAME, ENAME, DEPTNAME, DEPT_1, DEPT_2, DEPT_3 FROM {PersonView()} WHERE LTRIM(RTRIM(EMPNO)) = @id", conn);
+            cmd.Parameters.AddWithValue("@id", id);
+            using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                personFound = true;
+                name  = r.IsDBNull(0) ? null : r.GetString(0);
+                ename = r.IsDBNull(1) ? null : r.GetString(1);
+                dn = r.IsDBNull(2) ? null : r.GetString(2)?.Trim();
+                d1 = r.IsDBNull(3) ? null : r.GetString(3)?.Trim();
+                d2 = r.IsDBNull(4) ? null : r.GetString(4)?.Trim();
+                d3 = r.IsDBNull(5) ? null : r.GetString(5)?.Trim();
+            }
+        }
+        catch (Exception ex)
+        {
+            lookupError = "人員名冊(notes_person)查詢失敗";
+            app.Logger.LogError(ex, "notes_person 查詢失敗");
+        }
+        object? person = personFound ? new { empno = id, name, ename, deptname = dn, dept1 = d1, dept2 = d2, dept3 = d3 } : null;
+
+        var cmp = StringComparer.OrdinalIgnoreCase;
+        bool RuleMatches((string? Empno, string? DeptName, string? D1, string? D2, string? D3) rule, bool useRoster)
+        {
+            bool hasDeptCond = rule.DeptName != null || rule.D1 != null || rule.D2 != null || rule.D3 != null;
+            if (hasDeptCond && !useRoster) return false;   // 名冊查不到/查詢失敗時,含部門條件的規則不成立
+            if (rule.Empno != null && !cmp.Equals(rule.Empno, id)) return false;
+            if (rule.DeptName != null && !(dn != null && cmp.Equals(rule.DeptName, dn))) return false;
+            if (rule.D1 != null && !(d1 != null && cmp.Equals(rule.D1, d1))) return false;
+            if (rule.D2 != null && !(d2 != null && cmp.Equals(rule.D2, d2))) return false;
+            if (rule.D3 != null && !(d3 != null && cmp.Equals(rule.D3, d3))) return false;
+            return true;
+        }
+        bool ok = rules.Any(rule => RuleMatches(rule, personFound));
+        if (ok)
+            return Results.Ok(new { enabled, allowed = true, reason = "符合允許瀏覽的條件", person });
+        if (lookupError != null)
+            return Results.Ok(new { enabled, allowed = false, reason = lookupError + "，請聯絡管理員", person });
+        if (!personFound)
+            return Results.Ok(new { enabled, allowed = false, reason = $"工號 {id} 不在人員名冊(notes_person)中，且不在工號白名單", person });
+        return Results.Ok(new
+        {
+            enabled,
+            allowed = false,
+            reason = $"您的部門（{dn ?? "-"}；{d1 ?? "-"} / {d2 ?? "-"} / {d3 ?? "-"}）與工號皆不符合允許瀏覽的條件",
+            person
+        });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 規則清單(主管面板)
+app.MapGet("/api/access-rules", async () =>
+{
+    try
+    {
+        using var conn = new SqlConnection(ConnStr());
+        await conn.OpenAsync();
+        bool enabled;
+        using (var cmd = new SqlCommand("SELECT Value FROM dbo.AppSettings WHERE KeyName = 'AccessControlEnabled'", conn))
+            enabled = ((await cmd.ExecuteScalarAsync()) as string)?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+        var rules = new List<object>();
+        using (var cmd = new SqlCommand("SELECT RuleId, Empno, DeptName, Dept1, Dept2, Dept3, Note, CreatedBy, CreatedAt FROM dbo.AccessRules ORDER BY RuleId", conn))
+        using (var r = await cmd.ExecuteReaderAsync())
+            while (await r.ReadAsync())
+                rules.Add(new
+                {
+                    id = r.GetInt32(0),
+                    empno    = r.IsDBNull(1) ? null : r.GetString(1),
+                    deptName = r.IsDBNull(2) ? null : r.GetString(2),
+                    dept1    = r.IsDBNull(3) ? null : r.GetString(3),
+                    dept2    = r.IsDBNull(4) ? null : r.GetString(4),
+                    dept3    = r.IsDBNull(5) ? null : r.GetString(5),
+                    note = r.IsDBNull(6) ? null : r.GetString(6),
+                    createdBy = r.IsDBNull(7) ? null : r.GetString(7),
+                    createdAt = r.GetDateTime(8).ToString("yyyy-MM-dd HH:mm")
+                });
+        return Results.Ok(new { enabled, rules });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 新增規則 — usp_AddAccessRule(SP 內檢查主管權限,稽核 ACCESSRULE)
+app.MapPost("/api/access-rule", async (AccessRuleAddReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(ConnStr());
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_AddAccessRule", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@Empno", (object?)req.Empno ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@DeptName", (object?)req.DeptName ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Dept1", (object?)req.Dept1 ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Dept2", (object?)req.Dept2 ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Dept3", (object?)req.Dept3 ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Note", (object?)req.Note ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 刪除規則 — usp_DeleteAccessRule
+app.MapPost("/api/access-rule/delete", async (AccessRuleDelReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(ConnStr());
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_DeleteAccessRule", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@RuleId", req.RuleId);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 卡控總開關 — 沿用 usp_SetAppSetting(SP 內檢查主管權限,稽核 SETTING)
+app.MapPost("/api/settings/access-control", async (AccessControlReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(ConnStr());
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_SetAppSetting", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@KeyName", "AccessControlEnabled");
+        cmd.Parameters.AddWithValue("@Value", req.Enabled ? "true" : "false");
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
 app.MapPost("/api/settings/retro-checkin", async (RetroCheckinReq req) =>
 {
     try
@@ -1153,4 +1339,7 @@ record DeliverableReq(int ProjectId, string? Deliverable, string? MpSaving, stri
 record ScoreReq(string TaskCode, int Year, int Week, decimal Score, string Actor, string? ActorRole, string? ActorEmpId);
 record RetroCheckinReq(bool Enabled, string Actor, string? ActorRole);
 record ResultsExcelReq(int Year, List<int>? ProjectIds);
+record AccessRuleAddReq(string? Empno, string? DeptName, string? Dept1, string? Dept2, string? Dept3, string? Note, string Actor, string? ActorRole, string? ActorEmpId);
+record AccessRuleDelReq(int RuleId, string Actor, string? ActorRole, string? ActorEmpId);
+record AccessControlReq(bool Enabled, string Actor, string? ActorRole);
 record ProjectStarReq(int ProjectId, bool Starred, string Actor, string? ActorRole, string? ActorEmpId);

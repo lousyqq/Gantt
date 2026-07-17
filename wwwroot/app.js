@@ -492,10 +492,29 @@ function App() {
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState(null);
   const [empId, setEmpId] = useState(null); // Windows 工號(顯示用;實際寫入由 apiPost 自動附帶)
+  // 瀏覽權限卡控:null=檢查中;{enabled,allowed,reason,person}=結果。開關關閉時後端直接回 allowed=true。
+  const [accessCheck, setAccessCheck] = useState(null);
 
-  // 載入時偵測一次 Windows 工號(非網域環境取不到 → null,系統照常運作)
+  // 載入時偵測一次 Windows 工號(非網域環境取不到 → null),接著向後端驗證瀏覽權限
   React.useEffect(() => {
-    detectEmpId().then(setEmpId);
+    let cancelled = false;
+    detectEmpId().then(async id => {
+      if (cancelled) return;
+      setEmpId(id);
+      try {
+        const r = await apiGet(`/api/access-check?empId=${encodeURIComponent(id || '')}`);
+        if (!cancelled) setAccessCheck(r);
+      } catch {
+        // 後端不可達時不在此擋(bootstrap 會另行顯示連線錯誤);卡控啟用時的失敗判斷在伺服器端(fail-closed)
+        if (!cancelled) setAccessCheck({
+          enabled: false,
+          allowed: true
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 年度切換:可用年度與週→月對照皆來自 DB 的 ScheduleWeeks(開新年度只需 EXEC usp_EnsureScheduleYear)
@@ -642,6 +661,7 @@ function App() {
   const [noteTargetUser, setNoteTargetUser] = useState(null); // 主管代編「非專案/下週預計」的目標成員(null=編輯自己的)
   const [showAuditPanel, setShowAuditPanel] = useState(false); // 主管:異動紀錄(AuditLog)面板
   const [showMemberPanel, setShowMemberPanel] = useState(false); // 主管:成員管理面板
+  const [showAccessPanel, setShowAccessPanel] = useState(false); // 主管:瀏覽權限卡控面板(遷移 11)
   const [showDeadlinePanel, setShowDeadlinePanel] = useState(false); // 即將到期清單面板(頂部 ⏰ 晶片點開)
 
   const weekW = isCompact ? 22 : 32;
@@ -674,6 +694,7 @@ function App() {
     setShowWeeklyReport(false);
     setShowAuditPanel(false);
     setShowMemberPanel(false);
+    setShowAccessPanel(false);
     setShowDeadlinePanel(false);
   };
   const handleLogout = () => {
@@ -696,6 +717,7 @@ function App() {
     setShowWeeklyReport(false);
     setShowAuditPanel(false);
     setShowMemberPanel(false);
+    setShowAccessPanel(false);
     setShowDeadlinePanel(false);
   };
   const toggleOwnerCollapse = owner => {
@@ -1133,6 +1155,11 @@ function App() {
           e.preventDefault();
           return;
         }
+        if (showAccessPanel) {
+          setShowAccessPanel(false);
+          e.preventDefault();
+          return;
+        }
         if (showDeadlinePanel) {
           setShowDeadlinePanel(false);
           e.preventDefault();
@@ -1142,7 +1169,7 @@ function App() {
       }
 
       // 以下導航快捷鍵：任何 Modal/Panel 開啟時不觸發
-      const isAnyModalOpen = !!(confirmInfo || commentTarget || selectedTaskInfo || deliverableProj || editingProject || addingInterval || showExtraNoteModal || showWeeklyPlanModal || showWeeklyReport || showPendingPanel || showRetroPanel || showWeekEditPanel || showAuditPanel || showMemberPanel || showDeadlinePanel);
+      const isAnyModalOpen = !!(confirmInfo || commentTarget || selectedTaskInfo || deliverableProj || editingProject || addingInterval || showExtraNoteModal || showWeeklyPlanModal || showWeeklyReport || showPendingPanel || showRetroPanel || showWeekEditPanel || showAuditPanel || showMemberPanel || showAccessPanel || showDeadlinePanel);
       if (isAnyModalOpen) return;
 
       // Home 或 H：回到本週
@@ -1167,7 +1194,7 @@ function App() {
     };
     window.addEventListener('keydown', handler, true); // capture phase
     return () => window.removeEventListener('keydown', handler, true);
-  }, [currentUser, weekW, isOverview, isResults, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showDeadlinePanel, goToCurrentWeek]);
+  }, [currentUser, weekW, isOverview, isResults, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showDeadlinePanel, goToCurrentWeek]);
   const existingCategories = useMemo(() => [...new Set(projects.map(p => p.category).filter(Boolean))].sort(), [projects]);
 
   // 搜尋/類型篩選會隱藏同成員內的部分專案列,此時拖曳落點會與畫面不一致,故暫停拖曳排序
@@ -1527,6 +1554,18 @@ function App() {
     y: e.clientY
   } : null);
   const hideTooltip = () => setTooltip(null);
+
+  // 瀏覽權限卡控:檢查完成前顯示載入畫面;卡控啟用且未通過 → 整頁無權限畫面(不顯示登入與任何資料)
+  if (!accessCheck) return /*#__PURE__*/React.createElement("div", {
+    className: "min-h-screen bg-slate-100 flex flex-col"
+  }, /*#__PURE__*/React.createElement(LoadingScreen, null));
+  if (accessCheck.enabled && !accessCheck.allowed) {
+    return /*#__PURE__*/React.createElement(AccessDeniedScreen, {
+      empId: empId,
+      reason: accessCheck.reason,
+      person: accessCheck.person
+    });
+  }
   return /*#__PURE__*/React.createElement("div", {
     className: "min-h-screen bg-slate-50 font-sans flex flex-col relative overflow-hidden"
   }, /*#__PURE__*/React.createElement("header", {
@@ -1627,6 +1666,10 @@ function App() {
     onClick: () => setShowMemberPanel(true),
     className: "bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20"
   }, "\uD83D\uDC65 \u6210\u54E1\u7BA1\u7406"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowAccessPanel(true),
+    className: "bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20",
+    title: "\u8A2D\u5B9A\u8AB0\u53EF\u4EE5\u700F\u89BD\u672C\u9801\u9762\uFF1A\u4F9D\u90E8\u9580(DEPT_1/2/3)\u6216\u5DE5\u865F\u767D\u540D\u55AE\u5361\u63A7"
+  }, "\uD83D\uDD10 \u700F\u89BD\u6B0A\u9650"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowAuditPanel(true),
     className: "bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20"
   }, "\uD83D\uDCDC \u7570\u52D5\u7D00\u9304")), /*#__PURE__*/React.createElement("button", {
@@ -2508,6 +2551,12 @@ function App() {
     onRename: handleRenameUser,
     onDelete: handleDeleteUser,
     onClose: () => setShowMemberPanel(false)
+  }), showAccessPanel && role === 'manager' && /*#__PURE__*/React.createElement(AccessPanel, {
+    currentUser: currentUser,
+    role: role,
+    empId: empId,
+    showToast: showToast,
+    onClose: () => setShowAccessPanel(false)
   }), deliverableProj && /*#__PURE__*/React.createElement(DeliverableModal, {
     proj: deliverableProj,
     role: role,
@@ -2582,6 +2631,39 @@ function ErrorScreen({
       backgroundColor: '#001F5B'
     }
   }, "\u91CD\u65B0\u8F09\u5165")));
+}
+
+// 瀏覽權限未通過的整頁封鎖畫面(卡控啟用時取代整個 App,不顯示登入與資料)
+function AccessDeniedScreen({
+  empId,
+  reason,
+  person
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "min-h-screen flex justify-center items-center bg-slate-100 p-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bg-white p-10 rounded-2xl shadow-2xl border border-red-200 max-w-md w-full text-center"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl"
+  }, "\uD83D\uDEAB"), /*#__PURE__*/React.createElement("h2", {
+    className: "text-xl font-black text-slate-800 mb-2"
+  }, "\u7121\u6B0A\u9650\u700F\u89BD\u6B64\u9801\u9762"), /*#__PURE__*/React.createElement("p", {
+    className: "text-sm text-slate-500 mb-4"
+  }, "\u60A8\u7684\u5E33\u865F\u672A\u88AB\u6388\u6B0A\u700F\u89BD MSD \u5C08\u6848\u8FFD\u8E64\u7E3D\u8868\u3002"), /*#__PURE__*/React.createElement("div", {
+    className: "text-left text-sm bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4 space-y-1.5"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "text-slate-400 font-bold mr-2"
+  }, "\u767B\u5165\u5DE5\u865F"), /*#__PURE__*/React.createElement("span", {
+    className: "font-mono font-bold text-slate-800"
+  }, empId || '（無法取得）')), person && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    className: "text-slate-400 font-bold mr-2"
+  }, "\u4EBA\u54E1\u540D\u518A"), /*#__PURE__*/React.createElement("span", {
+    className: "text-slate-700 font-medium"
+  }, person.name || '', " ", person.ename ? `(${person.ename})` : '', "\u30FB", person.deptname || [person.dept1, person.dept2, person.dept3].filter(Boolean).join('/') || '無部門資料'))), reason && /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg p-3 mb-5 text-left whitespace-pre-wrap"
+  }, reason), /*#__PURE__*/React.createElement("p", {
+    className: "text-xs text-slate-400"
+  }, "\u82E5\u9700\u8981\u700F\u89BD\u6B0A\u9650\uFF0C\u8ACB\u806F\u7D61\u7CFB\u7D71\u7BA1\u7406\u54E1\uFF08\u4E3B\u7BA1\uFF09\u5C07\u60A8\u7684\u90E8\u9580\u6216\u5DE5\u865F\u52A0\u5165\u5141\u8A31\u6E05\u55AE\u3002")));
 }
 function LoginScreen({
   onLogin,
@@ -4601,6 +4683,14 @@ const AUDIT_ACTION_META = {
   COMMENT: {
     label: '回覆',
     cls: 'bg-violet-100 text-violet-700'
+  },
+  ACCESSRULE: {
+    label: '權限',
+    cls: 'bg-rose-100 text-rose-700'
+  },
+  SETTING: {
+    label: '設定',
+    cls: 'bg-slate-200 text-slate-700'
   }
 };
 const AUDIT_ENTITY_LABELS = {
@@ -4610,8 +4700,341 @@ const AUDIT_ENTITY_LABELS = {
   ExtraNote: '非專案事項',
   WeeklyPlan: '下週計畫',
   WeeklyComment: '主管回覆',
-  User: '成員'
+  User: '成員',
+  AccessRule: '瀏覽權限',
+  AppSettings: '系統設定'
 };
+
+// 瀏覽權限規則的條件欄位定義(投影友善:400 級實線邊框+700/800 級文字)
+// 同一條規則內有填的欄位「全部符合」才通過(AND);多條規則之間「任一符合」即放行(OR)
+const RULE_FIELDS = [{
+  key: 'empno',
+  label: '工號',
+  ph: '如 00058897',
+  chip: 'bg-amber-100 text-amber-800 border-amber-400'
+}, {
+  key: 'deptName',
+  label: 'DEPTNAME',
+  ph: '如 12A_PTI/ESI/MSD',
+  chip: 'bg-rose-100 text-rose-800 border-rose-400'
+}, {
+  key: 'dept1',
+  label: 'DEPT_1',
+  ph: '如 12A_PTI',
+  chip: 'bg-sky-100 text-sky-800 border-sky-400'
+}, {
+  key: 'dept2',
+  label: 'DEPT_2',
+  ph: '如 ESI',
+  chip: 'bg-teal-100 text-teal-800 border-teal-400'
+}, {
+  key: 'dept3',
+  label: 'DEPT_3',
+  ph: '如 MSD',
+  chip: 'bg-indigo-100 text-indigo-800 border-indigo-400'
+}];
+
+// 主管:瀏覽權限卡控面板 — 總開關 + 允許規則(部門/工號白名單,任一符合即放行) + 工號測試
+// 資料來源:登入者工號比對 [WEB].[dbo].[notes_person] 名冊的 DEPT_1/2/3;規則存 Gantt DB 的 AccessRules(遷移 11)
+function AccessPanel({
+  currentUser,
+  role,
+  empId,
+  showToast,
+  onClose
+}) {
+  const [enabled, setEnabled] = useState(false);
+  const [rules, setRules] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [ruleForm, setRuleForm] = useState({
+    empno: '',
+    deptName: '',
+    dept1: '',
+    dept2: '',
+    dept3: ''
+  }); // 任填 ≥1 欄,填多欄=全部符合才通過(AND)
+  const [ruleNote, setRuleNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [testId, setTestId] = useState('');
+  const [testResult, setTestResult] = useState(null);
+  const [testing, setTesting] = useState(false);
+  const load = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const d = await apiGet('/api/access-rules');
+      setEnabled(!!d.enabled);
+      setRules(d.rules || []);
+    } catch (e) {
+      setLoadError(e.message || '載入失敗');
+    } finally {
+      setLoading(false);
+    }
+  };
+  React.useEffect(() => {
+    load();
+  }, []);
+
+  // 規則物件 → 「欄位=值 且 …」描述文字(清單顯示與 toast 用)
+  const ruleDesc = r => RULE_FIELDS.filter(f => r[f.key]).map(f => `${f.label}=${r[f.key]}`).join(' 且 ');
+  const addRule = async () => {
+    if (saving) return;
+    const cond = {};
+    RULE_FIELDS.forEach(f => {
+      const v = (ruleForm[f.key] || '').trim();
+      if (v) cond[f.key] = v;
+    });
+    if (Object.keys(cond).length === 0) {
+      showToast('❌ 至少填寫一個條件欄位（工號或部門）');
+      return;
+    }
+    setSaving(true);
+    try {
+      await apiPost('/api/access-rule', {
+        ...cond,
+        note: ruleNote.trim() || null,
+        actor: currentUser,
+        actorRole: role
+      });
+      setRuleForm({
+        empno: '',
+        deptName: '',
+        dept1: '',
+        dept2: '',
+        dept3: ''
+      });
+      setRuleNote('');
+      showToast(`✅ 已新增允許規則：${ruleDesc(cond)}`);
+      await load();
+    } catch (e) {
+      showToast('❌ 新增失敗：' + (e.message || '無法連線資料庫'));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const deleteRule = async r => {
+    try {
+      await apiPost('/api/access-rule/delete', {
+        ruleId: r.id,
+        actor: currentUser,
+        actorRole: role
+      });
+      showToast(`🗑️ 已刪除規則：${ruleDesc(r)}`);
+      await load();
+    } catch (e) {
+      showToast('❌ 刪除失敗：' + (e.message || '無法連線資料庫'));
+    }
+  };
+  const toggle = async () => {
+    if (toggling) return;
+    setToggling(true);
+    try {
+      if (!enabled) {
+        // 開啟前保險:先用主管自己的工號跑一次規則,不通過就擋下,避免主管把自己鎖在門外
+        const me = await apiGet(`/api/access-check?empId=${encodeURIComponent(empId || '')}&preview=true`);
+        if (!me.allowed) {
+          showToast(`❌ 無法開啟卡控：您目前的工號（${empId || '無法取得'}）不符合任何允許規則，開啟後您自己也會被擋在門外。請先把自己的部門或工號加入規則。`);
+          return;
+        }
+      }
+      await apiPost('/api/settings/access-control', {
+        enabled: !enabled,
+        actor: currentUser,
+        actorRole: role
+      });
+      setEnabled(!enabled);
+      showToast(!enabled ? '🔒 已開啟瀏覽權限卡控，之後進站的訪客將依規則驗證' : '🔓 已關閉瀏覽權限卡控，所有人皆可瀏覽');
+    } catch (e) {
+      showToast('❌ 切換失敗：' + (e.message || '無法連線資料庫'));
+    } finally {
+      setToggling(false);
+    }
+  };
+  const runTest = async () => {
+    if (testing) return;
+    const id = testId.trim();
+    if (!id) {
+      showToast('❌ 請輸入要測試的工號');
+      return;
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      setTestResult(await apiGet(`/api/access-check?empId=${encodeURIComponent(id)}&preview=true`));
+    } catch (e) {
+      showToast('❌ 測試失敗：' + (e.message || '無法連線資料庫'));
+    } finally {
+      setTesting(false);
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-full max-w-md bg-white h-full shadow-2xl flex flex-col",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "px-5 py-4 text-white flex justify-between items-center",
+    style: {
+      backgroundColor: '#9F1239'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
+    className: "font-bold text-lg",
+    style: {
+      color: '#FFFFFF'
+    }
+  }, "\uD83D\uDD10 \u9801\u9762\u700F\u89BD\u6B0A\u9650"), /*#__PURE__*/React.createElement("p", {
+    className: "text-xs mt-0.5",
+    style: {
+      color: '#FECDD3'
+    }
+  }, "\u4F9D\u4EBA\u54E1\u540D\u518A\u90E8\u9580(DEPT_1/2/3)\u6216\u5DE5\u865F\u767D\u540D\u55AE\u5361\u63A7\uFF0C\u4EFB\u4E00\u898F\u5247\u7B26\u5408\u5373\u53EF\u700F\u89BD")), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    className: "text-white/70 hover:text-white p-1"
+  }, /*#__PURE__*/React.createElement("svg", {
+    className: "w-6 h-6",
+    fill: "none",
+    viewBox: "0 0 24 24",
+    stroke: "currentColor"
+  }, /*#__PURE__*/React.createElement("path", {
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    strokeWidth: 2,
+    d: "M6 18L18 6M6 6l12 12"
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 overflow-y-auto p-5 space-y-5"
+  }, loading ? /*#__PURE__*/React.createElement("div", {
+    className: "text-center text-slate-400 py-10"
+  }, "\u8F09\u5165\u4E2D\u2026") : loadError ? /*#__PURE__*/React.createElement("div", {
+    className: "bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm font-bold"
+  }, "\u274C \u8F09\u5165\u5931\u6557\uFF1A", loadError, /*#__PURE__*/React.createElement("button", {
+    onClick: load,
+    className: "ml-2 underline"
+  }, "\u91CD\u8A66")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: `rounded-xl border p-4 ${enabled ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-200'}`
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm font-black text-slate-800"
+  }, enabled ? '🔒 卡控啟用中' : '🔓 目前未卡控'), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-500 mt-1"
+  }, enabled ? '不符合規則的訪客會看到「無權限」畫面' : '所有人皆可瀏覽；設定好規則後再開啟')), /*#__PURE__*/React.createElement("button", {
+    onClick: toggle,
+    disabled: toggling,
+    className: `px-4 py-2 rounded-lg text-xs font-bold border shadow-sm transition text-white disabled:opacity-60 ${enabled ? 'bg-slate-500 hover:bg-slate-600 border-slate-600' : 'bg-rose-600 hover:bg-rose-700 border-rose-700'}`
+  }, toggling ? '切換中…' : enabled ? '關閉卡控' : '開啟卡控')), enabled && /*#__PURE__*/React.createElement("div", {
+    className: "mt-2.5 text-[11px] font-bold text-rose-800 bg-rose-100 border border-rose-300 rounded-lg px-2.5 py-1.5"
+  }, "\u26A0\uFE0F \u4FEE\u6539\u898F\u5247\u7ACB\u5373\u751F\u6548\u65BC\u300C\u4E0B\u4E00\u6B21\u9032\u7AD9/\u91CD\u65B0\u6574\u7406\u300D\uFF1B\u5DF2\u5728\u700F\u89BD\u4E2D\u7684\u4F7F\u7528\u8005\u4E0D\u6703\u88AB\u4E2D\u9014\u8E22\u51FA\u3002")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
+  }, "\u2795 \u65B0\u589E\u5141\u8A31\u898F\u5247"), /*#__PURE__*/React.createElement("div", {
+    className: "bg-white border border-slate-200 rounded-xl p-3.5 space-y-2.5 shadow-sm"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 gap-2"
+  }, RULE_FIELDS.map(f => /*#__PURE__*/React.createElement("label", {
+    key: f.key,
+    className: f.key === 'deptName' ? 'col-span-1' : ''
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "block text-[10px] font-bold text-slate-500 mb-0.5"
+  }, f.label), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    value: ruleForm[f.key],
+    onChange: e => setRuleForm(prev => ({
+      ...prev,
+      [f.key]: e.target.value
+    })),
+    onKeyDown: e => {
+      if (e.key === 'Enter' && !e.isComposing) addRule();
+    },
+    placeholder: f.ph,
+    className: "w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-rose-500"
+  }))), /*#__PURE__*/React.createElement("label", null, /*#__PURE__*/React.createElement("span", {
+    className: "block text-[10px] font-bold text-slate-500 mb-0.5"
+  }, "\u5099\u8A3B\uFF08\u9078\u586B\uFF09"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    value: ruleNote,
+    onChange: e => setRuleNote(e.target.value),
+    onKeyDown: e => {
+      if (e.key === 'Enter' && !e.isComposing) addRule();
+    },
+    placeholder: "\u5982\uFF1AMSD \u5168\u54E1",
+    className: "w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-rose-500"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 text-[11px] text-slate-400 leading-snug"
+  }, "\u4EFB\u586B\u4E00\u6B04\u4EE5\u4E0A\uFF1B", /*#__PURE__*/React.createElement("span", {
+    className: "font-bold text-slate-600"
+  }, "\u540C\u4E00\u689D\u898F\u5247\u5167\u586B\u591A\u500B\u6B04\u4F4D\uFF1D\u5168\u90E8\u7B26\u5408\u624D\u901A\u904E\uFF08\u4E14\uFF09"), "\uFF0C \u591A\u689D\u898F\u5247\u4E4B\u9593\u4EFB\u4E00\u7B26\u5408\u5373\u653E\u884C\uFF08\u6216\uFF09\u3002\u53EA\u586B\u5DE5\u865F\uFF1D\u767D\u540D\u55AE\u76F4\u63A5\u653E\u884C\uFF08\u4E0D\u67E5\u540D\u518A\uFF09\u3002"), /*#__PURE__*/React.createElement("button", {
+    onClick: addRule,
+    disabled: saving,
+    className: "flex-shrink-0 px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 border border-rose-700 shadow-sm disabled:opacity-60"
+  }, saving ? '儲存中…' : '新增')))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
+  }, "\uD83D\uDCDC \u76EE\u524D\u5141\u8A31\u898F\u5247\uFF08", rules.length, " \u689D\uFF0C\u4EFB\u4E00\u7B26\u5408\u5373\u653E\u884C\uFF09"), rules.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-xl p-4 text-xs font-bold"
+  }, "\u5C1A\u672A\u8A2D\u5B9A\u4EFB\u4F55\u898F\u5247\u3002", enabled ? '⚠️ 卡控啟用中且無規則＝全部擋下！' : '請先新增規則再開啟卡控。') : /*#__PURE__*/React.createElement("div", {
+    className: "space-y-2"
+  }, rules.map(r => /*#__PURE__*/React.createElement("div", {
+    key: r.id,
+    className: "bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-1 flex-wrap min-w-0"
+  }, RULE_FIELDS.filter(f => r[f.key]).map((f, i) => /*#__PURE__*/React.createElement(React.Fragment, {
+    key: f.key
+  }, i > 0 && /*#__PURE__*/React.createElement("span", {
+    className: "text-[10px] font-black text-slate-400"
+  }, "\u4E14"), /*#__PURE__*/React.createElement("span", {
+    className: `px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap ${f.chip}`
+  }, f.label, "\uFF1D", r[f.key])))), /*#__PURE__*/React.createElement("span", {
+    className: "ml-auto flex-shrink-0 text-[10px] text-slate-400",
+    title: `建立者 ${r.createdBy || '-'}`
+  }, r.createdAt), /*#__PURE__*/React.createElement("button", {
+    onClick: () => deleteRule(r),
+    className: "flex-shrink-0 p-1 rounded text-red-500 hover:bg-red-50 border border-transparent hover:border-red-200 transition",
+    title: "\u522A\u9664\u6B64\u898F\u5247"
+  }, "\uD83D\uDDD1")), r.note && /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-500 mt-1 truncate",
+    title: r.note
+  }, "\uD83D\uDCDD ", r.note))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
+  }, "\uD83E\uDDEA \u4EE5\u5DE5\u865F\u6E2C\u8A66\u898F\u5247\uFF08\u4E0D\u53D7\u7E3D\u958B\u95DC\u5F71\u97FF\uFF09"), /*#__PURE__*/React.createElement("div", {
+    className: "bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-2"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    value: testId,
+    onChange: e => {
+      setTestId(e.target.value);
+      setTestResult(null);
+    },
+    onKeyDown: e => {
+      if (e.key === 'Enter' && !e.isComposing) runTest();
+    },
+    placeholder: `輸入工號，如 ${empId || '00058897'}`,
+    className: "flex-1 min-w-0 border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm font-mono outline-none focus:border-rose-500"
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: runTest,
+    disabled: testing,
+    className: "flex-shrink-0 px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-slate-700 hover:bg-slate-800 border border-slate-800 shadow-sm disabled:opacity-60"
+  }, testing ? '測試中…' : '測試')), testResult && /*#__PURE__*/React.createElement("div", {
+    className: `rounded-lg border p-3 text-xs font-bold ${testResult.allowed ? 'bg-green-50 border-green-300 text-green-800' : 'bg-red-50 border-red-300 text-red-700'}`
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm"
+  }, testResult.allowed ? '✅ 可以瀏覽' : '🚫 會被擋下'), testResult.person && /*#__PURE__*/React.createElement("div", {
+    className: "mt-1 font-medium text-slate-600"
+  }, testResult.person.name, testResult.person.ename ? `（${testResult.person.ename}）` : '', "\u30FB", testResult.person.deptname || [testResult.person.dept1, testResult.person.dept2, testResult.person.dept3].filter(Boolean).join(' / ') || '無部門資料'), testResult.reason && /*#__PURE__*/React.createElement("div", {
+    className: "mt-1 font-medium"
+  }, testResult.reason)))))), /*#__PURE__*/React.createElement("div", {
+    className: "p-4 bg-slate-50 border-t border-slate-200"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    className: "w-full py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-xl transition"
+  }, "\u95DC\u9589\u9762\u677F"))));
+}
 
 // 主管:成員管理面板(新增/移除成員;移除為軟刪除 IsActive=0,名下仍有專案時後端會擋下)
 function MemberPanel({
