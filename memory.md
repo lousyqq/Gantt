@@ -1214,6 +1214,78 @@ person 回傳含 deptname；AccessRuleAddReq 改五欄位。
 00058897=✅（規則間 OR 生效）、00019246(EMS2)=🚫；console 乾淨。測試規則已清空、開關維持關閉。
 （過程中發現名冊 00058897 一筆被動過而消失，已重跑 sim 腳本重灌 34 筆。）
 
+---
+
+## 2026-07-18 — 使用統計：登入次數紀錄與主管統計面板（遷移 13）
+
+**需求**：統計網頁使用者登入次數，評估使用率。
+
+**DB**（新遷移檔 `13_add_login_stats.sql`，冪等，已套用本機 Gantt；**遠端依序執行 11→12→13**）：
+- 新表 `dbo.LoginLogs`：UserName／Role／EmpId（Windows 工號，可空）／
+  Source（'manual'=登入畫面點選、'auto'=重整自動還原）／LoginAt；索引 LoginAt。
+- SP `usp_LogLogin`：寫入登入紀錄（無權限限制；空名靜默略過）。
+
+**後端**（`Program.cs`）：
+- `POST /api/login-log` → usp_LogLogin（EmpId 取 apiPost 自動附帶的 actorEmpId）。
+- `GET /api/login-stats?days=`（7~365，預設 30）：total／today／last7／lastN／uniqueUsers／
+  manualN+autoN 拆分／byUser（次數+最後登入，降冪）／byDay（每日次數）。
+  注意 `SUM(CASE...)`=int 與 `COUNT_BIG`=bigint 混用 → 讀取端一律 `Convert.ToInt64(GetValue)`
+  （初版 GetInt64 直讀曾拋 InvalidCastException，已修）。
+
+**前端**（`ClientApp/app.jsx`）：
+- `handleLogin(user, role, source='manual')` 內 fire-and-forget 打 login-log（失敗靜默）；
+  localStorage 自動還原路徑傳 `source='auto'`。60 秒輪詢不計。
+- 主管 header 新增「📈 使用統計」→ `UsageStatsPanel`（藍綠標題列 #0F766E）：
+  區間切換（近 7/30/90 天）＋KPI 四卡（今日/近7天/近N天含手動·自動拆分/活躍使用者）＋
+  每日登入長條圖（缺日補 0，hover 顯示日期次數）＋各使用者次數排行（bar+最後登入時間）＋總累計附註。
+
+**驗證**：重整自動還原記 auto（含工號 yu-tinglin）、登入畫面點選記 manual（裕隆/主管）；
+面板 KPI=5 次（手動 2・自動 3）、活躍 2 人、排行與趨勢正確；區間切換正常；console 乾淨。
+測試 5 筆已清空，正式啟用從 0 開始累計。
+
+---
+
+## 2026-07-18 — 主管 header 按鈕收納：「⚙️ 管理」下拉選單
+
+**問題**：主管 header 已 6 顆功能鈕（編輯回報/成員管理/瀏覽權限/使用統計/異動紀錄/團隊總結），
+低頻管理入口與高頻日常按鈕搶空間，之後每加管理功能就再膨脹。
+
+**修正**（`ClientApp/app.jsx`；後端與 DB 不變）：依使用頻率收納——header 只留高頻直達的
+「🛠 編輯 W{..} 回報」（琥珀=操作）與「📊 團隊總結」（藍=檢視），低頻四項（👥 成員管理/🔐 瀏覽權限/
+📈 使用統計/📜 異動紀錄）收進新「**⚙️ 管理 ▾**」下拉選單（白底選單、含各項小字說明，點項目關選單開面板）。
+- 關閉方式：點選單外(透明 fixed 遮罩 z-[60]、選單 z-[70])、再點一次按鈕、或 ESC(closeTopModal 鏈首位)。
+  **選單點外關閉是「輸入型視窗不點外關閉」慣例的例外**——選單無輸入內容,點外關閉不會遺失資料。
+- 開啟時按鈕亮起(bg-white/25)且箭頭轉 ▴；成員視角不受影響。
+
+**驗證**：header 剩 3 顆功能鈕；選單四項含說明正確；點「使用統計」→ 選單關+面板開；
+點外關閉 ✓；ESC ✓；console 乾淨。
+
+**位置調整（同日追加，使用者反映不符使用習慣）**：「⚙️ 管理」原本卡在「編輯回報」與「團隊總結」
+兩顆高頻鈕中間，打斷動作流；改移至 header **最右側帳號區**（分隔線右邊、使用者名稱左邊、與登出同群組）——
+符合「設定/管理選單在右上角」的網頁慣例，兩顆高頻鈕相鄰。最終順序：
+🛠 編輯回報｜📊 團隊總結｜(分隔線) ⚙️ 管理 ▾｜使用者名/工號｜登出。已驗證選單展開完整可見、點項開面板正常。
+
+---
+
+## 2026-07-18 — UX 巡檢三項優化（切週置中／偏好持久化／快捷鍵提示）
+
+**巡檢結論**：高頻動線多已處理，補齊三個確認缺口（Toast 單一制與 60 秒靜默更新評估後維持現狀）。
+
+**修正**（`ClientApp/app.jsx`；後端與 DB 不變）：
+1. **切週自動置中**：header ‹ ›（主管/成員共四顆）原本只改週次、甘特畫面停在原地；
+   改為切週後同步 `setScrollTargetWeek(新週)`（沿用既有機制）自動平滑置中該週；
+   成員「🔒 唯讀檢視中·返回本週」改走 `goToCurrentWeek()`（含置中）。
+2. **檢視偏好持久化**：新增 `gantt_prefs`（localStorage）記「緊湊模式 compact」與
+   「週檢視/年度總覽 overview」——重整/隔天重開沿用；成果清單不記憶（重開回週檢視較安全）；
+   登入(含自動還原)時套用 overview 偏好；登出不清除（偏好屬於該台電腦）。
+   模組層 helper `readPrefs()`/`savePref(key, value)`。
+3. **快捷鍵提示**：「回到本週」tooltip 加「（快捷鍵 H）」；常駐圖例條尾端新增小字
+   「⌨ H 回本週・←→ 平移」（title 帶完整說明：H/←→ 4週/Shift 微移/ESC 關窗），
+   遵循「輔助資訊直接顯示」原則。
+
+**驗證**：‹ 切 W28 → scrollLeft 0→915 自動置中；切年度總覽＋緊湊 → prefs 寫入 →
+重整後兩者皆保持；圖例條顯示快捷鍵提示；console 乾淨。
+
 **教訓（工具側）**：PowerShell 5.1 `Get-Content -Raw`＋`Set-Content` 改含中文的 UTF-8(無BOM) 檔會以
 系統編碼誤讀→寫壞 JSON（驗證過程曾把 appsettings.json 中文註解弄成亂碼導致 config 解析失敗，
 已用 Write 工具重寫修復）；改此類檔案一律用 Edit/Write 工具。

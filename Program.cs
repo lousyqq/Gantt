@@ -1280,6 +1280,100 @@ app.MapPost("/api/settings/access-control", async (AccessControlReq req) =>
     catch (Exception ex) { return Fail(ex); }
 });
 
+// ─── 使用率統計(遷移 13) ─────────────────────────────────────────────
+// 每次登入(含重新整理自動還原)寫一筆 LoginLogs;統計面板供主管評估網頁使用率
+
+app.MapPost("/api/login-log", async (LoginLogReq req) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(ConnStr());
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_LogLogin", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@UserName", req.UserName);
+        cmd.Parameters.AddWithValue("@Role", (object?)req.Role ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@EmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Source", (object?)req.Source ?? "manual");
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 統計:整體/今日/近7天/近days天登入次數、不重複使用者、各使用者次數、每日趨勢
+app.MapGet("/api/login-stats", async (int? days) =>
+{
+    int d = Math.Clamp(days ?? 30, 7, 365);
+    try
+    {
+        using var conn = new SqlConnection(ConnStr());
+        await conn.OpenAsync();
+
+        long total = 0, today = 0, last7 = 0, lastN = 0, uniqueUsers = 0, manualN = 0;
+        using (var cmd = new SqlCommand(@"
+            SELECT COUNT_BIG(*),
+                   SUM(CASE WHEN LoginAt >= CAST(GETDATE() AS date) THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN LoginAt >= DATEADD(day, -7, GETDATE()) THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN LoginAt >= DATEADD(day, -@d, GETDATE()) THEN 1 ELSE 0 END),
+                   COUNT(DISTINCT CASE WHEN LoginAt >= DATEADD(day, -@d, GETDATE()) THEN UserName END),
+                   SUM(CASE WHEN LoginAt >= DATEADD(day, -@d, GETDATE()) AND Source = N'manual' THEN 1 ELSE 0 END)
+            FROM dbo.LoginLogs", conn))
+        {
+            cmd.Parameters.AddWithValue("@d", d);
+            using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync() && !r.IsDBNull(0))
+            {
+                // SUM(CASE...)=int、COUNT_BIG=bigint,統一用 Convert.ToInt64 讀取避免型別轉換例外
+                total = Convert.ToInt64(r.GetValue(0));
+                today = r.IsDBNull(1) ? 0 : Convert.ToInt64(r.GetValue(1));
+                last7 = r.IsDBNull(2) ? 0 : Convert.ToInt64(r.GetValue(2));
+                lastN = r.IsDBNull(3) ? 0 : Convert.ToInt64(r.GetValue(3));
+                uniqueUsers = r.IsDBNull(4) ? 0 : Convert.ToInt64(r.GetValue(4));
+                manualN = r.IsDBNull(5) ? 0 : Convert.ToInt64(r.GetValue(5));
+            }
+        }
+
+        // 各使用者(近 d 天):次數/最後登入
+        var byUser = new List<object>();
+        using (var cmd = new SqlCommand(@"
+            SELECT UserName, MAX(ISNULL(Role, N'')), COUNT_BIG(*), MAX(LoginAt)
+            FROM dbo.LoginLogs
+            WHERE LoginAt >= DATEADD(day, -@d, GETDATE())
+            GROUP BY UserName
+            ORDER BY COUNT_BIG(*) DESC, MAX(LoginAt) DESC", conn))
+        {
+            cmd.Parameters.AddWithValue("@d", d);
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                byUser.Add(new
+                {
+                    user = r.GetString(0),
+                    role = r.GetString(1),
+                    count = r.GetInt64(2),
+                    lastAt = r.GetDateTime(3).ToString("yyyy-MM-dd HH:mm")
+                });
+        }
+
+        // 每日趨勢(近 d 天;無登入的日期由前端補 0)
+        var byDay = new List<object>();
+        using (var cmd = new SqlCommand(@"
+            SELECT CAST(LoginAt AS date), COUNT_BIG(*)
+            FROM dbo.LoginLogs
+            WHERE LoginAt >= DATEADD(day, -@d, GETDATE())
+            GROUP BY CAST(LoginAt AS date)
+            ORDER BY CAST(LoginAt AS date)", conn))
+        {
+            cmd.Parameters.AddWithValue("@d", d);
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                byDay.Add(new { date = r.GetDateTime(0).ToString("yyyy-MM-dd"), count = r.GetInt64(1) });
+        }
+
+        return Results.Ok(new { days = d, total, today, last7, lastN, uniqueUsers, manualN, autoN = lastN - manualN, byUser, byDay });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
 app.MapPost("/api/settings/retro-checkin", async (RetroCheckinReq req) =>
 {
     try
@@ -1342,4 +1436,5 @@ record ResultsExcelReq(int Year, List<int>? ProjectIds);
 record AccessRuleAddReq(string? Empno, string? DeptName, string? Dept1, string? Dept2, string? Dept3, string? Note, string Actor, string? ActorRole, string? ActorEmpId);
 record AccessRuleDelReq(int RuleId, string Actor, string? ActorRole, string? ActorEmpId);
 record AccessControlReq(bool Enabled, string Actor, string? ActorRole);
+record LoginLogReq(string UserName, string? Role, string? Source, string? ActorEmpId);
 record ProjectStarReq(int ProjectId, bool Starred, string Actor, string? ActorRole, string? ActorEmpId);

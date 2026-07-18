@@ -79,6 +79,15 @@ async function apiGet(path) {
 }
 // Windows 工號(如 00058897):載入時由 /api/whoami 偵測(桌機網域帳號 UMC\00058897 剝前綴),
 // 所有寫入 API 自動附帶,由預存程序寫入 AuditLog.ActorEmpId 留下操作紀錄;非網域環境為 null(照常可用)
+// 檢視偏好持久化(gantt_prefs):緊湊模式/「週檢視vs年度總覽」重整或隔天重開沿用上次習慣;
+// 成果清單不記憶(重開回到週檢視較安全);登出不清除(偏好屬於這台電腦的使用習慣)
+function readPrefs() {
+  try { return JSON.parse(localStorage.getItem('gantt_prefs') || '{}') || {}; } catch (e) { return {}; }
+}
+function savePref(key, value) {
+  try { const p = readPrefs(); p[key] = value; localStorage.setItem('gantt_prefs', JSON.stringify(p)); } catch (e) {}
+}
+
 let CURRENT_EMP_ID = null;
 async function detectEmpId() {
   try {
@@ -432,7 +441,7 @@ function App() {
   }, [currentUser, currentWeek, scheduleYear]);
 
   // UI 狀態(範本 B:預設寬鬆模式,字級較大對年長者友善)
-  const [isCompact, setIsCompact] = useState(false);
+  const [isCompact, setIsCompact] = useState(() => readPrefs().compact === true);   // 緊湊模式偏好:重整後沿用
   const [isOverview, setIsOverview] = useState(false);   // 年度總覽:52 週自動縮放進一個畫面寬,無水平捲軸(唯讀瀏覽視角)
   const [isResults, setIsResults] = useState(false);     // 成果清單:集中檢閱所有專案具體成果項目與 MP 節省統計
   const [collapsedOwners, setCollapsedOwners] = useState(new Set());
@@ -548,6 +557,8 @@ function App() {
   const [showAuditPanel, setShowAuditPanel] = useState(false);   // 主管:異動紀錄(AuditLog)面板
   const [showMemberPanel, setShowMemberPanel] = useState(false); // 主管:成員管理面板
   const [showAccessPanel, setShowAccessPanel] = useState(false); // 主管:瀏覽權限卡控面板(遷移 11)
+  const [showUsagePanel, setShowUsagePanel] = useState(false);   // 主管:使用統計面板(登入次數,遷移 13)
+  const [showAdminMenu, setShowAdminMenu] = useState(false);     // 主管:header「⚙️ 管理」下拉選單(收納低頻管理入口)
   const [showDeadlinePanel, setShowDeadlinePanel] = useState(false); // 即將到期清單面板(頂部 ⏰ 晶片點開)
 
   const weekW = isCompact ? 22 : 32;
@@ -556,11 +567,13 @@ function App() {
 
   // 每次登入角色時：預設開啟各成員的週檢視、展開清單頁面；成員預設顯示個人專案，主管預設為全部成員
   // 登入身分寫入 localStorage:重新整理/重開分頁不再被登出(登出時清除;內網固定使用者,風險可接受)
-  const handleLogin = (user, selectedRole) => {
+  const handleLogin = (user, selectedRole, source = 'manual') => {
     try { localStorage.setItem('gantt_login', JSON.stringify({ user, role: selectedRole })); } catch (e) {}
+    // 使用率統計:每次登入寫一筆 LoginLogs(manual=登入畫面點選/auto=重整自動還原);失敗靜默不影響使用
+    apiPost('/api/login-log', { userName: user, role: selectedRole, source }).catch(() => {});
     setCurrentUser(user);
     setRole(selectedRole);
-    setIsOverview(false);
+    setIsOverview(readPrefs().overview === true);   // 檢視偏好:沿用上次的週檢視/年度總覽選擇
     setIsResults(false);
     setCurrentWeek(getTodayWeek(scheduleYear, weeksTotal));
     setCollapsedOwners(new Set());
@@ -576,6 +589,8 @@ function App() {
     setShowAuditPanel(false);
     setShowMemberPanel(false);
     setShowAccessPanel(false);
+    setShowUsagePanel(false);
+    setShowAdminMenu(false);
     setShowDeadlinePanel(false);
   };
 
@@ -598,6 +613,8 @@ function App() {
     setShowAuditPanel(false);
     setShowMemberPanel(false);
     setShowAccessPanel(false);
+    setShowUsagePanel(false);
+    setShowAdminMenu(false);
     setShowDeadlinePanel(false);
   };
 
@@ -832,7 +849,7 @@ function App() {
       const saved = JSON.parse(localStorage.getItem('gantt_login') || 'null');
       if (!saved || !saved.user || !saved.role) return;
       if (saved.role === 'manager' || users.includes(saved.user)) {
-        handleLogin(saved.user, saved.role);
+        handleLogin(saved.user, saved.role, 'auto');   // 重整自動還原:統計來源記 auto
       } else {
         localStorage.removeItem('gantt_login');
       }
@@ -869,6 +886,7 @@ function App() {
             });
           } else closer();
         };
+        if (showAdminMenu) { setShowAdminMenu(false); e.preventDefault(); return; }
         if (confirmInfo) { setConfirmInfo(null); e.preventDefault(); return; }
         if (commentTarget) { closeGuard(() => setCommentTarget(null)); e.preventDefault(); return; }
         if (selectedTaskInfo) { closeGuard(() => setSelectedTaskInfo(null)); e.preventDefault(); return; }
@@ -884,12 +902,13 @@ function App() {
         if (showAuditPanel) { setShowAuditPanel(false); e.preventDefault(); return; }
         if (showMemberPanel) { setShowMemberPanel(false); e.preventDefault(); return; }
         if (showAccessPanel) { setShowAccessPanel(false); e.preventDefault(); return; }
+        if (showUsagePanel) { setShowUsagePanel(false); e.preventDefault(); return; }
         if (showDeadlinePanel) { setShowDeadlinePanel(false); e.preventDefault(); return; }
         return;
       }
 
       // 以下導航快捷鍵：任何 Modal/Panel 開啟時不觸發
-      const isAnyModalOpen = !!(confirmInfo || commentTarget || selectedTaskInfo || deliverableProj || editingProject || addingInterval || showExtraNoteModal || showWeeklyPlanModal || showWeeklyReport || showPendingPanel || showRetroPanel || showWeekEditPanel || showAuditPanel || showMemberPanel || showAccessPanel || showDeadlinePanel);
+      const isAnyModalOpen = !!(confirmInfo || commentTarget || selectedTaskInfo || deliverableProj || editingProject || addingInterval || showExtraNoteModal || showWeeklyPlanModal || showWeeklyReport || showPendingPanel || showRetroPanel || showWeekEditPanel || showAuditPanel || showMemberPanel || showAccessPanel || showUsagePanel || showAdminMenu || showDeadlinePanel);
       if (isAnyModalOpen) return;
 
       // Home 或 H：回到本週
@@ -914,7 +933,7 @@ function App() {
     };
     window.addEventListener('keydown', handler, true);   // capture phase
     return () => window.removeEventListener('keydown', handler, true);
-  }, [currentUser, weekW, isOverview, isResults, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showDeadlinePanel, goToCurrentWeek]);
+  }, [currentUser, weekW, isOverview, isResults, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showUsagePanel, showAdminMenu, showDeadlinePanel, goToCurrentWeek]);
 
   const existingCategories = useMemo(
     () => [...new Set(projects.map(p => p.category).filter(Boolean))].sort(),
@@ -1232,20 +1251,21 @@ function App() {
               <span className="text-white/85 mr-2 text-xs font-medium">系統週數</span>
               {role === 'manager' ? (
                 <div className="flex items-center space-x-1.5">
-                  <button onClick={() => setCurrentWeek(p => Math.max(1, p - 1))} className="w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" title="上一週">‹</button>
+                  {/* 切週後同步捲動置中該週(scrollTargetWeek 機制),避免「週切了但畫面停在原地」 */}
+                  <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); setScrollTargetWeek(w); }} className="w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" title="上一週">‹</button>
                   <span className="font-bold text-sm tracking-wider text-center" style={{ color: GOLD, minWidth: 100 }}>W{String(currentWeek).padStart(2, '0')}<span className="text-white/75 font-normal text-[10px] ml-1">{weekToMonth(currentWeek, months)}</span></span>
-                  <button onClick={() => setCurrentWeek(p => Math.min(weeksTotal, p + 1))} className="w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" title="下一週">›</button>
+                  <button onClick={() => { const w = Math.min(weeksTotal, currentWeek + 1); setCurrentWeek(w); setScrollTargetWeek(w); }} className="w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" title="下一週">›</button>
                 </div>
               ) : (
                 <div className="flex items-center space-x-1.5">
-                  <button onClick={() => setCurrentWeek(p => Math.max(1, p - 1))} className="w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" title="檢視前一週(唯讀)">‹</button>
+                  <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); setScrollTargetWeek(w); }} className="w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" title="檢視前一週(唯讀)">‹</button>
                   <span className="font-bold text-sm tracking-wider text-center" style={{ color: GOLD, minWidth: 100 }}>W{String(currentWeek).padStart(2, '0')}<span className="text-white/75 font-normal text-[10px] ml-1">{weekToMonth(currentWeek, months)}</span></span>
-                  <button onClick={() => setCurrentWeek(p => Math.min(todayWeek, p + 1))} disabled={currentWeek >= todayWeek}
+                  <button onClick={() => { const w = Math.min(todayWeek, currentWeek + 1); setCurrentWeek(w); setScrollTargetWeek(w); }} disabled={currentWeek >= todayWeek}
                     className={`w-5 h-5 flex items-center justify-center rounded-full text-xs font-bold transition ${currentWeek >= todayWeek ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-white/10 hover:bg-white/30'}`} title="檢視後一週">›</button>
                 </div>
               )}
               {role === 'member' && isViewingPast && (
-                <button onClick={() => setCurrentWeek(todayWeek)}
+                <button onClick={goToCurrentWeek}
                   className="ml-2 flex items-center bg-yellow-500/90 hover:bg-yellow-400 text-slate-900 text-[10px] font-bold px-2 py-0.5 rounded-full transition">
                   🔒 唯讀檢視中 · 返回本週 W{String(todayWeek).padStart(2, '0')}
                 </button>
@@ -1282,19 +1302,6 @@ function App() {
                   title={`編輯 W${String(currentWeek).padStart(2, '0')} 各成員回報：代成員補登/修正任務打卡、非專案事項、下週預計工作，並可編輯主管回覆`}>
                   🛠 編輯 W{String(currentWeek).padStart(2, '0')} 回報
                 </button>
-                <button onClick={() => setShowMemberPanel(true)}
-                  className="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20">
-                  👥 成員管理
-                </button>
-                <button onClick={() => setShowAccessPanel(true)}
-                  className="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20"
-                  title="設定誰可以瀏覽本頁面：依部門(DEPT_1/2/3)或工號白名單卡控">
-                  🔐 瀏覽權限
-                </button>
-                <button onClick={() => setShowAuditPanel(true)}
-                  className="bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20">
-                  📜 異動紀錄
-                </button>
               </>
             )}
             <button onClick={() => setShowWeeklyReport(true)}
@@ -1302,6 +1309,40 @@ function App() {
               📊 W{String(currentWeek).padStart(2, '0')} 團隊總結
             </button>
             <div className="flex items-center space-x-3 border-l border-white/20 pl-3 ml-1">
+              {/* 低頻管理入口收納為「⚙️ 管理」下拉選單,置於右側帳號區(網頁慣例:設定/管理在右上角,與登出同群組) */}
+              {role === 'manager' && (
+                <div className="relative">
+                  <button onClick={() => setShowAdminMenu(v => !v)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20 text-white ${showAdminMenu ? 'bg-white/25' : 'bg-white/10 hover:bg-white/20'}`}
+                    title="管理功能：成員管理、瀏覽權限、使用統計、異動紀錄">
+                    ⚙️ 管理 {showAdminMenu ? '▴' : '▾'}
+                  </button>
+                  {showAdminMenu && (
+                    <>
+                      {/* 選單無輸入內容,點選單外關閉不會遺失資料(輸入型視窗「不點外關閉」慣例的例外) */}
+                      <div className="fixed inset-0 z-[60]" onClick={() => setShowAdminMenu(false)}></div>
+                      <div className="absolute right-0 top-full mt-1.5 z-[70] w-44 bg-white rounded-xl shadow-2xl border border-slate-200 py-1.5 overflow-hidden">
+                        {[
+                          { icon: '👥', label: '成員管理', desc: '新增/移除/改名', open: () => setShowMemberPanel(true) },
+                          { icon: '🔐', label: '瀏覽權限', desc: '部門/工號卡控', open: () => setShowAccessPanel(true) },
+                          { icon: '📈', label: '使用統計', desc: '登入次數/使用率', open: () => setShowUsagePanel(true) },
+                          { icon: '📜', label: '異動紀錄', desc: '操作稽核', open: () => setShowAuditPanel(true) }
+                        ].map(item => (
+                          <button key={item.label}
+                            onClick={() => { setShowAdminMenu(false); item.open(); }}
+                            className="w-full text-left px-3.5 py-2 hover:bg-slate-100 transition flex items-center gap-2.5">
+                            <span className="text-base">{item.icon}</span>
+                            <span className="min-w-0">
+                              <span className="block text-xs font-bold text-slate-800">{item.label}</span>
+                              <span className="block text-[10px] text-slate-400">{item.desc}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               <div className="text-right leading-tight">
                 <div className="font-bold text-sm">{currentUser}</div>
                 <div className="text-[10px] text-white/80">{role === 'manager' ? '主管' : '成員'}{empId ? ` · 工號 ${empId}` : ''}</div>
@@ -1374,6 +1415,11 @@ function App() {
                 <span className="flex items-center" title="藍色＝該週回報「Monitor(例行監控)」"><span className="w-2.5 h-2.5 bg-sky-700 mr-1 rounded-sm"></span>Monitor</span>
                 <span className="flex items-center" title="灰色＝該週回報「未執行」"><span className="w-2.5 h-2.5 bg-slate-500 mr-1 rounded-sm"></span>未執行</span>
                 <span className="flex items-center" title="紅框＋❗＝本週排定但尚未回報的任務"><span className="w-3 h-2.5 mr-1 rounded-sm border-2 border-red-400 bg-white"></span>❗待回報</span>
+                {/* 鍵盤快捷鍵提示:常駐小字(輔助資訊直接顯示原則),完整說明放 title */}
+                <span className="flex items-center text-slate-400 border-l border-slate-200 pl-2"
+                  title="鍵盤快捷鍵：H＝回到本週並置中；← →＝左右平移 4 週；Shift＋← →＝微移 1 週；ESC＝關閉最上層視窗">
+                  ⌨ H 回本週・←→ 平移
+                </span>
               </div>
             </div>
           )}
@@ -1430,10 +1476,10 @@ function App() {
             {/* 檢視切換: 週檢視=可打卡操作; 年度總覽=整年全景; 成果清單=具體產出與MP總表 */}
             {/* 成員切入成果清單:改用成員下拉、預設看自己;切回週檢視/年度總覽:還原「只看我的」預設 */}
             <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: NAVY }}>
-              <button onClick={() => { if (isResults && role === 'member') { setOnlyMine(true); setOwnerFilter('all'); } setIsOverview(false); setIsResults(false); }}
+              <button onClick={() => { if (isResults && role === 'member') { setOnlyMine(true); setOwnerFilter('all'); } setIsOverview(false); setIsResults(false); savePref('overview', false); }}
                 className={`px-2 py-1 font-bold transition ${!isOverview && !isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
                 style={!isOverview && !isResults ? { backgroundColor: NAVY } : {}}>週檢視</button>
-              <button onClick={() => { if (isResults && role === 'member') { setOnlyMine(true); setOwnerFilter('all'); } setIsOverview(true); setIsResults(false); }}
+              <button onClick={() => { if (isResults && role === 'member') { setOnlyMine(true); setOwnerFilter('all'); } setIsOverview(true); setIsResults(false); savePref('overview', true); }}
                 className={`px-2 py-1 font-bold transition ${isOverview && !isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
                 style={isOverview && !isResults ? { backgroundColor: NAVY } : {}}
                 title="整年 52 週自動縮放至一個畫面寬(無水平捲軸),滑鼠停留甘特條可看細節">年度總覽</button>
@@ -1443,7 +1489,7 @@ function App() {
                 title="檢視全年度所有專案的具體產出項目與 MP Saving 統計(高階主管瀏覽視角,唯讀)">成果清單</button>
             </div>
             {!isOverview && !isResults && (
-              <button onClick={goToCurrentWeek} title={`回到本週 W${String(todayWeek).padStart(2, '0')} 並置中`}
+              <button onClick={goToCurrentWeek} title={`回到本週 W${String(todayWeek).padStart(2, '0')} 並置中（快捷鍵 H）`}
                 className="flex items-center text-white px-2 py-1 rounded-lg font-bold shadow-sm transition hover:opacity-90" style={{ backgroundColor: NAVY }}>
                 <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                 回到本週
@@ -1451,7 +1497,7 @@ function App() {
             )}
             <div className="h-5 w-px bg-slate-300/80 mx-1 flex-shrink-0"></div>
             {!isOverview && !isResults && (
-              <button onClick={() => setIsCompact(!isCompact)} className="text-slate-600 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-200 font-medium transition">
+              <button onClick={() => { const v = !isCompact; setIsCompact(v); savePref('compact', v); }} className="text-slate-600 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-200 font-medium transition">
                 {isCompact ? '寬鬆模式' : '緊湊模式'}
               </button>
             )}
@@ -1919,6 +1965,9 @@ function App() {
           showToast={showToast}
           onClose={() => setShowAccessPanel(false)}
         />
+      )}
+      {showUsagePanel && role === 'manager' && (
+        <UsageStatsPanel onClose={() => setShowUsagePanel(false)} />
       )}
       {deliverableProj && (
         <DeliverableModal
@@ -3378,6 +3427,153 @@ const AUDIT_ACTION_META = {
   SETTING:   { label: '設定', cls: 'bg-slate-200 text-slate-700' }
 };
 const AUDIT_ENTITY_LABELS = { Project: '專案', Task: '任務', WeeklyLog: '週回報', ExtraNote: '非專案事項', WeeklyPlan: '下週計畫', WeeklyComment: '主管回覆', User: '成員', AccessRule: '瀏覽權限', AppSettings: '系統設定' };
+
+// 主管:使用統計面板 — 登入次數(LoginLogs,遷移 13)評估網頁使用率;
+// 每次登入寫一筆(manual=登入畫面點選/auto=重整自動還原,兩者都代表一次開啟使用)
+function UsageStatsPanel({ onClose }) {
+  const [days, setDays] = useState(30);
+  const [stats, setStats] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setStats(null); setLoadError(null);
+    apiGet(`/api/login-stats?days=${days}`)
+      .then(d => { if (!cancelled) setStats(d); })
+      .catch(e => { if (!cancelled) setLoadError(e.message || '載入失敗'); });
+    return () => { cancelled = true; };
+  }, [days]);
+
+  // 每日趨勢:補齊近 days 天中無登入的日期(count=0),依日期排序
+  const dayBars = useMemo(() => {
+    if (!stats) return [];
+    const map = {};
+    (stats.byDay || []).forEach(d => { map[d.date] = d.count; });
+    const list = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const dt = new Date(); dt.setDate(dt.getDate() - i);
+      const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+      list.push({ date: key, label: `${dt.getMonth() + 1}/${dt.getDate()}`, count: map[key] || 0 });
+    }
+    return list;
+  }, [stats, days]);
+  const maxDay = Math.max(1, ...dayBars.map(d => d.count));
+  const maxUser = stats ? Math.max(1, ...(stats.byUser || []).map(u => Number(u.count))) : 1;
+
+  const kpi = (label, value, sub) => (
+    <div className="bg-white border border-slate-200 rounded-xl p-3 text-center shadow-sm">
+      <div className="text-[11px] font-bold text-slate-500">{label}</div>
+      <div className="text-2xl font-black text-slate-800 mt-0.5">{value}</div>
+      {sub && <div className="text-[10px] text-slate-400 mt-0.5">{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end">
+      <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#0F766E' }}>
+          <div>
+            <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>📈 使用統計</h3>
+            <p className="text-xs mt-0.5" style={{ color: '#99F6E4' }}>登入次數（含重新整理自動登入），評估網頁使用率</p>
+          </div>
+          <button onClick={onClose} className="text-white/70 hover:text-white p-1"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+        </div>
+
+        {/* 統計區間切換 */}
+        <div className="bg-white px-5 py-2 border-b border-slate-200 flex items-center gap-1.5">
+          <span className="text-[11px] font-bold text-slate-500 mr-1">統計區間</span>
+          {[7, 30, 90].map(d => (
+            <button key={d} onClick={() => setDays(d)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${days === d ? 'bg-teal-600 text-white border-teal-700' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
+              近 {d} 天
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {loadError ? (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm font-bold">❌ 載入失敗：{loadError}</div>
+          ) : !stats ? (
+            <div className="text-center text-slate-400 py-10">載入中…</div>
+          ) : (
+            <>
+              {/* ① KPI */}
+              <div className="grid grid-cols-2 gap-3">
+                {kpi('今日登入', stats.today)}
+                {kpi('近 7 天', stats.last7)}
+                {kpi(`近 ${stats.days} 天`, stats.lastN, `手動 ${stats.manualN}・自動 ${stats.autoN}`)}
+                {kpi('活躍使用者', stats.uniqueUsers, `近 ${stats.days} 天有登入的人數`)}
+              </div>
+
+              {/* ② 每日趨勢 */}
+              <div>
+                <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-2">📅 每日登入次數（近 {stats.days} 天）</div>
+                <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
+                  {stats.lastN === 0 ? (
+                    <div className="text-center text-slate-400 italic text-xs py-6">此區間尚無登入紀錄</div>
+                  ) : (
+                    <>
+                      <div className="flex items-end gap-px h-24">
+                        {dayBars.map(d => (
+                          <div key={d.date} className="flex-1 flex flex-col justify-end h-full group relative" title={`${d.date}：${d.count} 次`}>
+                            <div className={`w-full rounded-t transition ${d.count > 0 ? 'bg-teal-500 group-hover:bg-teal-600' : 'bg-slate-100'}`}
+                              style={{ height: d.count > 0 ? `${Math.max(8, Math.round((d.count / maxDay) * 100))}%` : 2 }}></div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex justify-between text-[10px] text-slate-400 mt-1.5 font-medium">
+                        <span>{dayBars[0]?.label}</span>
+                        <span>單日最高 {maxDay} 次</span>
+                        <span>{dayBars[dayBars.length - 1]?.label}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* ③ 使用者排行 */}
+              <div>
+                <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-2">👥 各使用者登入次數（近 {stats.days} 天）</div>
+                {(stats.byUser || []).length === 0 ? (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-center text-slate-400 text-xs italic">此區間尚無登入紀錄</div>
+                ) : (
+                  <div className="space-y-2">
+                    {stats.byUser.map(u => (
+                      <div key={u.user} className="bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-800 text-sm">{u.user}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${u.role === 'manager' ? 'bg-violet-100 text-violet-800 border-violet-400' : 'bg-sky-100 text-sky-800 border-sky-400'}`}>
+                            {u.role === 'manager' ? '主管' : '成員'}
+                          </span>
+                          <span className="ml-auto font-black text-teal-700 text-sm">{u.count} 次</span>
+                        </div>
+                        <div className="mt-1.5 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-teal-500 rounded-full" style={{ width: `${Math.max(4, Math.round((Number(u.count) / maxUser) * 100))}%` }}></div>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-1">最後登入 {u.lastAt}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="text-[11px] text-slate-400 leading-relaxed">
+                ※ 每次於登入畫面選擇身分、或重新整理／重開分頁自動還原登入，皆計一次。總累計（含更早期間）：{stats.total} 次。
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="p-4 bg-slate-50 border-t border-slate-200">
+          <button onClick={onClose}
+            className="w-full py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-xl transition">
+            關閉面板
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // 瀏覽權限規則的條件欄位定義(投影友善:400 級實線邊框+700/800 級文字)
 // 同一條規則內有填的欄位「全部符合」才通過(AND);多條規則之間「任一符合」即放行(OR)
