@@ -96,7 +96,7 @@ app.MapGet("/api/bootstrap", async (int? year) =>
         using (var cmd = new SqlCommand(@"
             SELECT p.ProjectId, p.TypeCode, p.Category, u.UserName AS Owner, p.Name,
                    t.TaskCode, t.TaskName, t.StartWeek, t.EndWeek, p.Deliverable, p.MpSaving,
-                   CAST(ISNULL(p.IsStarred, 0) AS BIT) AS IsStarred
+                   CAST(ISNULL(p.IsStarred, 0) AS BIT) AS IsStarred, p.NID AS ProjNID, t.NID AS TaskNID
             FROM dbo.Projects p
             JOIN dbo.Users u ON u.UserId = p.OwnerUserId
             LEFT JOIN dbo.Tasks t ON t.ProjectId = p.ProjectId AND t.IsDeleted = 0
@@ -120,6 +120,7 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                         Deliverable = r.IsDBNull(9) ? null : r.GetString(9),
                         MpSaving = r.IsDBNull(10) ? null : r.GetString(10),
                         IsStarred = Convert.ToBoolean(r.GetValue(11)),
+                        Nid = r.IsDBNull(12) ? null : r.GetString(12),
                         Tasks = new List<TaskItemDto>()
                     };
                     projMap[pid] = proj;
@@ -131,7 +132,8 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                         Id = r.GetString(5),
                         Name = r.GetString(6),
                         Start = r.GetInt32(7),
-                        End = r.GetInt32(8)
+                        End = r.GetInt32(8),
+                        Nid = r.IsDBNull(13) ? null : r.GetString(13)
                     });
             }
         }
@@ -422,6 +424,7 @@ app.MapPost("/api/task-schedule", async (TaskScheduleReq req) =>
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@NID", (object?)req.Nid ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -444,6 +447,7 @@ app.MapPost("/api/project", async (ProjectCreateReq req) =>
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@NID", (object?)req.Nid ?? DBNull.Value);
         var outId = new SqlParameter("@NewProjectId", SqlDbType.Int) { Direction = ParameterDirection.Output };
         cmd.Parameters.Add(outId);
         await cmd.ExecuteNonQueryAsync();
@@ -468,6 +472,7 @@ app.MapPost("/api/project/update", async (ProjectUpdateReq req) =>
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@NID", (object?)req.Nid ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -561,6 +566,7 @@ app.MapPost("/api/task", async (TaskCreateReq req) =>
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@NID", (object?)req.Nid ?? DBNull.Value);
         var outCode = new SqlParameter("@NewTaskCode", SqlDbType.NVarChar, 30) { Direction = ParameterDirection.Output };
         cmd.Parameters.Add(outCode);
         await cmd.ExecuteNonQueryAsync();
@@ -957,12 +963,12 @@ app.MapPost("/api/results-excel", async (ResultsExcelReq req) =>
     int y = req.Year;
     try
     {
-        var all = new List<(int Id, string Owner, string Category, string Type, string Name, bool Starred, string? Deliverable, string? MpSaving)>();
+        var all = new List<(int Id, string Owner, string Category, string Type, string Name, bool Starred, string? Deliverable, string? MpSaving, string? Nid)>();
         using (var conn = new SqlConnection(ConnStr()))
         {
             await conn.OpenAsync();
             using var cmd = new SqlCommand(@"
-                SELECT p.ProjectId, u.UserName, p.Category, p.TypeCode, p.Name, p.IsStarred, p.Deliverable, p.MpSaving
+                SELECT p.ProjectId, u.UserName, p.Category, p.TypeCode, p.Name, p.IsStarred, p.Deliverable, p.MpSaving, p.NID
                 FROM dbo.Projects p
                 JOIN dbo.Users u ON u.UserId = p.OwnerUserId
                 WHERE p.IsDeleted = 0 AND p.ScheduleYear = @y
@@ -973,7 +979,8 @@ app.MapPost("/api/results-excel", async (ResultsExcelReq req) =>
                 all.Add((r.GetInt32(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4),
                          r.GetBoolean(5),
                          r.IsDBNull(6) ? null : r.GetString(6),
-                         r.IsDBNull(7) ? null : r.GetString(7)));
+                         r.IsDBNull(7) ? null : r.GetString(7),
+                         r.IsDBNull(8) ? null : r.GetString(8)));
         }
 
         // 依前端傳入的顯示順序輸出(套用畫面上的篩選與排序);未傳=全部
@@ -986,7 +993,7 @@ app.MapPost("/api/results-excel", async (ResultsExcelReq req) =>
 
         using var wb = new ClosedXML.Excel.XLWorkbook();
         var ws = wb.Worksheets.Add($"{y} 成果清單");
-        string[] headers = { "No", "分類", "類型", "專案名稱", "負責人", "重點關注", "預計交付具體產出成果", "MP Saving" };
+        string[] headers = { "No", "分類", "類型", "專案名稱", "負責人", "重點關注", "預計交付具體產出成果", "MP Saving", "NID" };
         for (int i = 0; i < headers.Length; i++) ws.Cell(1, i + 1).Value = headers[i];
         var head = ws.Range(1, 1, 1, headers.Length);
         head.Style.Font.Bold = true;
@@ -1005,6 +1012,7 @@ app.MapPost("/api/results-excel", async (ResultsExcelReq req) =>
             ws.Cell(row, 6).Value = p.Starred ? "★" : "";
             ws.Cell(row, 7).Value = p.Deliverable ?? "";
             ws.Cell(row, 8).Value = p.MpSaving ?? "";
+            ws.Cell(row, 9).Value = p.Nid ?? "";
             if (p.Starred)
             {
                 var st = ws.Cell(row, 6).Style;
@@ -1028,6 +1036,8 @@ app.MapPost("/api/results-excel", async (ResultsExcelReq req) =>
         ws.Column(7).Style.Alignment.WrapText = true;
         ws.Column(8).Width = 20;
         ws.Column(8).Style.Alignment.WrapText = true;
+        ws.Column(9).Width = 22;
+        ws.Column(9).Style.Alignment.WrapText = true;
 
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
@@ -1403,6 +1413,7 @@ class ProjectDto
     public string? Deliverable { get; set; }   // 具體產出項目(負責人與主管可編輯)
     public string? MpSaving { get; set; }      // MP 人力節省(同上,與產出項目同視窗編輯)
     public bool IsStarred { get; set; }        // 主管標記重點關注(存於 DB，全員同步可見)
+    public string? Nid { get; set; }           // 專案流水編號(選填;一專案可含多組 NID)
     public List<TaskItemDto> Tasks { get; set; } = new();
 }
 
@@ -1412,17 +1423,18 @@ class TaskItemDto
     public string Name { get; set; } = "";
     public int Start { get; set; }
     public int End { get; set; }
+    public string? Nid { get; set; }           // 該進度區間對應哪組 NID(選填)
 }
 
 // ActorEmpId = 前端 /api/whoami 偵測到的 Windows 工號(如 00058897);非網域環境為 null,由 apiPost 自動附帶
 record WeeklyLogReq(string TaskCode, int Year, int Week, string Status, string? Note, string Actor, string? ActorRole, string? ActorEmpId);
 record ExtraNoteReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole, string? ActorEmpId);
-record TaskScheduleReq(string TaskCode, string Name, int Start, int End, string Actor, string? ActorRole, string? ActorEmpId);
-record ProjectCreateReq(string Type, string Category, string Owner, string Name, int Year, string Actor, string? ActorRole, string? ActorEmpId);
-record ProjectUpdateReq(int ProjectId, string Type, string Category, string Owner, string Name, string Actor, string? ActorRole, string? ActorEmpId);
+record TaskScheduleReq(string TaskCode, string Name, int Start, int End, string Actor, string? ActorRole, string? ActorEmpId, string? Nid);
+record ProjectCreateReq(string Type, string Category, string Owner, string Name, int Year, string Actor, string? ActorRole, string? ActorEmpId, string? Nid);
+record ProjectUpdateReq(int ProjectId, string Type, string Category, string Owner, string Name, string Actor, string? ActorRole, string? ActorEmpId, string? Nid);
 record ProjectDeleteReq(int ProjectId, string Actor, string? ActorRole, string? ActorEmpId);
 record ProjectReorderReq(List<int>? OrderedIds, string Actor, string? ActorRole, string? ActorEmpId);
-record TaskCreateReq(int ProjectId, string TaskName, int Start, int End, string Actor, string? ActorRole, string? ActorEmpId);
+record TaskCreateReq(int ProjectId, string TaskName, int Start, int End, string Actor, string? ActorRole, string? ActorEmpId, string? Nid);
 record TaskDeleteReq(string TaskCode, string Actor, string? ActorRole, string? ActorEmpId);
 record UserCreateReq(string UserName, string Actor, string? ActorRole, string? ActorEmpId);
 record UserUpdateReq(string UserName, string NewName, string Actor, string? ActorRole, string? ActorEmpId);

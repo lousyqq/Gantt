@@ -189,6 +189,8 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
           const hasB = b.deliverable ? 1 : 0;
           if (hasA !== hasB) return (hasA - hasB) * factor;
           return String(a.deliverable || '').localeCompare(String(b.deliverable || ''), 'zh-TW') * factor;
+        } else if (key === 'nid') {
+          return String(a.nid || '').localeCompare(String(b.nid || ''), 'zh-TW', { numeric: true }) * factor;
         }
         return 0;
       });
@@ -326,6 +328,7 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
               {renderSortHeader("負責人", "owner", "w-24")}
               {renderSortHeader("預計交付具體產出成果", "deliverable", "w-auto")}
               {renderSortHeader("MP Saving", "mpSaving", "w-36")}
+              {renderSortHeader("NID", "nid", "w-32")}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 text-[13px]">
@@ -381,12 +384,23 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
                       <span className="text-slate-300 font-light">—</span>
                     )}
                   </td>
+                  <td className="px-3 py-1 align-top" title={proj.nid || ''}>
+                    {proj.nid ? (
+                      <div className="flex flex-wrap gap-1">
+                        {String(proj.nid).split(/[、,，;；\s]+/).filter(Boolean).map((n, i) => (
+                          <span key={i} className="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold border border-slate-200 whitespace-nowrap">{n}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-slate-300 font-light">—</span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
             {displayedProjects.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-slate-400 font-medium">
+                <td colSpan={8} className="py-8 text-center text-slate-400 font-medium">
                   符合篩選條件的專案項目為空
                 </td>
               </tr>
@@ -818,15 +832,15 @@ function App() {
     }
   };
 
-  const handleUpdateTaskDetails = async (projId, taskId, newName, newStart, newEnd) => {
+  const handleUpdateTaskDetails = async (projId, taskId, newName, newStart, newEnd, newNid) => {
     try {
       await apiPost('/api/task-schedule', {
-        taskCode: taskId, name: newName, start: parseInt(newStart), end: parseInt(newEnd),
+        taskCode: taskId, name: newName, start: parseInt(newStart), end: parseInt(newEnd), nid: newNid,
         actor: currentUser, actorRole: role
       });
       setProjects(prev => prev.map(p => {
         if (p.id !== projId) return p;
-        return { ...p, tasks: p.tasks.map(t => t.id === taskId ? { ...t, name: newName, start: parseInt(newStart), end: parseInt(newEnd) } : t) };
+        return { ...p, tasks: p.tasks.map(t => t.id === taskId ? { ...t, name: newName, start: parseInt(newStart), end: parseInt(newEnd), nid: newNid } : t) };
       }));
       setSelectedTaskInfo(null);
       showToast('✅ 排程已更新');
@@ -948,12 +962,12 @@ function App() {
       if (form.mode === 'add') {
         await apiPost('/api/project', {
           type: form.type, category: form.category, owner: form.owner,
-          name: form.name, year: scheduleYear, actor: currentUser, actorRole: role
+          name: form.name, year: scheduleYear, nid: form.nid, actor: currentUser, actorRole: role
         });
       } else {
         await apiPost('/api/project/update', {
           projectId: form.projectId, type: form.type, category: form.category,
-          owner: form.owner, name: form.name, actor: currentUser, actorRole: role
+          owner: form.owner, name: form.name, nid: form.nid, actor: currentUser, actorRole: role
         });
       }
       await refreshData();
@@ -995,10 +1009,10 @@ function App() {
     });
   };
 
-  const handleAddInterval = async (proj, taskName, start, end) => {
+  const handleAddInterval = async (proj, taskName, start, end, nid) => {
     try {
       await apiPost('/api/task', {
-        projectId: proj.id, taskName, start: parseInt(start), end: parseInt(end),
+        projectId: proj.id, taskName, start: parseInt(start), end: parseInt(end), nid,
         actor: currentUser, actorRole: role
       });
       await refreshData();
@@ -1669,7 +1683,7 @@ function App() {
                               )}
                               <div className={`flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`}>{proj.type.toUpperCase()}</div>
                               {/* 範本 B:專案名稱近全黑+加粗,寬鬆模式 15px(預設)/緊湊 13px/總覽 12.5px */}
-                              <span className={`flex-1 min-w-0 truncate font-semibold text-slate-900 ${isOverview ? 'text-[12.5px]' : isCompact ? 'text-[13px]' : 'text-[15px]'}`} title={proj.name}>{proj.name}</span>
+                              <span className={`flex-1 min-w-0 truncate font-semibold text-slate-900 ${isOverview ? 'text-[12.5px]' : isCompact ? 'text-[13px]' : 'text-[15px]'}`} title={proj.nid ? `${proj.name}\nNID：${proj.nid}` : proj.name}>{proj.name}</span>
                               {/* 具體產出項目(專案執行完畢後的成果)入口:已填=實色,未填=淡色;負責人與主管可編輯,其他人唯讀 */}
                               <button
                                 onClick={(e) => { e.stopPropagation(); setDeliverableProj(proj); }}
@@ -1788,7 +1802,9 @@ function App() {
             <div className="text-slate-300 mb-0.5">👤 {tooltip.proj.owner}　·　{tooltip.proj.category}</div>
             {tooltip.proj.deliverable && <div className="text-amber-200/90 mb-0.5">🎯 {tooltip.proj.deliverable}</div>}
             {tooltip.proj.mpSaving && <div className="text-emerald-300 font-bold mb-0.5">💡 MP 節省：{tooltip.proj.mpSaving}</div>}
+            {tooltip.proj.nid && <div className="text-slate-300 mb-0.5">🔖 專案 NID：{tooltip.proj.nid}</div>}
             <div className="text-slate-300">📅 {tooltip.task.name}</div>
+            {tooltip.task.nid && <div className="text-slate-400">🔖 區間 NID：{tooltip.task.nid}</div>}
             <div className="text-slate-400">W{tooltip.task.start} – W{tooltip.task.end}（{weekToMonth(tooltip.task.start, months)} ~ {weekToMonth(tooltip.task.end, months)}）</div>
             {isTaskDeadlineSoon(tooltip.task) && (
               <div className="mt-1 text-orange-300 font-bold">
@@ -2112,6 +2128,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
   const [taskName, setTaskName] = useState(task.name);
   const [startWeek, setStartWeek] = useState(task.start);
   const [endWeek, setEndWeek] = useState(task.end);
+  const [taskNid, setTaskNid] = useState(task.nid || '');   // 此進度區間對應哪組 NID(選填)
   const [saving, setSaving] = useState(false);   // 防連點:送出中鎖定按鈕
   useModalDirtyReset();
   const [scheduleError, setScheduleError] = useState('');
@@ -2131,7 +2148,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
     if (!taskName.trim()) { setScheduleError('任務名稱不可空白'); return; }
     if (isNaN(s) || isNaN(e) || s < 1 || e > weeksTotal || s > e) { setScheduleError(`週次需介於 1–${weeksTotal}，且開始週不可晚於結束週`); return; }
     setSaving(true);
-    try { await onUpdateTaskDetails(proj.id, task.id, taskName.trim(), s, e); } finally { setSaving(false); }
+    try { await onUpdateTaskDetails(proj.id, task.id, taskName.trim(), s, e, taskNid.trim()); } finally { setSaving(false); }
   };
 
   return (
@@ -2167,6 +2184,11 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                 <input type="number" min="1" max={weeksTotal} value={endWeek} onChange={e => { setEndWeek(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
                   className="w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" />
               </div>
+            </div>
+            <div className="mt-3">
+              <label className="text-[10px] text-slate-400 font-bold">NID（此區間對應哪組 NID，選填）</label>
+              <input type="text" value={taskNid} onChange={e => { setTaskNid(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
+                className="w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" placeholder="如 N001…" />
             </div>
             {scheduleError && <div className="mt-2 text-xs text-red-600 font-bold">{scheduleError}</div>}
             {isManager && (
@@ -2393,7 +2415,7 @@ function DeliverableModal({ proj, role, currentUser, onClose, onSave }) {
         <div className="px-6 py-4 text-white flex justify-between items-start" style={{ backgroundColor: '#F59E0B' }}>
           <div className="pr-3">
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🎯 具體產出與 MP 效益</h3>
-            <p className="text-xs mt-0.5 truncate max-w-[360px]" style={{ color: '#FEF3C7' }}>{proj.name}（負責人：{proj.owner}）</p>
+            <p className="text-xs mt-0.5 break-words leading-snug" style={{ color: '#FEF3C7' }}>{proj.name}（負責人：{proj.owner}）</p>
           </div>
           <button onClick={onClose} className="text-white/70 hover:text-white flex-shrink-0"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
@@ -2555,7 +2577,7 @@ function DeadlinePanel({ items, onClose, onSelect }) {
               className="w-full text-left bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-xl p-3 transition group">
               <div className="flex items-center justify-between">
                 <div className="min-w-0 pr-2">
-                  <div className="text-xs font-bold text-slate-700 truncate">{proj.name}</div>
+                  <div className="text-xs font-bold text-slate-700 break-words leading-snug">{proj.name}</div>
                   <div className="text-sm text-slate-600 mt-0.5 truncate">{task.name}</div>
                   <div className="text-[10px] text-slate-400 mt-1">👤 {proj.owner} · 排程 W{task.start}–W{task.end}</div>
                 </div>
@@ -2633,7 +2655,7 @@ function PendingPanel({ pending = [], completed = [], currentWeek, planPending =
                     className="w-full text-left bg-yellow-50 hover:bg-yellow-100 border border-yellow-300 rounded-xl p-3.5 transition group shadow-sm">
                     <div className="flex items-center justify-between">
                       <div className="min-w-0 pr-2">
-                        <div className="text-xs font-bold text-amber-900 truncate">{proj.name}</div>
+                        <div className="text-xs font-bold text-amber-900 break-words leading-snug">{proj.name}</div>
                         <div className="text-sm font-black text-slate-800 mt-0.5 truncate">{task.name}</div>
                         <div className="text-[10px] text-slate-500 mt-1">排程 W{task.start}–W{task.end} · {proj.category}</div>
                       </div>
@@ -2707,8 +2729,8 @@ function PendingPanel({ pending = [], completed = [], currentWeek, planPending =
                     className="w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-3 transition group opacity-90">
                     <div className="flex items-center justify-between">
                       <div className="min-w-0 pr-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-600 truncate">{proj.name}</span>
+                        <div className="text-xs font-bold text-slate-600 break-words leading-snug">{proj.name}</div>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1">
                           <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${log.status === 'executed' ? 'bg-green-100 text-green-800' : log.status === 'monitor' ? 'bg-sky-100 text-sky-800' : 'bg-slate-200 text-slate-700'}`}>
                             {STATUS_META[log.status]?.icon} {STATUS_META[log.status]?.label}
                           </span>
@@ -2822,8 +2844,8 @@ function ManagerWeekPanel({ week, todayWeek, users = [], projects, taskLogs, ext
                     className={`w-full text-left border rounded-xl p-3 transition group shadow-sm ${log ? 'bg-slate-50 hover:bg-slate-100 border-slate-200' : 'bg-yellow-50 hover:bg-yellow-100 border-yellow-300'}`}>
                     <div className="flex items-center justify-between">
                       <div className="min-w-0 pr-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-bold text-slate-700 truncate">{proj.name}</span>
+                        <div className="text-xs font-bold text-slate-700 break-words leading-snug">{proj.name}</div>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1">
                           {log ? (
                             <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold ${log.status === 'executed' ? 'bg-green-100 text-green-800' : log.status === 'monitor' ? 'bg-sky-100 text-sky-800' : 'bg-slate-200 text-slate-700'}`}>
                               {STATUS_META[log.status]?.icon} {STATUS_META[log.status]?.label}
@@ -3082,15 +3104,14 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
         <div className="text-xs font-bold text-slate-400 border-b border-slate-100 pb-1">📌 專案執行項目</div>
         {activeTasks.length > 0 ? activeTasks.map(({ proj, task, log }) => (
           <div key={task.id} className={`text-sm p-2.5 rounded-lg border ${log.status === 'not_executed' ? 'bg-slate-100 border-slate-200 opacity-80' : log.status === 'monitor' ? 'bg-sky-50/70 border-sky-200' : 'bg-green-50/60 border-green-200'}`}>
-            <div className="flex items-center justify-between">
-              <div className="font-bold text-slate-700 truncate text-xs pr-2">{proj.name}</div>
-              <div className="flex-shrink-0 flex items-center gap-1">
-                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_META[log.status]?.tag}`}>{STATUS_META[log.status]?.label}</span>
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700" title="打卡得分">{Number(log.score ?? 1)}分</span>
-                {log.reporterRole === 'manager' && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300" title="此筆由主管代為修正/補登">✏️主管</span>
-                )}
-              </div>
+            {/* 方案A:專案名稱獨立整行完整顯示(可換行,不截斷),徽章移到下方一列 */}
+            <div className="font-bold text-slate-700 text-xs leading-snug break-words">{proj.name}</div>
+            <div className="flex flex-wrap items-center gap-1 mt-1">
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_META[log.status]?.tag}`}>{STATUS_META[log.status]?.label}</span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700" title="打卡得分">{Number(log.score ?? 1)}分</span>
+              {log.reporterRole === 'manager' && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300" title="此筆由主管代為修正/補登">✏️主管</span>
+              )}
             </div>
             <div className="text-slate-600 my-1 font-medium text-xs">{task.name}</div>
             {log.note && <div className="text-slate-700 text-xs bg-white p-1.5 rounded border border-slate-100 whitespace-pre-wrap">{log.note}</div>}
@@ -3248,6 +3269,7 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
   const [name, setName] = useState(isEdit ? p.name : '');
   const [category, setCategory] = useState(isEdit ? p.category : '');
   const [type, setType] = useState(isEdit ? p.type : 'a');
+  const [nid, setNid] = useState(isEdit ? (p.nid || '') : '');   // 專案流水編號(選填;一專案可含多組)
   const [owner, setOwner] = useState(info.owner);   // 編輯時可改派負責人(如移轉給新成員)
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -3265,7 +3287,8 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
         owner,
         name: name.trim(),
         category: category.trim(),
-        type
+        type,
+        nid: nid.trim()
       });
     } finally { setSaving(false); }
   };
@@ -3315,6 +3338,11 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
               )}
             </div>
           )}
+          <div>
+            <label className="text-xs font-bold text-slate-500">NID（流水編號，選填）</label>
+            <input type="text" value={nid} onChange={e => { setNid(e.target.value); markModalDirty(); }}
+              className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="專案流水編號，可含多組（如 N001, N002）…" />
+          </div>
           {error && <div className="text-xs text-red-600 font-bold">{error}</div>}
           <div className="flex justify-end space-x-3 pt-2">
             <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
@@ -3330,6 +3358,7 @@ function IntervalModal({ project, currentWeek, weeksTotal = WEEKS_TOTAL, onClose
   const [taskName, setTaskName] = useState('');
   const [start, setStart] = useState(currentWeek);
   const [end, setEnd] = useState(currentWeek);
+  const [nid, setNid] = useState('');   // 此區間對應哪組 NID(選填)
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   useModalDirtyReset();
@@ -3340,7 +3369,7 @@ function IntervalModal({ project, currentWeek, weeksTotal = WEEKS_TOTAL, onClose
     if (!taskName.trim()) { setError('計畫名稱不可空白'); return; }
     if (isNaN(s) || isNaN(e) || s < 1 || e > weeksTotal || s > e) { setError(`週次需介於 1–${weeksTotal}，且開始週不可晚於結束週`); return; }
     setSaving(true);
-    try { await onSave(project, taskName.trim(), s, e); } finally { setSaving(false); }
+    try { await onSave(project, taskName.trim(), s, e, nid.trim()); } finally { setSaving(false); }
   };
 
   return (
@@ -3370,6 +3399,11 @@ function IntervalModal({ project, currentWeek, weeksTotal = WEEKS_TOTAL, onClose
               <input type="number" min="1" max={weeksTotal} value={end} onChange={e => { setEnd(e.target.value); setError(''); markModalDirty(); }}
                 className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" />
             </div>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-slate-500">NID（此區間對應哪組 NID，選填）</label>
+            <input type="text" value={nid} onChange={e => { setNid(e.target.value); markModalDirty(); }}
+              className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500" placeholder="如 N001…" />
           </div>
           {error && <div className="text-xs text-red-600 font-bold">{error}</div>}
           <div className="flex justify-end space-x-3 pt-2">

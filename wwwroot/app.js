@@ -304,6 +304,10 @@ function ResultsView({
           const hasB = b.deliverable ? 1 : 0;
           if (hasA !== hasB) return (hasA - hasB) * factor;
           return String(a.deliverable || '').localeCompare(String(b.deliverable || ''), 'zh-TW') * factor;
+        } else if (key === 'nid') {
+          return String(a.nid || '').localeCompare(String(b.nid || ''), 'zh-TW', {
+            numeric: true
+          }) * factor;
         }
         return 0;
       });
@@ -446,7 +450,7 @@ function ResultsView({
     className: "bg-slate-100 text-xs font-bold border-b border-slate-200 h-9"
   }, /*#__PURE__*/React.createElement("th", {
     className: "px-2 w-10 text-center text-slate-500 whitespace-nowrap"
-  }, "No"), renderSortHeader("分類", "category", "w-20"), renderSortHeader("類型", "type", "w-14 text-center"), renderSortHeader("專案名稱", "name", "w-[420px]"), renderSortHeader("負責人", "owner", "w-24"), renderSortHeader("預計交付具體產出成果", "deliverable", "w-auto"), renderSortHeader("MP Saving", "mpSaving", "w-36"))), /*#__PURE__*/React.createElement("tbody", {
+  }, "No"), renderSortHeader("分類", "category", "w-20"), renderSortHeader("類型", "type", "w-14 text-center"), renderSortHeader("專案名稱", "name", "w-[420px]"), renderSortHeader("負責人", "owner", "w-24"), renderSortHeader("預計交付具體產出成果", "deliverable", "w-auto"), renderSortHeader("MP Saving", "mpSaving", "w-36"), renderSortHeader("NID", "nid", "w-32"))), /*#__PURE__*/React.createElement("tbody", {
     className: "divide-y divide-slate-200 text-[13px]"
   }, displayedProjects.map((proj, idx) => {
     const cleanDeliverable = proj.deliverable ? String(proj.deliverable).replace(/[\r\n]+/g, ' ') : '';
@@ -493,9 +497,19 @@ function ResultsView({
       className: "inline-flex items-center px-2 py-0.5 rounded text-[13px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 whitespace-nowrap"
     }, proj.mpSaving) : /*#__PURE__*/React.createElement("span", {
       className: "text-slate-300 font-light"
+    }, "\u2014")), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-1 align-top",
+      title: proj.nid || ''
+    }, proj.nid ? /*#__PURE__*/React.createElement("div", {
+      className: "flex flex-wrap gap-1"
+    }, String(proj.nid).split(/[、,，;；\s]+/).filter(Boolean).map((n, i) => /*#__PURE__*/React.createElement("span", {
+      key: i,
+      className: "inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold border border-slate-200 whitespace-nowrap"
+    }, n))) : /*#__PURE__*/React.createElement("span", {
+      className: "text-slate-300 font-light"
     }, "\u2014")));
   }), displayedProjects.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-    colSpan: 7,
+    colSpan: 8,
     className: "py-8 text-center text-slate-400 font-medium"
   }, "\u7B26\u5408\u7BE9\u9078\u689D\u4EF6\u7684\u5C08\u6848\u9805\u76EE\u70BA\u7A7A"))))));
 }
@@ -1021,13 +1035,14 @@ function App() {
       showToast('❌ 調整失敗：' + (e.message || '無法連線資料庫'));
     }
   };
-  const handleUpdateTaskDetails = async (projId, taskId, newName, newStart, newEnd) => {
+  const handleUpdateTaskDetails = async (projId, taskId, newName, newStart, newEnd, newNid) => {
     try {
       await apiPost('/api/task-schedule', {
         taskCode: taskId,
         name: newName,
         start: parseInt(newStart),
         end: parseInt(newEnd),
+        nid: newNid,
         actor: currentUser,
         actorRole: role
       });
@@ -1039,7 +1054,8 @@ function App() {
             ...t,
             name: newName,
             start: parseInt(newStart),
-            end: parseInt(newEnd)
+            end: parseInt(newEnd),
+            nid: newNid
           } : t)
         };
       }));
@@ -1246,6 +1262,7 @@ function App() {
           owner: form.owner,
           name: form.name,
           year: scheduleYear,
+          nid: form.nid,
           actor: currentUser,
           actorRole: role
         });
@@ -1256,6 +1273,7 @@ function App() {
           category: form.category,
           owner: form.owner,
           name: form.name,
+          nid: form.nid,
           actor: currentUser,
           actorRole: role
         });
@@ -1305,13 +1323,14 @@ function App() {
       }
     });
   };
-  const handleAddInterval = async (proj, taskName, start, end) => {
+  const handleAddInterval = async (proj, taskName, start, end, nid) => {
     try {
       await apiPost('/api/task', {
         projectId: proj.id,
         taskName,
         start: parseInt(start),
         end: parseInt(end),
+        nid,
         actor: currentUser,
         actorRole: role
       });
@@ -2320,7 +2339,7 @@ function App() {
       className: `flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`
     }, proj.type.toUpperCase()), /*#__PURE__*/React.createElement("span", {
       className: `flex-1 min-w-0 truncate font-semibold text-slate-900 ${isOverview ? 'text-[12.5px]' : isCompact ? 'text-[13px]' : 'text-[15px]'}`,
-      title: proj.name
+      title: proj.nid ? `${proj.name}\nNID：${proj.nid}` : proj.name
     }, proj.name), /*#__PURE__*/React.createElement("button", {
       onClick: e => {
         e.stopPropagation();
@@ -2447,9 +2466,13 @@ function App() {
     className: "text-amber-200/90 mb-0.5"
   }, "\uD83C\uDFAF ", tooltip.proj.deliverable), tooltip.proj.mpSaving && /*#__PURE__*/React.createElement("div", {
     className: "text-emerald-300 font-bold mb-0.5"
-  }, "\uD83D\uDCA1 MP \u7BC0\u7701\uFF1A", tooltip.proj.mpSaving), /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCA1 MP \u7BC0\u7701\uFF1A", tooltip.proj.mpSaving), tooltip.proj.nid && /*#__PURE__*/React.createElement("div", {
+    className: "text-slate-300 mb-0.5"
+  }, "\uD83D\uDD16 \u5C08\u6848 NID\uFF1A", tooltip.proj.nid), /*#__PURE__*/React.createElement("div", {
     className: "text-slate-300"
-  }, "\uD83D\uDCC5 ", tooltip.task.name), /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCC5 ", tooltip.task.name), tooltip.task.nid && /*#__PURE__*/React.createElement("div", {
+    className: "text-slate-400"
+  }, "\uD83D\uDD16 \u5340\u9593 NID\uFF1A", tooltip.task.nid), /*#__PURE__*/React.createElement("div", {
     className: "text-slate-400"
   }, "W", tooltip.task.start, " \u2013 W", tooltip.task.end, "\uFF08", weekToMonth(tooltip.task.start, months), " ~ ", weekToMonth(tooltip.task.end, months), "\uFF09"), isTaskDeadlineSoon(tooltip.task) && /*#__PURE__*/React.createElement("div", {
     className: "mt-1 text-orange-300 font-bold"
@@ -2861,6 +2884,7 @@ function TaskModal({
   const [taskName, setTaskName] = useState(task.name);
   const [startWeek, setStartWeek] = useState(task.start);
   const [endWeek, setEndWeek] = useState(task.end);
+  const [taskNid, setTaskNid] = useState(task.nid || ''); // 此進度區間對應哪組 NID(選填)
   const [saving, setSaving] = useState(false); // 防連點:送出中鎖定按鈕
   useModalDirtyReset();
   const [scheduleError, setScheduleError] = useState('');
@@ -2896,7 +2920,7 @@ function TaskModal({
     }
     setSaving(true);
     try {
-      await onUpdateTaskDetails(proj.id, task.id, taskName.trim(), s, e);
+      await onUpdateTaskDetails(proj.id, task.id, taskName.trim(), s, e, taskNid.trim());
     } finally {
       setSaving(false);
     }
@@ -2986,7 +3010,22 @@ function TaskModal({
     },
     disabled: !isManager,
     className: "w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500"
-  }))), scheduleError && /*#__PURE__*/React.createElement("div", {
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "mt-3"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "text-[10px] text-slate-400 font-bold"
+  }, "NID\uFF08\u6B64\u5340\u9593\u5C0D\u61C9\u54EA\u7D44 NID\uFF0C\u9078\u586B\uFF09"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    value: taskNid,
+    onChange: e => {
+      setTaskNid(e.target.value);
+      setScheduleError('');
+      markModalDirty();
+    },
+    disabled: !isManager,
+    className: "w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500",
+    placeholder: "\u5982 N001\u2026"
+  })), scheduleError && /*#__PURE__*/React.createElement("div", {
     className: "mt-2 text-xs text-red-600 font-bold"
   }, scheduleError), isManager && /*#__PURE__*/React.createElement("div", {
     className: "mt-3 flex gap-2"
@@ -3299,7 +3338,7 @@ function DeliverableModal({
       color: '#FFFFFF'
     }
   }, "\uD83C\uDFAF \u5177\u9AD4\u7522\u51FA\u8207 MP \u6548\u76CA"), /*#__PURE__*/React.createElement("p", {
-    className: "text-xs mt-0.5 truncate max-w-[360px]",
+    className: "text-xs mt-0.5 break-words leading-snug",
     style: {
       color: '#FEF3C7'
     }
@@ -3584,7 +3623,7 @@ function DeadlinePanel({
   }, /*#__PURE__*/React.createElement("div", {
     className: "min-w-0 pr-2"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-xs font-bold text-slate-700 truncate"
+    className: "text-xs font-bold text-slate-700 break-words leading-snug"
   }, proj.name), /*#__PURE__*/React.createElement("div", {
     className: "text-sm text-slate-600 mt-0.5 truncate"
   }, task.name), /*#__PURE__*/React.createElement("div", {
@@ -3693,7 +3732,7 @@ function PendingPanel({
   }, /*#__PURE__*/React.createElement("div", {
     className: "min-w-0 pr-2"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-xs font-bold text-amber-900 truncate"
+    className: "text-xs font-bold text-amber-900 break-words leading-snug"
   }, proj.name), /*#__PURE__*/React.createElement("div", {
     className: "text-sm font-black text-slate-800 mt-0.5 truncate"
   }, task.name), /*#__PURE__*/React.createElement("div", {
@@ -3768,10 +3807,10 @@ function PendingPanel({
   }, /*#__PURE__*/React.createElement("div", {
     className: "min-w-0 pr-2"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-1.5"
+    className: "text-xs font-bold text-slate-600 break-words leading-snug"
+  }, proj.name), /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-wrap items-center gap-1.5 mt-1"
   }, /*#__PURE__*/React.createElement("span", {
-    className: "text-xs font-bold text-slate-600 truncate"
-  }, proj.name), /*#__PURE__*/React.createElement("span", {
     className: `px-1.5 py-0.5 rounded text-[10px] font-bold ${log.status === 'executed' ? 'bg-green-100 text-green-800' : log.status === 'monitor' ? 'bg-sky-100 text-sky-800' : 'bg-slate-200 text-slate-700'}`
   }, STATUS_META[log.status]?.icon, " ", STATUS_META[log.status]?.label)), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-medium text-slate-700 mt-1 truncate"
@@ -3917,10 +3956,10 @@ function ManagerWeekPanel({
   }, /*#__PURE__*/React.createElement("div", {
     className: "min-w-0 pr-2"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-1.5"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-xs font-bold text-slate-700 truncate"
-  }, proj.name), log ? /*#__PURE__*/React.createElement("span", {
+    className: "text-xs font-bold text-slate-700 break-words leading-snug"
+  }, proj.name), /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-wrap items-center gap-1.5 mt-1"
+  }, log ? /*#__PURE__*/React.createElement("span", {
     className: `flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold ${log.status === 'executed' ? 'bg-green-100 text-green-800' : log.status === 'monitor' ? 'bg-sky-100 text-sky-800' : 'bg-slate-200 text-slate-700'}`
   }, STATUS_META[log.status]?.icon, " ", STATUS_META[log.status]?.label) : /*#__PURE__*/React.createElement("span", {
     className: "flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-300"
@@ -4250,11 +4289,9 @@ function WeeklyReportDashboard({
     key: task.id,
     className: `text-sm p-2.5 rounded-lg border ${log.status === 'not_executed' ? 'bg-slate-100 border-slate-200 opacity-80' : log.status === 'monitor' ? 'bg-sky-50/70 border-sky-200' : 'bg-green-50/60 border-green-200'}`
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center justify-between"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "font-bold text-slate-700 truncate text-xs pr-2"
+    className: "font-bold text-slate-700 text-xs leading-snug break-words"
   }, proj.name), /*#__PURE__*/React.createElement("div", {
-    className: "flex-shrink-0 flex items-center gap-1"
+    className: "flex flex-wrap items-center gap-1 mt-1"
   }, /*#__PURE__*/React.createElement("span", {
     className: `px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_META[log.status]?.tag}`
   }, STATUS_META[log.status]?.label), /*#__PURE__*/React.createElement("span", {
@@ -4263,7 +4300,7 @@ function WeeklyReportDashboard({
   }, Number(log.score ?? 1), "\u5206"), log.reporterRole === 'manager' && /*#__PURE__*/React.createElement("span", {
     className: "px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300",
     title: "\u6B64\u7B46\u7531\u4E3B\u7BA1\u4EE3\u70BA\u4FEE\u6B63/\u88DC\u767B"
-  }, "\u270F\uFE0F\u4E3B\u7BA1"))), /*#__PURE__*/React.createElement("div", {
+  }, "\u270F\uFE0F\u4E3B\u7BA1")), /*#__PURE__*/React.createElement("div", {
     className: "text-slate-600 my-1 font-medium text-xs"
   }, task.name), log.note && /*#__PURE__*/React.createElement("div", {
     className: "text-slate-700 text-xs bg-white p-1.5 rounded border border-slate-100 whitespace-pre-wrap"
@@ -4446,6 +4483,7 @@ function ProjectEditModal({
   const [name, setName] = useState(isEdit ? p.name : '');
   const [category, setCategory] = useState(isEdit ? p.category : '');
   const [type, setType] = useState(isEdit ? p.type : 'a');
+  const [nid, setNid] = useState(isEdit ? p.nid || '' : ''); // 專案流水編號(選填;一專案可含多組)
   const [owner, setOwner] = useState(info.owner); // 編輯時可改派負責人(如移轉給新成員)
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -4468,7 +4506,8 @@ function ProjectEditModal({
         owner,
         name: name.trim(),
         category: category.trim(),
-        type
+        type,
+        nid: nid.trim()
       });
     } finally {
       setSaving(false);
@@ -4560,7 +4599,18 @@ function ProjectEditModal({
     value: u
   }, u))), owner !== info.owner && /*#__PURE__*/React.createElement("div", {
     className: "mt-1 text-[11px] text-orange-600 font-bold"
-  }, "\u26A0 \u5132\u5B58\u5F8C\u6B64\u5C08\u6848(\u542B\u5340\u9593\u8207\u56DE\u5831\u7D00\u9304)\u5C07\u79FB\u8F49\u7D66\u300C", owner, "\u300D")), error && /*#__PURE__*/React.createElement("div", {
+  }, "\u26A0 \u5132\u5B58\u5F8C\u6B64\u5C08\u6848(\u542B\u5340\u9593\u8207\u56DE\u5831\u7D00\u9304)\u5C07\u79FB\u8F49\u7D66\u300C", owner, "\u300D")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-xs font-bold text-slate-500"
+  }, "NID\uFF08\u6D41\u6C34\u7DE8\u865F\uFF0C\u9078\u586B\uFF09"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    value: nid,
+    onChange: e => {
+      setNid(e.target.value);
+      markModalDirty();
+    },
+    className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500",
+    placeholder: "\u5C08\u6848\u6D41\u6C34\u7DE8\u865F\uFF0C\u53EF\u542B\u591A\u7D44\uFF08\u5982 N001, N002\uFF09\u2026"
+  })), error && /*#__PURE__*/React.createElement("div", {
     className: "text-xs text-red-600 font-bold"
   }, error), /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end space-x-3 pt-2"
@@ -4586,6 +4636,7 @@ function IntervalModal({
   const [taskName, setTaskName] = useState('');
   const [start, setStart] = useState(currentWeek);
   const [end, setEnd] = useState(currentWeek);
+  const [nid, setNid] = useState(''); // 此區間對應哪組 NID(選填)
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   useModalDirtyReset();
@@ -4603,7 +4654,7 @@ function IntervalModal({
     }
     setSaving(true);
     try {
-      await onSave(project, taskName.trim(), s, e);
+      await onSave(project, taskName.trim(), s, e, nid.trim());
     } finally {
       setSaving(false);
     }
@@ -4682,7 +4733,18 @@ function IntervalModal({
       markModalDirty();
     },
     className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"
-  }))), error && /*#__PURE__*/React.createElement("div", {
+  }))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-xs font-bold text-slate-500"
+  }, "NID\uFF08\u6B64\u5340\u9593\u5C0D\u61C9\u54EA\u7D44 NID\uFF0C\u9078\u586B\uFF09"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    value: nid,
+    onChange: e => {
+      setNid(e.target.value);
+      markModalDirty();
+    },
+    className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500",
+    placeholder: "\u5982 N001\u2026"
+  })), error && /*#__PURE__*/React.createElement("div", {
     className: "text-xs text-red-600 font-bold"
   }, error), /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end space-x-3 pt-2"
