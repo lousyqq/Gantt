@@ -2356,7 +2356,7 @@ function App() {
         title: `${soon.length} 個計畫區間即將到期(最近的剩 ${remain} 週)`
       }, "\u23F0 \u5269", remain, "\u9031");
     })(), role === 'manager' && !isOverview && /*#__PURE__*/React.createElement("div", {
-      className: "flex-shrink-0 flex items-center gap-0.5 ml-1 opacity-0 group-hover/row:opacity-100 transition-opacity"
+      className: "flex-shrink-0 hidden group-hover/row:flex items-center gap-0.5 ml-1"
     }, /*#__PURE__*/React.createElement("button", {
       onClick: () => setAddingInterval(proj),
       className: "w-5 h-5 flex items-center justify-center rounded text-green-600 hover:bg-green-100 font-bold",

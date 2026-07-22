@@ -1704,7 +1704,7 @@ function App() {
                                 );
                               })()}
                               {role === 'manager' && !isOverview && (
-                                <div className="flex-shrink-0 flex items-center gap-0.5 ml-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                                <div className="flex-shrink-0 hidden group-hover/row:flex items-center gap-0.5 ml-1">
                                   <button onClick={() => setAddingInterval(proj)}
                                     className="w-5 h-5 flex items-center justify-center rounded text-green-600 hover:bg-green-100 font-bold" title="新增計畫區間">＋</button>
                                   <button onClick={() => setEditingProject({ mode: 'edit', owner: group.owner, project: proj })}

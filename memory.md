@@ -19,7 +19,7 @@ MSD 專案追蹤總表：ASP.NET Core 9 Minimal API＋React SPA＋SQL Server。
 
 ## 目前待辦事項
 
-1. **遠端 DB 遷移**：確認遠端是否已依序執行 `10→11→12→13→14`（未執行則需執行）；Gantt2 測試庫缺 11~14。
+1. **遠端 DB 遷移**：確認遠端是否已依序執行 `10→11→12→13→14→15`（未執行則需執行）；Gantt2 測試庫缺 11~15。
 2. **安全性——連線字串明碼密碼**：`appsettings.json` 含 SQL 明碼密碼且存在於 GitHub（lousyqq/Gantt）歷史；
    應改環境變數／IIS 組態覆蓋，必要時更改 SQL 密碼並將 repo 設為 private（或 git filter-repo 清歷史）。
 3. **git origin 待補**：2026-07-15 `.git/config` 損毀重建後 origin remote URL 遺失，需 `git remote add origin <URL>`（若尚未補）。

@@ -152,4 +152,13 @@ usp_ToggleProjectStar、usp_EnsureScheduleYear、usp_SetAppSetting、usp_AddAcce
 - 已套用本機 Gantt（驗證：新增/更新專案 NID `N001,N002`→`N003`、區間 NID `N001`→`N002` 皆正確；results-excel 含 NID 欄）。
   **遠端需執行（順序 …→13→14）**；Gantt2 未套用。
 
+## 2026-07-22 — 遷移 15：NID 納入稽核新舊值（15_audit_nid_changes.sql）
+- 問題：遷移 14 未把 NID 放進 AuditLog 的 Old/NewValue，只改 NID 時白話翻譯顯示「內容未變更」。
+- `CREATE OR ALTER usp_UpdateProject`：稽核值格式 `type|分類|負責人|名稱` → **`type|分類|負責人|名稱|NID`**。
+- `CREATE OR ALTER usp_UpdateTaskSchedule`：稽核值尾端以換行附加 **`\nNID=<nid>`**（`name=… | W..-W..\nNID=…`）。
+- 其餘行為與遷移 14 相同；後端 `/api/audit-log` 白話翻譯同步解析（Project 比較第 5 欄、Task 以 `\nNID=` 分離），
+  向下相容 14 之前的短格式歷史列。
+- 已套用本機 Gantt（驗證：只改 NID 的專案／區間、以及名稱+排程+NID 同改，皆正確顯示「NID『舊』→『新』」）。
+  **遠端需執行（順序 …→14→15）**；Gantt2 未套用。
+
 <!-- 新的 DB 變更請從此行下方繼續追加，勿修改上方任何段落 -->

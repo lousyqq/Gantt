@@ -708,20 +708,23 @@ app.MapGet("/api/audit-log", async (int? top) =>
                             return projInfo.TryGetValue(entityId ?? "", out var pv)
                                 ? $"更新專案「{pv.Name}」的具體產出項目：{newV}"
                                 : $"更新專案的具體產出項目：{newV}";
-                        // INSERT / UPDATE:值格式 type|分類|負責人|名稱
+                        // INSERT / UPDATE:值格式 type|分類|負責人|名稱[|NID](NID 自遷移 15 起)
                         var np = (newV ?? "").Split('|');
-                        if (action == "INSERT" && np.Length == 4)
+                        if (action == "INSERT" && np.Length >= 4)
                             return $"新增專案「{np[3]}」（負責人:{np[2]}，分類:{np[1]}，類型:{typeLabel.GetValueOrDefault(np[0], np[0])}）";
-                        if (action == "UPDATE" && np.Length == 4)
+                        if (action == "UPDATE" && np.Length >= 4)
                         {
                             var op = (oldV ?? "").Split('|');
                             var changes = new List<string>();
-                            if (op.Length == 4)
+                            if (op.Length >= 4)
                             {
                                 if (op[3] != np[3]) changes.Add($"名稱「{op[3]}」→「{np[3]}」");
                                 if (op[1] != np[1]) changes.Add($"分類「{op[1]}」→「{np[1]}」");
                                 if (op[0] != np[0]) changes.Add($"類型「{typeLabel.GetValueOrDefault(op[0], op[0])}」→「{typeLabel.GetValueOrDefault(np[0], np[0])}」");
                                 if (op[2] != np[2]) changes.Add($"負責人「{op[2]}」→「{np[2]}」(專案移轉)");
+                                // NID 僅在兩邊皆有第 5 欄(遷移 15 後的紀錄)時比較
+                                if (op.Length >= 5 && np.Length >= 5 && op[4] != np[4])
+                                    changes.Add($"NID「{(op[4] == "" ? "（未填）" : op[4])}」→「{(np[4] == "" ? "（未填）" : np[4])}」");
                             }
                             return changes.Count > 0
                                 ? $"修改專案「{np[3]}」：{string.Join("、", changes)}"
@@ -743,9 +746,21 @@ app.MapGet("/api/audit-log", async (int? top) =>
                         }
                         if (action == "UPDATE")
                         {
-                            var (on, orr) = ParseTaskSchedule(oldV ?? "");
-                            var (nn, nr) = ParseTaskSchedule(newV ?? "");
-                            var what = on != nn ? $"任務「{on}」更名為「{nn}」，排程 {orr} → {nr}" : $"任務「{nn}」排程 {orr} → {nr}";
+                            // 自遷移 15 起,值尾端以換行附加 NID=...;先分離後再解析排程
+                            static (string Sched, string Nid) SplitNid(string v)
+                            {
+                                var k = v.IndexOf("\nNID=", StringComparison.Ordinal);
+                                return k >= 0 ? (v[..k], v[(k + 5)..]) : (v, "");
+                            }
+                            var (oSched, oNid) = SplitNid(oldV ?? "");
+                            var (nSched, nNid) = SplitNid(newV ?? "");
+                            var (on, orr) = ParseTaskSchedule(oSched);
+                            var (nn, nr) = ParseTaskSchedule(nSched);
+                            var parts = new List<string>();
+                            if (on != nn) parts.Add($"任務「{on}」更名為「{nn}」");
+                            if (orr != nr) parts.Add($"排程 {orr} → {nr}");
+                            if (oNid != nNid) parts.Add($"NID「{(oNid == "" ? "（未填）" : oNid)}」→「{(nNid == "" ? "（未填）" : nNid)}」");
+                            var what = parts.Count > 0 ? string.Join("，", parts) : "內容未變更";
                             return projName is null ? $"調整計畫區間：{what}" : $"調整專案「{projName}」的計畫區間：{what}";
                         }
                         if (action == "DELETE")
