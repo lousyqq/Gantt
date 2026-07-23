@@ -456,7 +456,7 @@ function ResultsView({
     const cleanDeliverable = proj.deliverable ? String(proj.deliverable).replace(/[\r\n]+/g, ' ') : '';
     return /*#__PURE__*/React.createElement("tr", {
       key: proj.id,
-      className: "hover:bg-blue-50/40 transition"
+      className: "hover:bg-blue-50/40 transition [&>td]:align-top"
     }, /*#__PURE__*/React.createElement("td", {
       className: "px-3 py-1 text-center text-slate-400 font-medium whitespace-nowrap truncate"
     }, idx + 1), /*#__PURE__*/React.createElement("td", {
@@ -492,9 +492,9 @@ function ResultsView({
     }, cleanDeliverable) : /*#__PURE__*/React.createElement("span", {
       className: "text-slate-300 font-light"
     }, "\u2014")), /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-1 whitespace-nowrap"
+      className: "px-3 py-1 align-top overflow-hidden"
     }, proj.mpSaving ? /*#__PURE__*/React.createElement("span", {
-      className: "inline-flex items-center px-2 py-0.5 rounded text-[13px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 whitespace-nowrap"
+      className: "inline-block max-w-full px-2 py-0.5 rounded text-[13px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 break-words leading-snug"
     }, proj.mpSaving) : /*#__PURE__*/React.createElement("span", {
       className: "text-slate-300 font-light"
     }, "\u2014")), /*#__PURE__*/React.createElement("td", {

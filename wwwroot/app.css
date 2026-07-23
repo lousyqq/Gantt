@@ -1043,6 +1043,10 @@ video {
   max-width: 300px;
 }
 
+.max-w-full {
+  max-width: 100%;
+}
+
 .max-w-lg {
   max-width: 32rem;
 }
@@ -3593,4 +3597,8 @@ video {
 
 .\[\&\>\*\]\:flex-shrink-0>* {
   flex-shrink: 0;
+}
+
+.\[\&\>td\]\:align-top>td {
+  vertical-align: top;
 }

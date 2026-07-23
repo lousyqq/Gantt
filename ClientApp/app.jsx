@@ -335,7 +335,7 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
             {displayedProjects.map((proj, idx) => {
               const cleanDeliverable = proj.deliverable ? String(proj.deliverable).replace(/[\r\n]+/g, ' ') : '';
               return (
-                <tr key={proj.id} className="hover:bg-blue-50/40 transition">
+                <tr key={proj.id} className="hover:bg-blue-50/40 transition [&>td]:align-top">
                   <td className="px-3 py-1 text-center text-slate-400 font-medium whitespace-nowrap truncate">{idx + 1}</td>
                   <td className="px-3 py-1 whitespace-nowrap truncate text-slate-800 font-semibold" title={proj.category}>
                     {proj.category || '--'}
@@ -375,9 +375,9 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
                       <span className="text-slate-300 font-light">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-1 whitespace-nowrap">
+                  <td className="px-3 py-1 align-top overflow-hidden">
                     {proj.mpSaving ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[13px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 whitespace-nowrap">
+                      <span className="inline-block max-w-full px-2 py-0.5 rounded text-[13px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 break-words leading-snug">
                         {proj.mpSaving}
                       </span>
                     ) : (
