@@ -635,6 +635,10 @@ video {
   z-index: 10;
 }
 
+.z-20 {
+  z-index: 20;
+}
+
 .z-30 {
   z-index: 30;
 }
@@ -2980,12 +2984,6 @@ video {
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
 }
 
-.shadow-\[4px_0_8px_rgba\(0\2c 0\2c 0\2c 0\.08\)\] {
-  --tw-shadow: 4px 0 8px rgba(0,0,0,0.08);
-  --tw-shadow-colored: 4px 0 8px var(--tw-shadow-color);
-  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
-}
-
 .shadow-inner {
   --tw-shadow: inset 0 2px 4px 0 rgb(0 0 0 / 0.05);
   --tw-shadow-colored: inset 0 2px 4px 0 var(--tw-shadow-color);
@@ -3126,14 +3124,6 @@ video {
   transition-duration: 500ms;
 }
 
-.\[backface-visibility\:hidden\] {
-  backface-visibility: hidden;
-}
-
-.\[will-change\:transform\] {
-  will-change: transform;
-}
-
 /* =====================================================================
    深色模式：以 .dark（掛在 <html>）覆寫常用的中性色類別。
    甘特凍結欄的行內色改用 CSS 變數，隨主題自動切換。
@@ -3151,6 +3141,8 @@ video {
   /* 群組列 hover */
   --gantt-row-hover: #EFF6FF;
   /* 專案列 hover */
+  --frozen-bg: #FFFFFF;
+  /* 凍結資料格底色(=bg-white);用於封住欄位間的次像素縫隙 */
 }
 
 .dark {
@@ -3158,6 +3150,7 @@ video {
   --gantt-group: #17233A;
   --gantt-group-hover: #1F2F4A;
   --gantt-row-hover: #17233A;
+  --frozen-bg: #1E293B;
 }
 
 /* 中性表面 */

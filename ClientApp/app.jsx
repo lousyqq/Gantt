@@ -1567,6 +1567,11 @@ function App() {
                 toggleStar={toggleStar}
               />
             ) : (
+              <>
+              {/* 凍結欄「遮罩層」:單一不透明實色蓋住整個左側凍結區,z 介於甘特條(10)與凍結格(30)之間,
+                  徹底杜絕捲動時甘特條從欄位縫隙透出的次像素滲色(高度用負 margin 抵銷,不佔版面/不撐長捲軸) */}
+              <div aria-hidden="true" className="sticky left-0 z-20 pointer-events-none"
+                style={{ width: isOverview ? 240 : 490, height: 100000, marginBottom: -100000, background: 'var(--frozen-bg)' }}></div>
               <table className="border-collapse bg-white" style={{ tableLayout: 'fixed', width: isOverview ? '100%' : 490 + weeksTotal * weekW }}>
               <colgroup>
                 {!isOverview && <col style={{ width: 28 }} />}
@@ -1671,10 +1676,10 @@ function App() {
                           onDragOver={role === 'manager' && dragState && dragState.owner === group.owner ? (e) => { e.preventDefault(); if (dragOverId !== proj.id) setDragOverId(proj.id); } : undefined}
                           onDrop={role === 'manager' && dragState ? (e) => { e.preventDefault(); handleReorderProjects(group.owner, dragState.id, proj.id); setDragState(null); setDragOverId(null); } : undefined}
                           className={`group/row border-b border-slate-300 transition-colors ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`}>
-                          {!isOverview && <td className={`text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-200 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ width: 28, minWidth: 28, maxWidth: 28 }}>{idx + 1}</td>}
-                          {!isOverview && <td className={`text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-200 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ width: 42, minWidth: 42, maxWidth: 42, left: 28 }}>{proj.category}</td>}
+                          {!isOverview && <td className={`text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-200 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ width: 28, minWidth: 28, maxWidth: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}>{idx + 1}</td>}
+                          {!isOverview && <td className={`text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-200 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ width: 42, minWidth: 42, maxWidth: 42, left: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}>{proj.category}</td>}
                           {/* --- 嚴格設定 100% 純實色背景與絕對寬度，防止橫向捲動時甘特條穿透或重疊 --- */}
-                          <td className="sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 shadow-[4px_0_8px_rgba(0,0,0,0.08)] border-r border-slate-300 p-0" style={{ width: isOverview ? 240 : 420, minWidth: isOverview ? 240 : 420, maxWidth: isOverview ? 240 : 420, left: isOverview ? 0 : 70 }}>
+                          <td className="sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 p-0" style={{ width: isOverview ? 240 : 420, minWidth: isOverview ? 240 : 420, maxWidth: isOverview ? 240 : 420, left: isOverview ? 0 : 70, boxShadow: '2px 0 0 0 var(--frozen-bg), 4px 0 8px rgba(0,0,0,0.08)' }}>
                             <div className="w-full h-full flex items-center px-2 overflow-hidden">
                               {role === 'manager' && !isOverview && (
                                 isFilteringRows ? (
@@ -1797,6 +1802,7 @@ function App() {
                 })}
               </tbody>
             </table>
+              </>
             )}
           </div>
         </div>
@@ -3210,7 +3216,7 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
 
           return (
             <div key={user} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className={`bg-slate-100 px-4 py-2 border-b border-slate-200 font-bold text-slate-800 flex items-center ${showTeamView ? 'cursor-pointer hover:bg-slate-200/70 transition' : ''}`}
+              <div className={`bg-slate-200 px-4 py-2 border-b border-slate-300 font-bold text-slate-800 flex items-center ${showTeamView ? 'cursor-pointer hover:bg-slate-200/70 transition' : ''}`}
                 onClick={showTeamView ? () => toggleExpand(user) : undefined}>
                 {showTeamView && (
                   <span className="mr-1.5 text-slate-400 text-xs select-none">{isExpanded ? '▼' : '▶'}</span>

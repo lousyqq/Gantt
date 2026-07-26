@@ -14,12 +14,14 @@
   --gantt-group: #EFF6FF;        /* 成員群組列底 */
   --gantt-group-hover: #DBEAFE;  /* 群組列 hover */
   --gantt-row-hover: #EFF6FF;    /* 專案列 hover */
+  --frozen-bg: #FFFFFF;          /* 凍結資料格底色(=bg-white);用於封住欄位間的次像素縫隙 */
 }
 .dark {
   --gantt-sticky: #0B1220;
   --gantt-group: #17233A;
   --gantt-group-hover: #1F2F4A;
   --gantt-row-hover: #17233A;
+  --frozen-bg: #1E293B;
 }
 
 /* 中性表面 */

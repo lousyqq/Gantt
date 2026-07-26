@@ -2105,7 +2105,16 @@ function App() {
     year: scheduleYear,
     starredIds: starredIds,
     toggleStar: toggleStar
-  }) : /*#__PURE__*/React.createElement("table", {
+  }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    "aria-hidden": "true",
+    className: "sticky left-0 z-20 pointer-events-none",
+    style: {
+      width: isOverview ? 240 : 490,
+      height: 100000,
+      marginBottom: -100000,
+      background: 'var(--frozen-bg)'
+    }
+  }), /*#__PURE__*/React.createElement("table", {
     className: "border-collapse bg-white",
     style: {
       tableLayout: 'fixed',
@@ -2305,27 +2314,30 @@ function App() {
       } : undefined,
       className: `group/row border-b border-slate-300 transition-colors ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`
     }, !isOverview && /*#__PURE__*/React.createElement("td", {
-      className: `text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 [will-change:transform] [backface-visibility:hidden] border-r border-slate-200 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
+      className: `text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-200 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
       style: {
         width: 28,
         minWidth: 28,
-        maxWidth: 28
+        maxWidth: 28,
+        boxShadow: '2px 0 0 0 var(--frozen-bg)'
       }
     }, idx + 1), !isOverview && /*#__PURE__*/React.createElement("td", {
-      className: `text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 [will-change:transform] [backface-visibility:hidden] border-r border-slate-200 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
+      className: `text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-200 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
       style: {
         width: 42,
         minWidth: 42,
         maxWidth: 42,
-        left: 28
+        left: 28,
+        boxShadow: '2px 0 0 0 var(--frozen-bg)'
       }
     }, proj.category), /*#__PURE__*/React.createElement("td", {
-      className: "sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 [will-change:transform] [backface-visibility:hidden] shadow-[4px_0_8px_rgba(0,0,0,0.08)] border-r border-slate-300 p-0",
+      className: "sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 p-0",
       style: {
         width: isOverview ? 240 : 420,
         minWidth: isOverview ? 240 : 420,
         maxWidth: isOverview ? 240 : 420,
-        left: isOverview ? 0 : 70
+        left: isOverview ? 0 : 70,
+        boxShadow: '2px 0 0 0 var(--frozen-bg), 4px 0 8px rgba(0,0,0,0.08)'
       }
     }, /*#__PURE__*/React.createElement("div", {
       className: "w-full h-full flex items-center px-2 overflow-hidden"
@@ -2459,7 +2471,7 @@ function App() {
         }
       }, isPending && '❗', deadlineSoon && '⏰', task.name)));
     })))));
-  }))))), tooltip && /*#__PURE__*/React.createElement("div", {
+  })))))), tooltip && /*#__PURE__*/React.createElement("div", {
     className: "fixed z-[200] pointer-events-none",
     style: {
       left: Math.min(tooltip.x + 14, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 300),
@@ -4424,7 +4436,7 @@ function WeeklyReportDashboard({
       key: user,
       className: "bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"
     }, /*#__PURE__*/React.createElement("div", {
-      className: `bg-slate-100 px-4 py-2 border-b border-slate-200 font-bold text-slate-800 flex items-center ${showTeamView ? 'cursor-pointer hover:bg-slate-200/70 transition' : ''}`,
+      className: `bg-slate-200 px-4 py-2 border-b border-slate-300 font-bold text-slate-800 flex items-center ${showTeamView ? 'cursor-pointer hover:bg-slate-200/70 transition' : ''}`,
       onClick: showTeamView ? () => toggleExpand(user) : undefined
     }, showTeamView && /*#__PURE__*/React.createElement("span", {
       className: "mr-1.5 text-slate-400 text-xs select-none"
