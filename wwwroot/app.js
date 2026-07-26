@@ -564,6 +564,11 @@ function App() {
   }, [currentUser, currentWeek, scheduleYear]);
 
   // UI 狀態(範本 B:預設寬鬆模式,字級較大對年長者友善)
+  const [isDark, setIsDark] = useState(() => readPrefs().dark === true); // 深色模式偏好:重整後沿用(這台電腦)
+  React.useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDark);
+    savePref('dark', isDark);
+  }, [isDark]);
   const [isCompact, setIsCompact] = useState(() => readPrefs().compact === true); // 緊湊模式偏好:重整後沿用
   const [isOverview, setIsOverview] = useState(false); // 年度總覽:52 週自動縮放進一個畫面寬,無水平捲軸(唯讀瀏覽視角)
   const [isResults, setIsResults] = useState(false); // 成果清單:集中檢閱所有專案具體成果項目與 MP 節省統計
@@ -1793,6 +1798,10 @@ function App() {
   }, currentUser), /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] text-white/80"
   }, role === 'manager' ? '主管' : '成員', empId ? ` · 工號 ${empId}` : '')), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setIsDark(v => !v),
+    className: "p-1.5 hover:bg-white/20 rounded-lg transition text-white/80 hover:text-white bg-white/5 text-sm leading-none w-8 h-8 flex items-center justify-center",
+    title: isDark ? '切換為淺色模式' : '切換為深色模式'
+  }, isDark ? '☀️' : '🌙'), /*#__PURE__*/React.createElement("button", {
     onClick: handleLogout,
     className: "p-1.5 hover:bg-red-500/80 rounded-lg transition text-white/70 hover:text-white bg-white/5",
     title: "\u767B\u51FA"
@@ -1817,11 +1826,11 @@ function App() {
   }) : /*#__PURE__*/React.createElement("div", {
     className: "flex-1 flex flex-col overflow-hidden bg-white relative"
   }, isResults ? /*#__PURE__*/React.createElement("div", {
-    className: "px-4 py-2 border-b border-slate-200 bg-gradient-to-r from-amber-50/80 via-white to-white flex items-center justify-between text-xs overflow-x-auto"
+    className: "px-4 py-2 border-b border-slate-200 bg-gradient-to-r from-amber-50/80 via-white to-white dark:bg-none dark:bg-slate-800 flex items-center justify-between text-xs overflow-x-auto"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-3"
   }, /*#__PURE__*/React.createElement("span", {
-    className: "font-black text-amber-800 text-sm"
+    className: "font-black text-amber-800 dark:text-amber-300 text-sm"
   }, "\uD83C\uDFAF ", scheduleYear, " \u5E74\u5EA6\u6210\u679C\u8207 MP \u6548\u76CA\u6E05\u55AE"), /*#__PURE__*/React.createElement("span", {
     className: "text-slate-500"
   }, "\u6AA2\u8996\u6240\u6709\u5C08\u6848\u5B8C\u5DE5\u9810\u8A08\u4EA4\u4ED8\u4E4B\u5177\u9AD4\u7522\u51FA\u8207\u7D2F\u8A08\u7BC0\u7701\u4E4B MP \u4EBA\u529B")), /*#__PURE__*/React.createElement("div", {
@@ -2152,7 +2161,7 @@ function App() {
       width: 28,
       minWidth: 28,
       maxWidth: 28,
-      backgroundColor: '#F1F5F9'
+      backgroundColor: 'var(--gantt-sticky)'
     }
   }, "No"), /*#__PURE__*/React.createElement("th", {
     className: "border-r border-b border-slate-300 p-1 sticky z-50 text-center font-medium",
@@ -2161,7 +2170,7 @@ function App() {
       minWidth: 42,
       maxWidth: 42,
       left: 28,
-      backgroundColor: '#F1F5F9'
+      backgroundColor: 'var(--gantt-sticky)'
     }
   }, "\u5206\u985E"), /*#__PURE__*/React.createElement("th", {
     className: "border-r border-b border-slate-300 p-1 sticky z-50 shadow-[3px_0_6px_rgba(0,0,0,0.08)] text-left pl-3 font-medium",
@@ -2170,7 +2179,7 @@ function App() {
       minWidth: 420,
       maxWidth: 420,
       left: 70,
-      backgroundColor: '#F1F5F9'
+      backgroundColor: 'var(--gantt-sticky)'
     }
   }, "\u5C08\u6848\u540D\u7A31 (Project Name)"), Array.from({
     length: weeksTotal
@@ -2219,7 +2228,7 @@ function App() {
       key: group.owner
     }, /*#__PURE__*/React.createElement("tr", {
       onClick: () => toggleOwnerCollapse(group.owner),
-      className: "group/header bg-[#EFF6FF] hover:bg-[#DBEAFE] cursor-pointer border-b border-blue-100 transition-colors"
+      className: "group/header bg-[var(--gantt-group)] hover:bg-[var(--gantt-group-hover)] cursor-pointer border-b border-blue-100 transition-colors"
     }, /*#__PURE__*/React.createElement("td", {
       colSpan: isOverview ? 1 : 3,
       className: "sticky left-0 z-40 border-r border-blue-200 p-0 shadow-[3px_0_6px_rgba(0,0,0,0.06)]",
@@ -2227,7 +2236,7 @@ function App() {
         width: isOverview ? 240 : 490,
         minWidth: isOverview ? 240 : 490,
         maxWidth: isOverview ? 240 : 490,
-        backgroundColor: '#EFF6FF'
+        backgroundColor: 'var(--gantt-group)'
       }
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex items-center text-blue-900 font-bold text-[13px] px-2 py-1.5 border-l-4",
@@ -2296,14 +2305,14 @@ function App() {
       } : undefined,
       className: `group/row border-b border-slate-300 transition-colors ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`
     }, !isOverview && /*#__PURE__*/React.createElement("td", {
-      className: `text-center sticky left-0 bg-white group-hover/row:bg-[#EFF6FF] transition-colors z-30 border-r border-slate-200 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
+      className: `text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 [will-change:transform] [backface-visibility:hidden] border-r border-slate-200 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
       style: {
         width: 28,
         minWidth: 28,
         maxWidth: 28
       }
     }, idx + 1), !isOverview && /*#__PURE__*/React.createElement("td", {
-      className: `text-center sticky bg-white group-hover/row:bg-[#EFF6FF] transition-colors z-30 border-r border-slate-200 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
+      className: `text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 [will-change:transform] [backface-visibility:hidden] border-r border-slate-200 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
       style: {
         width: 42,
         minWidth: 42,
@@ -2311,7 +2320,7 @@ function App() {
         left: 28
       }
     }, proj.category), /*#__PURE__*/React.createElement("td", {
-      className: "sticky bg-white group-hover/row:bg-[#EFF6FF] transition-colors z-30 shadow-[4px_0_8px_rgba(0,0,0,0.08)] border-r border-slate-300 p-0",
+      className: "sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 [will-change:transform] [backface-visibility:hidden] shadow-[4px_0_8px_rgba(0,0,0,0.08)] border-r border-slate-300 p-0",
       style: {
         width: isOverview ? 240 : 420,
         minWidth: isOverview ? 240 : 420,
@@ -2398,7 +2407,7 @@ function App() {
       const isPending = role === 'member' && proj.owner === currentUser && isActiveThisWeek && !weekLog;
       const deadlineSoon = isTaskDeadlineSoon(task); // 剩 ≤2 週或已過 70% 時程 → 橘框 + ⏰(未回報紅框優先)
 
-      const barClass = 'text-slate-900';
+      const barClass = 'text-[#0f172a]'; // 計畫條底永遠是淺奶油色,文字固定深色(不受深色模式覆寫),投影高對比
       const barStyle = {
         backgroundImage: 'repeating-linear-gradient(45deg, #FFF6D6, #FFF6D6 6px, #FDEDB8 6px, #FDEDB8 12px)',
         borderColor: 'rgba(180,83,9,0.75)' // 加深(範本 B):淡黃條在白底上需要更明確的輪廓
@@ -3230,7 +3239,7 @@ function ExtraNoteModal({
     }, /*#__PURE__*/React.createElement("div", {
       className: "px-6 py-4 text-white flex justify-between items-center",
       style: {
-        backgroundColor: '#F97316'
+        backgroundColor: '#C2410C'
       }
     }, /*#__PURE__*/React.createElement("h3", {
       className: "font-bold text-lg flex items-center",
@@ -3328,7 +3337,7 @@ function DeliverableModal({
   }, /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-4 text-white flex justify-between items-start",
     style: {
-      backgroundColor: '#F59E0B'
+      backgroundColor: '#B45309'
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "pr-3"
@@ -3732,7 +3741,7 @@ function PendingPanel({
   }, /*#__PURE__*/React.createElement("div", {
     className: "min-w-0 pr-2"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-xs font-bold text-amber-900 break-words leading-snug"
+    className: "text-xs font-bold text-amber-900 dark:text-amber-200 break-words leading-snug"
   }, proj.name), /*#__PURE__*/React.createElement("div", {
     className: "text-sm font-black text-slate-800 mt-0.5 truncate"
   }, task.name), /*#__PURE__*/React.createElement("div", {

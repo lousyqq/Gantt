@@ -13,6 +13,9 @@ MSD 專案追蹤總表：ASP.NET Core 9 Minimal API＋React SPA＋SQL Server。
 全功能已上線運作中，操作皆有 AuditLog 稽核（含 Windows 工號），異動紀錄以白話呈現。
 
 - 使用者：6 位成員＋管理部主管；登入畫面點選（身分持久化 localStorage），Windows 工號由 `/api/whoami` 自動偵測。
+- 深色模式：header 🌙/☀️ 切換，偏好存 `gantt_prefs.dark`；`index.html` 有 no-flash 前置腳本、`<html>` 掛 `dark` class。
+  做法＝`ClientApp/input.css` 的 `.dark` 覆寫層（中性 slate/blue 表面/文字/邊框 + 彩色面板卡片 -50 底色轉深）
+  ＋甘特凍結欄色改 CSS 變數；狀態晶片(-100+同色深字)維持淺底。少數混色元件用 `dark:` 變體個別修正。
 - 年度：2026（53 週）為主，2027 已建；開新年度 `EXEC dbo.usp_EnsureScheduleYear <年>;`。
 - 環境：開發=Sariel\Gantt（另有 Gantt2 測試庫）；遠端正式主機基準=old.sql+new.sql，增量遷移 10~13。
 - 系統開關現況：`AllowRetroCheckin=false`、`AccessControlEnabled=false`（本機留示範規則 DEPT_3=MSD 一條）。

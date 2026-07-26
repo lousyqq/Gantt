@@ -1,3 +1,154 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* =====================================================================
+   深色模式：以 .dark（掛在 <html>）覆寫常用的中性色類別。
+   甘特凍結欄的行內色改用 CSS 變數，隨主題自動切換。
+   彩色狀態晶片與彈窗彩色標題列（navy/橘/紅…）維持原樣——深底上仍清晰。
+   ===================================================================== */
+
+/* 甘特凍結欄／群組列／hover 用色（行內樣式與任意值類別皆引用這些變數） */
+:root {
+  --gantt-sticky: #F1F5F9;       /* 凍結欄表頭底 */
+  --gantt-group: #EFF6FF;        /* 成員群組列底 */
+  --gantt-group-hover: #DBEAFE;  /* 群組列 hover */
+  --gantt-row-hover: #EFF6FF;    /* 專案列 hover */
+}
+.dark {
+  --gantt-sticky: #0B1220;
+  --gantt-group: #17233A;
+  --gantt-group-hover: #1F2F4A;
+  --gantt-row-hover: #17233A;
+}
+
+/* 中性表面 */
+.dark .bg-white { background-color: #1E293B; }
+.dark .bg-slate-50 { background-color: #0F172A; }
+.dark .bg-slate-100 { background-color: #1E293B; }
+.dark .bg-slate-200 { background-color: #334155; }
+.dark .hover\:bg-slate-50:hover { background-color: #1E293B; }
+.dark .hover\:bg-slate-100:hover { background-color: #334155; }
+.dark .hover\:bg-slate-200:hover { background-color: #3E4C61; }
+
+/* 中性文字 */
+.dark .text-slate-900 { color: #F1F5F9; }
+.dark .text-slate-800 { color: #E2E8F0; }
+.dark .text-slate-700 { color: #CBD5E1; }
+.dark .text-slate-600 { color: #A9B4C4; }
+.dark .text-slate-500 { color: #94A3B8; }
+.dark .text-slate-400 { color: #7787A0; }
+.dark .text-slate-300 { color: #64748B; }
+
+/* 中性邊框 */
+.dark .border-slate-100 { border-color: #1E293B; }
+.dark .border-slate-200 { border-color: #334155; }
+.dark .border-slate-300 { border-color: #475569; }
+
+/* =====================================================================
+   彩色語意色的完整深色矩陣：所有色底（-50 卡片／-100 晶片，含透明變體）
+   在深色模式一律轉「深色調同色底」，同色文字一律「調亮」，達成
+   「深底 + 亮字」的一致觀感；投影下高對比、不刺眼。中性 slate 見上方。
+   ===================================================================== */
+
+/* blue */
+.dark .bg-blue-50,.dark .bg-blue-50\/40 { background-color:#172338; }
+.dark .bg-blue-100,.dark .bg-blue-100\/80 { background-color:#1E3A5F; }
+.dark .hover\:bg-blue-100:hover { background-color:#1E3A5F; }
+.dark .text-blue-600,.dark .text-blue-700,.dark .text-blue-800,.dark .text-blue-900 { color:#93C5FD; }
+.dark .border-blue-100 { border-color:#1E3A5F; }
+.dark .border-blue-200,.dark .border-blue-300 { border-color:#274B73; }
+
+/* sky */
+.dark .bg-sky-50,.dark .bg-sky-50\/70 { background-color:#10233A; }
+.dark .bg-sky-100 { background-color:#163450; }
+.dark .text-sky-600,.dark .text-sky-700,.dark .text-sky-800 { color:#7DD3FC; }
+.dark .border-sky-200,.dark .border-sky-300 { border-color:#1E5A82; }
+
+/* indigo */
+.dark .bg-indigo-50,.dark .bg-indigo-50\/70 { background-color:#171A33; }
+.dark .bg-indigo-100,.dark .bg-indigo-100\/70 { background-color:#1F2447; }
+.dark .text-indigo-600,.dark .text-indigo-700,.dark .text-indigo-800,.dark .text-indigo-900 { color:#A5B4FC; }
+.dark .border-indigo-200,.dark .border-indigo-300 { border-color:#34407C; }
+
+/* violet */
+.dark .bg-violet-50,.dark .bg-violet-50\/70 { background-color:#1E1733; }
+.dark .bg-violet-100,.dark .bg-violet-100\/70 { background-color:#2A2147; }
+.dark .text-violet-600,.dark .text-violet-700,.dark .text-violet-800,.dark .text-violet-900 { color:#C4B5FD; }
+.dark .border-violet-200,.dark .border-violet-300 { border-color:#4A3A82; }
+
+/* purple */
+.dark .bg-purple-50 { background-color:#241733; }
+.dark .bg-purple-100 { background-color:#2F2147; }
+.dark .text-purple-600,.dark .text-purple-700,.dark .text-purple-800 { color:#D8B4FE; }
+.dark .border-purple-200,.dark .border-purple-300 { border-color:#5A3A82; }
+
+/* pink */
+.dark .bg-pink-50 { background-color:#2A1420; }
+.dark .bg-pink-100 { background-color:#3A1C2C; }
+.dark .text-pink-600,.dark .text-pink-700,.dark .text-pink-800 { color:#F9A8D4; }
+.dark .border-pink-200,.dark .border-pink-300 { border-color:#7C2E52; }
+
+/* rose */
+.dark .bg-rose-50 { background-color:#2A1016; }
+.dark .bg-rose-100 { background-color:#3A161F; }
+.dark .text-rose-600,.dark .text-rose-700,.dark .text-rose-800 { color:#FDA4AF; }
+.dark .border-rose-200,.dark .border-rose-300 { border-color:#7C2638; }
+
+/* red */
+.dark .bg-red-50,.dark .bg-red-50\/40,.dark .bg-red-50\/70 { background-color:#2A1010; }
+.dark .bg-red-100 { background-color:#3A1616; }
+.dark .hover\:bg-red-100:hover { background-color:#3A1616; }
+.dark .text-red-600,.dark .text-red-700,.dark .text-red-800 { color:#FCA5A5; }
+.dark .border-red-200,.dark .border-red-300 { border-color:#7C2626; }
+
+/* orange */
+.dark .bg-orange-50,.dark .bg-orange-50\/70 { background-color:#2A1C0E; }
+.dark .bg-orange-100,.dark .bg-orange-100\/70 { background-color:#3A2712; }
+.dark .hover\:bg-orange-100:hover { background-color:#3A2712; }
+.dark .text-orange-600,.dark .text-orange-700,.dark .text-orange-800 { color:#FDBA74; }
+.dark .border-orange-200,.dark .border-orange-300 { border-color:#7C4A16; }
+
+/* amber */
+.dark .bg-amber-50,.dark .bg-amber-50\/40,.dark .bg-amber-50\/70 { background-color:#2A1F0A; }
+.dark .bg-amber-100,.dark .bg-amber-100\/80 { background-color:#3A2C10; }
+.dark .text-amber-600,.dark .text-amber-700,.dark .text-amber-800,.dark .text-amber-900 { color:#FCD34D; }
+.dark .border-amber-200,.dark .border-amber-300,.dark .border-amber-400 { border-color:#7C5A16; }
+
+/* yellow */
+.dark .bg-yellow-50 { background-color:#2A2410; }
+.dark .bg-yellow-100 { background-color:#3A331A; }
+.dark .hover\:bg-yellow-100:hover { background-color:#3A331A; }
+.dark .text-yellow-600,.dark .text-yellow-700,.dark .text-yellow-800 { color:#FDE047; }
+.dark .border-yellow-200,.dark .border-yellow-300 { border-color:#7A6A1E; }
+
+/* green */
+.dark .bg-green-50,.dark .bg-green-50\/60 { background-color:#10240F; }
+.dark .bg-green-100 { background-color:#17331A; }
+.dark .text-green-600,.dark .text-green-700,.dark .text-green-800 { color:#86EFAC; }
+.dark .border-green-200,.dark .border-green-300 { border-color:#2F6B2E; }
+
+/* emerald */
+.dark .bg-emerald-50,.dark .bg-emerald-50\/40,.dark .bg-emerald-50\/70 { background-color:#0C2418; }
+.dark .bg-emerald-100,.dark .bg-emerald-100\/70,.dark .bg-emerald-100\/80 { background-color:#123322; }
+.dark .text-emerald-600,.dark .text-emerald-700,.dark .text-emerald-800,.dark .text-emerald-900 { color:#6EE7B7; }
+.dark .border-emerald-200,.dark .border-emerald-300 { border-color:#1E6B4E; }
+
+/* teal */
+.dark .bg-teal-50 { background-color:#0C2422; }
+.dark .bg-teal-100 { background-color:#123331; }
+.dark .text-teal-600,.dark .text-teal-700,.dark .text-teal-800 { color:#5EEAD4; }
+.dark .border-teal-200,.dark .border-teal-300 { border-color:#1E6B64; }
+
+/* -200 晶片底（少數以 -200 當底色的小標籤） */
+.dark .bg-yellow-200 { background-color:#4A4020; }
+.dark .bg-orange-200 { background-color:#4A3316; }
+.dark .bg-violet-200 { background-color:#352A55; }
+
+/* 亮橘/琥珀實心按鈕（bg-amber-500 白字在淺色下已偏低對比）：深色下轉深琥珀，白字清晰、投影不刺眼 */
+.dark .bg-amber-500 { background-color:#B45309; }
+.dark .hover\:bg-amber-600:hover { background-color:#92400E; }
+
+/* 概況列的漸層底（唯一的漸層用法） */
+.dark .from-slate-50 { --tw-gradient-from: #0F172A var(--tw-gradient-from-position); --tw-gradient-to: rgb(15 23 42 / 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.dark .to-white { --tw-gradient-to: #1E293B var(--tw-gradient-to-position); }
