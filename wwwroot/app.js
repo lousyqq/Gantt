@@ -361,7 +361,7 @@ function ResultsView({
     }, /*#__PURE__*/React.createElement("span", {
       className: "whitespace-nowrap"
     }, label), /*#__PURE__*/React.createElement("span", {
-      className: `text-[11px] px-1 rounded flex-shrink-0 ${isSorted ? 'bg-blue-600 text-white font-black' : 'text-slate-400 font-normal'}`
+      className: `text-[11px] px-1 rounded flex-shrink-0 ${isSorted ? 'bg-blue-600 text-white font-black' : 'text-slate-500 font-normal'}`
     }, dirIcon)));
   };
   return /*#__PURE__*/React.createElement("div", {
@@ -381,7 +381,7 @@ function ResultsView({
     className: "grid grid-cols-2 md:grid-cols-5 gap-4"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setFilterMode('all'),
-    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'all' ? 'bg-[#001F5B] text-white border-[#001F5B] shadow-md ring-2 ring-offset-2 ring-[#001F5B]/30' : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`
+    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'all' ? 'bg-[#001F5B] text-white border-[#001F5B] shadow-md ring-2 ring-offset-2 ring-[#001F5B]/30' : 'bg-white text-slate-800 border-slate-300 hover:border-slate-300 hover:bg-slate-50'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: `w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'all' ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`
   }, "\uD83D\uDCC1"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -392,7 +392,7 @@ function ResultsView({
     className: `text-xs font-medium ${filterMode === 'all' ? 'text-blue-200' : 'text-slate-500'}`
   }, "\u6848")))), /*#__PURE__*/React.createElement("button", {
     onClick: () => setFilterMode('starred'),
-    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'starred' ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-offset-2 ring-amber-500/30' : 'bg-white text-slate-800 border-slate-200 hover:border-amber-300 hover:bg-amber-50/40'}`
+    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'starred' ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-offset-2 ring-amber-500/30' : 'bg-white text-slate-800 border-slate-300 hover:border-amber-300 hover:bg-amber-50/40'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: `w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'starred' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-600'}`
   }, "\u2B50"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -403,7 +403,7 @@ function ResultsView({
     className: `text-xs font-medium ${filterMode === 'starred' ? 'text-amber-100' : 'text-slate-500'}`
   }, "\u6848")))), /*#__PURE__*/React.createElement("button", {
     onClick: () => setFilterMode('hasMp'),
-    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'hasMp' ? 'bg-emerald-600 text-white border-emerald-600 shadow-md ring-2 ring-offset-2 ring-emerald-600/30' : 'bg-white text-slate-800 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40'}`
+    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'hasMp' ? 'bg-emerald-600 text-white border-emerald-600 shadow-md ring-2 ring-offset-2 ring-emerald-600/30' : 'bg-white text-slate-800 border-slate-300 hover:border-emerald-300 hover:bg-emerald-50/40'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: `w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'hasMp' ? 'bg-white/10 text-white' : 'bg-emerald-100 text-emerald-600'}`
   }, "\uD83D\uDCA1"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -414,7 +414,7 @@ function ResultsView({
     className: `text-xs font-medium ${filterMode === 'hasMp' ? 'text-emerald-100' : 'text-slate-500'}`
   }, "\u6848")))), /*#__PURE__*/React.createElement("button", {
     onClick: () => setFilterMode('hasDeliverable'),
-    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'hasDeliverable' ? 'bg-amber-600 text-white border-amber-600 shadow-md ring-2 ring-offset-2 ring-amber-600/30' : 'bg-white text-slate-800 border-slate-200 hover:border-amber-300 hover:bg-amber-50/40'}`
+    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'hasDeliverable' ? 'bg-amber-600 text-white border-amber-600 shadow-md ring-2 ring-offset-2 ring-amber-600/30' : 'bg-white text-slate-800 border-slate-300 hover:border-amber-300 hover:bg-amber-50/40'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: `w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'hasDeliverable' ? 'bg-white/10 text-white' : 'bg-amber-100 text-amber-600'}`
   }, "\uD83C\uDFAF"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -425,7 +425,7 @@ function ResultsView({
     className: `text-xs font-medium ${filterMode === 'hasDeliverable' ? 'text-amber-100' : 'text-slate-500'}`
   }, "/ ", projects.length, " \u6848")))), /*#__PURE__*/React.createElement("button", {
     onClick: () => setFilterMode('missing'),
-    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'missing' ? 'bg-red-600 text-white border-red-600 shadow-md ring-2 ring-offset-2 ring-red-600/30' : 'bg-white text-slate-800 border-slate-200 hover:border-red-300 hover:bg-red-50/40'}`
+    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'missing' ? 'bg-red-600 text-white border-red-600 shadow-md ring-2 ring-offset-2 ring-red-600/30' : 'bg-white text-slate-800 border-slate-300 hover:border-red-300 hover:bg-red-50/40'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: `w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'missing' ? 'bg-white/10 text-white' : 'bg-red-100 text-red-600'}`
   }, "\u26A0\uFE0F"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -443,11 +443,11 @@ function ResultsView({
     }),
     className: "px-3 py-1 rounded-lg bg-white hover:bg-blue-100 text-blue-700 border border-blue-300 font-bold transition shadow-sm"
   }, "\u6E05\u9664\u6392\u5E8F")), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden"
+    className: "bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden"
   }, /*#__PURE__*/React.createElement("table", {
     className: "w-full text-left border-collapse table-fixed"
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
-    className: "bg-slate-100 text-xs font-bold border-b border-slate-200 h-9"
+    className: "bg-slate-100 text-xs font-bold border-b border-slate-300 h-9"
   }, /*#__PURE__*/React.createElement("th", {
     className: "px-2 w-10 text-center text-slate-500 whitespace-nowrap"
   }, "No"), renderSortHeader("分類", "category", "w-20"), renderSortHeader("類型", "type", "w-14 text-center"), renderSortHeader("專案名稱", "name", "w-[420px]"), renderSortHeader("負責人", "owner", "w-24"), renderSortHeader("預計交付具體產出成果", "deliverable", "w-auto"), renderSortHeader("MP Saving", "mpSaving", "w-36"), renderSortHeader("NID", "nid", "w-32"))), /*#__PURE__*/React.createElement("tbody", {
@@ -458,7 +458,7 @@ function ResultsView({
       key: proj.id,
       className: "hover:bg-blue-50/40 transition [&>td]:align-top"
     }, /*#__PURE__*/React.createElement("td", {
-      className: "px-3 py-1 text-center text-slate-400 font-medium whitespace-nowrap truncate"
+      className: "px-3 py-1 text-center text-slate-500 font-medium whitespace-nowrap truncate"
     }, idx + 1), /*#__PURE__*/React.createElement("td", {
       className: "px-3 py-1 whitespace-nowrap truncate text-slate-800 font-semibold",
       title: proj.category
@@ -474,7 +474,7 @@ function ResultsView({
       className: "flex items-start"
     }, role === 'manager' ? /*#__PURE__*/React.createElement("button", {
       onClick: e => toggleStar && toggleStar(proj.id, e),
-      className: `flex-shrink-0 mr-1.5 text-base transition transform hover:scale-125 ${starredIds.has(proj.id) ? 'text-amber-500' : 'text-slate-300 hover:text-amber-400'}`,
+      className: `flex-shrink-0 mr-1.5 text-base transition transform hover:scale-125 ${starredIds.has(proj.id) ? 'text-amber-500' : 'text-slate-400 hover:text-amber-400'}`,
       title: starredIds.has(proj.id) ? '取消重點關注標記' : '標記為重點關注項目'
     }, starredIds.has(proj.id) ? '★' : '☆') : starredIds.has(proj.id) ? /*#__PURE__*/React.createElement("span", {
       className: "flex-shrink-0 mr-1.5 text-base text-amber-500",
@@ -490,13 +490,13 @@ function ResultsView({
     }, cleanDeliverable ? /*#__PURE__*/React.createElement("div", {
       className: "text-slate-800 font-semibold whitespace-normal break-words leading-snug"
     }, cleanDeliverable) : /*#__PURE__*/React.createElement("span", {
-      className: "text-slate-300 font-light"
+      className: "text-slate-400 font-light"
     }, "\u2014")), /*#__PURE__*/React.createElement("td", {
       className: "px-3 py-1 align-top overflow-hidden"
     }, proj.mpSaving ? /*#__PURE__*/React.createElement("span", {
       className: "inline-block max-w-full px-2 py-0.5 rounded text-[13px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 break-words leading-snug"
     }, proj.mpSaving) : /*#__PURE__*/React.createElement("span", {
-      className: "text-slate-300 font-light"
+      className: "text-slate-400 font-light"
     }, "\u2014")), /*#__PURE__*/React.createElement("td", {
       className: "px-3 py-1 align-top",
       title: proj.nid || ''
@@ -504,13 +504,13 @@ function ResultsView({
       className: "flex flex-wrap gap-1"
     }, String(proj.nid).split(/[、,，;；\s]+/).filter(Boolean).map((n, i) => /*#__PURE__*/React.createElement("span", {
       key: i,
-      className: "inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold border border-slate-200 whitespace-nowrap"
+      className: "inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold border border-slate-300 whitespace-nowrap"
     }, n))) : /*#__PURE__*/React.createElement("span", {
-      className: "text-slate-300 font-light"
+      className: "text-slate-400 font-light"
     }, "\u2014")));
   }), displayedProjects.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
     colSpan: 8,
-    className: "py-8 text-center text-slate-400 font-medium"
+    className: "py-8 text-center text-slate-500 font-medium"
   }, "\u7B26\u5408\u7BE9\u9078\u689D\u4EF6\u7684\u5C08\u6848\u9805\u76EE\u70BA\u7A7A"))))));
 }
 function App() {
@@ -668,6 +668,8 @@ function App() {
     loadBootstrap();
   }, [loadBootstrap]);
   const [selectedTaskInfo, setSelectedTaskInfo] = useState(null);
+  // 團隊總結看板點成員回報格 → 左側甘特圖對應區間暫時淺藍高亮(提示「正在講哪一項」),再點/關看板/點別處即還原
+  const [highlightedTaskId, setHighlightedTaskId] = useState(null);
   const [showExtraNoteModal, setShowExtraNoteModal] = useState(false);
   const [showWeeklyPlanModal, setShowWeeklyPlanModal] = useState(false); // 下週預計執行工作
   // Toast:成功 2.5 秒;錯誤(訊息以 ❌ 開頭自動判定)停 6 秒且可手動關閉;
@@ -704,6 +706,20 @@ function App() {
   const weekW = isCompact ? 22 : 32;
   const todayWeek = getTodayWeek(scheduleYear, weeksTotal); // 本週(相對於選定年度)
   const isViewingPast = currentWeek !== todayWeek; // 是否在檢視非本週
+
+  // 團隊看板點回報格 → 展開該成員群組、捲到該列與當前週(靠左避開右側面板)、暫時高亮該區間;再點同項=取消
+  const [pendingScrollProj, setPendingScrollProj] = useState(null); // 觸發「捲到該列+當前週」的 effect(用 effect 而非 rAF,嵌入式瀏覽器較可靠)
+  const handleHighlightTask = useCallback((proj, task) => {
+    const willClear = highlightedTaskId === task.id;
+    setHighlightedTaskId(willClear ? null : task.id);
+    if (willClear) return;
+    setCollapsedOwners(prev => {
+      const s = new Set(prev);
+      s.delete(proj.owner);
+      return s;
+    });
+    setPendingScrollProj(proj.id);
+  }, [highlightedTaskId]);
 
   // 每次登入角色時：預設開啟各成員的週檢視、展開清單頁面；成員預設顯示個人專案，主管預設為全部成員
   // 登入身分寫入 localStorage:重新整理/重開分頁不再被登出(登出時清除;內網固定使用者,風險可接受)
@@ -816,6 +832,22 @@ function App() {
     scrollToWeek(scrollTargetWeek);
     setScrollTargetWeek(null);
   }, [scrollTargetWeek, scrollToWeek]);
+
+  // 團隊看板點回報格後:捲到該專案列(垂直)＋把當前週放到甘特區左側(水平,避開右側看板面板)
+  React.useEffect(() => {
+    if (pendingScrollProj == null) return;
+    const el = ganttRef.current;
+    if (el) {
+      const row = el.querySelector(`[data-proj-row="${pendingScrollProj}"]`);
+      if (row) {
+        const cr = el.getBoundingClientRect(),
+          rr = row.getBoundingClientRect();
+        el.scrollTop = Math.max(0, el.scrollTop + (rr.top - cr.top) - Math.min(el.clientHeight / 2, 220));
+      }
+      smoothScrollLeftTo(el, Math.max(0, (currentWeek - 1) * weekW - 40));
+    }
+    setPendingScrollProj(null);
+  }, [pendingScrollProj, currentWeek, weekW]);
 
   // 本地時間戳(yyyy-MM-dd HH:mm),與 bootstrap 回傳的 updatedAt 格式一致(樂觀更新用)
   const nowStamp = () => {
@@ -1180,6 +1212,7 @@ function App() {
           return;
         }
         if (showWeeklyReport) {
+          setHighlightedTaskId(null);
           setShowWeeklyReport(false);
           e.preventDefault();
           return;
@@ -1629,7 +1662,7 @@ function App() {
     });
   }
   return /*#__PURE__*/React.createElement("div", {
-    className: "min-h-screen bg-slate-50 font-sans flex flex-col relative overflow-hidden"
+    className: "min-h-screen bg-slate-100 font-sans flex flex-col relative overflow-hidden"
   }, /*#__PURE__*/React.createElement("header", {
     className: "text-white px-4 py-2 flex justify-between items-center z-50 shadow-md",
     style: {
@@ -1755,7 +1788,7 @@ function App() {
     className: "fixed inset-0 z-[60]",
     onClick: () => setShowAdminMenu(false)
   }), /*#__PURE__*/React.createElement("div", {
-    className: "absolute right-0 top-full mt-1.5 z-[70] w-44 bg-white rounded-xl shadow-2xl border border-slate-200 py-1.5 overflow-hidden"
+    className: "absolute right-0 top-full mt-1.5 z-[70] w-44 bg-white rounded-xl shadow-2xl border border-slate-300 py-1.5 overflow-hidden"
   }, [{
     icon: '👥',
     label: '成員管理',
@@ -1790,7 +1823,7 @@ function App() {
   }, /*#__PURE__*/React.createElement("span", {
     className: "block text-xs font-bold text-slate-800"
   }, item.label), /*#__PURE__*/React.createElement("span", {
-    className: "block text-[10px] text-slate-400"
+    className: "block text-[10px] text-slate-500"
   }, item.desc))))))), /*#__PURE__*/React.createElement("div", {
     className: "text-right leading-tight"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1826,7 +1859,7 @@ function App() {
   }) : /*#__PURE__*/React.createElement("div", {
     className: "flex-1 flex flex-col overflow-hidden bg-white relative"
   }, isResults ? /*#__PURE__*/React.createElement("div", {
-    className: "px-4 py-2 border-b border-slate-200 bg-gradient-to-r from-amber-50/80 via-white to-white dark:bg-none dark:bg-slate-800 flex items-center justify-between text-xs overflow-x-auto"
+    className: "px-4 py-2 border-b border-slate-300 bg-gradient-to-r from-amber-50/80 via-white to-white dark:bg-none dark:bg-slate-800 flex items-center justify-between text-xs overflow-x-auto"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-3"
   }, /*#__PURE__*/React.createElement("span", {
@@ -1840,7 +1873,7 @@ function App() {
   }, "\u5DF2\u586B\u5BEB\u7522\u51FA\u9805\u76EE\uFF1A", projects.filter(p => p.deliverable).length, " / ", projects.length, " \u6848"), /*#__PURE__*/React.createElement("div", {
     className: "bg-emerald-100/80 border border-emerald-300 text-emerald-900 px-3 py-1 rounded-full font-bold"
   }, "\uD83D\uDCA1 MP Saving\uFF1A", projects.filter(p => p.mpSaving).length, " \u6848"))) : /*#__PURE__*/React.createElement("div", {
-    className: "px-4 py-2 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white flex items-center gap-3 text-xs overflow-x-auto"
+    className: "px-4 py-2 border-b border-slate-300 bg-gradient-to-r from-slate-50 to-white flex items-center gap-3 text-xs overflow-x-auto"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center flex-shrink-0"
   }, /*#__PURE__*/React.createElement("span", {
@@ -1859,7 +1892,7 @@ function App() {
   })), /*#__PURE__*/React.createElement("span", {
     className: "ml-2 font-bold text-slate-800 whitespace-nowrap"
   }, weekStats.reported, "/", weekStats.active, " \u5DF2\u56DE\u5831")), /*#__PURE__*/React.createElement("div", {
-    className: "h-6 border-l border-slate-200 flex-shrink-0"
+    className: "h-6 border-l border-slate-300 flex-shrink-0"
   }), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-1.5 flex-shrink-0"
   }, /*#__PURE__*/React.createElement(StatChip, {
@@ -1891,7 +1924,7 @@ function App() {
   }, "\u203A"))), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 min-w-[8px]"
   }), /*#__PURE__*/React.createElement("div", {
-    className: "flex-shrink-0 flex items-center gap-2 text-[11px] text-slate-600 border border-slate-200 rounded-lg bg-white px-2 py-0.5"
+    className: "flex-shrink-0 flex items-center gap-2 text-[11px] text-slate-600 border border-slate-300 rounded-lg bg-white px-2 py-0.5"
   }, /*#__PURE__*/React.createElement("span", {
     className: "flex items-center",
     title: "\u9EC3\u8272\u659C\u7D0B\u689D\uFF1D\u8A08\u756B\u5340\u9593(\u6392\u5B9A\u7684\u8D77\u8A16\u9031)"
@@ -1922,14 +1955,14 @@ function App() {
   }, /*#__PURE__*/React.createElement("span", {
     className: "w-3 h-2.5 mr-1 rounded-sm border-2 border-red-400 bg-white"
   }), "\u2757\u5F85\u56DE\u5831"), /*#__PURE__*/React.createElement("span", {
-    className: "flex items-center text-slate-400 border-l border-slate-200 pl-2",
+    className: "flex items-center text-slate-500 border-l border-slate-300 pl-2",
     title: "\u9375\u76E4\u5FEB\u6377\u9375\uFF1AH\uFF1D\u56DE\u5230\u672C\u9031\u4E26\u7F6E\u4E2D\uFF1B\u2190 \u2192\uFF1D\u5DE6\u53F3\u5E73\u79FB 4 \u9031\uFF1BShift\uFF0B\u2190 \u2192\uFF1D\u5FAE\u79FB 1 \u9031\uFF1BESC\uFF1D\u95DC\u9589\u6700\u4E0A\u5C64\u8996\u7A97"
   }, "\u2328 H \u56DE\u672C\u9031\u30FB\u2190\u2192 \u5E73\u79FB"))), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white px-4 py-1.5 border-b border-slate-200 flex flex-nowrap items-center gap-1.5 text-[11px] z-30 overflow-x-auto [&>*]:flex-shrink-0"
+    className: "bg-white px-4 py-1.5 border-b border-slate-300 flex flex-nowrap items-center gap-1.5 text-[11px] z-30 overflow-x-auto [&>*]:flex-shrink-0"
   }, /*#__PURE__*/React.createElement("div", {
     className: "relative"
   }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400",
+    className: "w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-slate-500",
     fill: "none",
     stroke: "currentColor",
     viewBox: "0 0 24 24"
@@ -1945,7 +1978,7 @@ function App() {
     className: "pl-7 pr-6 py-1 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition w-44 focus:w-52"
   }), searchText && /*#__PURE__*/React.createElement("button", {
     onClick: () => setSearchText(''),
-    className: "absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold px-1"
+    className: "absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-600 font-bold px-1"
   }, "\xD7")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center space-x-1"
   }, Object.entries(PROJECT_TYPES).map(([key, meta]) => {
@@ -1960,9 +1993,9 @@ function App() {
     onClick: () => setTypeFilter(new Set()),
     className: "text-blue-600 hover:underline px-1"
   }, "\u6E05\u9664")), /*#__PURE__*/React.createElement("div", {
-    className: "h-5 border-l border-slate-200"
+    className: "h-5 border-l border-slate-300"
   }), role === 'member' && !isResults ? /*#__PURE__*/React.createElement("label", {
-    className: "flex items-center space-x-1.5 cursor-pointer select-none bg-slate-50 border border-slate-200 rounded-lg px-2 py-1"
+    className: "flex items-center space-x-1.5 cursor-pointer select-none bg-slate-100 border border-slate-300 rounded-lg px-2 py-1"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: onlyMine,
@@ -2066,7 +2099,7 @@ function App() {
       setIsCompact(v);
       savePref('compact', v);
     },
-    className: "text-slate-600 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-200 font-medium transition"
+    className: "text-slate-600 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-300 font-medium transition"
   }, isCompact ? '寬鬆模式' : '緊湊模式'), role === 'manager' &&
   /*#__PURE__*/
   // 長文字縮短:完整說明放 title;開啟時下方另有整條琥珀色警示列,資訊不會漏
@@ -2081,7 +2114,7 @@ function App() {
     title: "\u5C55\u958B\u5168\u90E8\u6210\u54E1\u7FA4\u7D44",
     className: "text-blue-600 hover:text-blue-800 font-medium"
   }, "\u5C55\u958B"), /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-300"
+    className: "text-slate-400"
   }, "|"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setCollapsedOwners(new Set(users)),
     title: "\u6536\u5408\u5168\u90E8\u6210\u54E1\u7FA4\u7D44",
@@ -2097,7 +2130,7 @@ function App() {
     className: "px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold shadow-sm transition"
   }, "\u95DC\u9589\u8C41\u514D\u671F")), /*#__PURE__*/React.createElement("div", {
     ref: ganttRef,
-    className: "flex-1 overflow-auto bg-slate-50 relative"
+    className: "flex-1 overflow-auto bg-slate-100 relative"
   }, isResults ? /*#__PURE__*/React.createElement(ResultsView, {
     projects: filteredProjects,
     role: role,
@@ -2201,7 +2234,7 @@ function App() {
         if (role === 'manager' || weekNum <= todayWeek) setCurrentWeek(weekNum);
       },
       title: role === 'manager' ? `點擊將系統週切換至 W${weekNum}` : weekNum <= todayWeek ? `點擊檢視 W${weekNum}(唯讀)` : undefined,
-      className: `border-r border-b border-slate-300 p-0 text-center relative ${role === 'manager' || weekNum <= todayWeek ? 'cursor-pointer hover:bg-blue-100' : ''} ${isCurrent ? 'text-white font-bold' : weekNum > todayWeek ? 'bg-slate-100 text-slate-500 font-normal' : 'bg-slate-50 text-slate-700 font-normal'}`,
+      className: `border-r border-b border-slate-300 p-0 text-center relative ${role === 'manager' || weekNum <= todayWeek ? 'cursor-pointer hover:bg-blue-100' : ''} ${isCurrent ? 'text-white font-bold' : weekNum > todayWeek ? 'bg-slate-100 text-slate-500 font-normal' : 'bg-slate-100 text-slate-700 font-normal'}`,
       style: {
         width: weekW,
         ...(isCurrent ? {
@@ -2220,7 +2253,7 @@ function App() {
     className: "text-xs"
   }, groupedProjects.length === 0 ? /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
     colSpan: weeksTotal + 3,
-    className: "p-10 text-center text-slate-400"
+    className: "p-10 text-center text-slate-500"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-3xl mb-2"
   }, "\uD83D\uDD0D"), "\u627E\u4E0D\u5230\u7B26\u5408\u689D\u4EF6\u7684\u5C08\u6848\u3002\u8ABF\u6574\u641C\u5C0B\u95DC\u9375\u5B57\u6216\u6E05\u9664\u7BE9\u9078\u5F8C\u518D\u8A66\u4E00\u6B21\u3002")) : groupedProjects.map(group => {
@@ -2292,7 +2325,7 @@ function App() {
       title: `為 ${group.owner} 新增專案`
     }, "\uFF0B \u65B0\u589E\u5C08\u6848"))), /*#__PURE__*/React.createElement("td", {
       colSpan: weeksTotal,
-      className: "p-0 border-r border-slate-200"
+      className: "p-0 border-r border-slate-300"
     }, /*#__PURE__*/React.createElement("div", {
       className: "w-full h-full flex opacity-30"
     }, Array.from({
@@ -2302,6 +2335,7 @@ function App() {
       className: `flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-100' : ''}`
     }))))), !isCollapsed && group.projects.map((proj, idx) => /*#__PURE__*/React.createElement("tr", {
       key: proj.id,
+      "data-proj-row": proj.id,
       onDragOver: role === 'manager' && dragState && dragState.owner === group.owner ? e => {
         e.preventDefault();
         if (dragOverId !== proj.id) setDragOverId(proj.id);
@@ -2314,7 +2348,7 @@ function App() {
       } : undefined,
       className: `group/row border-b border-slate-300 transition-colors ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`
     }, !isOverview && /*#__PURE__*/React.createElement("td", {
-      className: `text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-200 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
+      className: `text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
       style: {
         width: 28,
         minWidth: 28,
@@ -2322,7 +2356,7 @@ function App() {
         boxShadow: '2px 0 0 0 var(--frozen-bg)'
       }
     }, idx + 1), !isOverview && /*#__PURE__*/React.createElement("td", {
-      className: `text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-200 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
+      className: `text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
       style: {
         width: 42,
         minWidth: 42,
@@ -2354,7 +2388,7 @@ function App() {
         setDragState(null);
         setDragOverId(null);
       },
-      className: "flex-shrink-0 mr-1 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 select-none text-[13px] leading-none",
+      className: "flex-shrink-0 mr-1 cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-500 select-none text-[13px] leading-none",
       title: "\u62D6\u66F3\u4EE5\u8ABF\u6574\u6392\u5E8F"
     }, "\u283F")), /*#__PURE__*/React.createElement("div", {
       className: `flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`
@@ -2406,7 +2440,7 @@ function App() {
       length: weeksTotal
     }).map((_, i) => /*#__PURE__*/React.createElement("div", {
       key: i,
-      className: `flex-1 border-r border-slate-200 ${i + 1 === currentWeek ? 'bg-red-50/70' : ''}`
+      className: `flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-50/70' : ''}`
     }))), /*#__PURE__*/React.createElement("div", {
       className: "absolute top-0 bottom-0 z-10 pointer-events-none",
       style: {
@@ -2419,8 +2453,13 @@ function App() {
       const isPending = role === 'member' && proj.owner === currentUser && isActiveThisWeek && !weekLog;
       const deadlineSoon = isTaskDeadlineSoon(task); // 剩 ≤2 週或已過 70% 時程 → 橘框 + ⏰(未回報紅框優先)
 
+      const isHighlighted = task.id === highlightedTaskId; // 團隊看板點回報格時的暫時提示
       const barClass = 'text-[#0f172a]'; // 計畫條底永遠是淺奶油色,文字固定深色(不受深色模式覆寫),投影高對比
-      const barStyle = {
+      const barStyle = isHighlighted ? {
+        backgroundImage: 'repeating-linear-gradient(45deg, #DBEAFE, #DBEAFE 6px, #BFDBFE 6px, #BFDBFE 12px)',
+        // 淺藍高亮(僅提示用)
+        borderColor: '#2563EB'
+      } : {
         backgroundImage: 'repeating-linear-gradient(45deg, #FFF6D6, #FFF6D6 6px, #FDEDB8 6px, #FDEDB8 12px)',
         borderColor: 'rgba(180,83,9,0.75)' // 加深(範本 B):淡黃條在白底上需要更明確的輪廓
       };
@@ -2432,16 +2471,19 @@ function App() {
       return /*#__PURE__*/React.createElement(React.Fragment, {
         key: task.id
       }, /*#__PURE__*/React.createElement("div", {
-        onClick: () => setSelectedTaskInfo({
-          proj,
-          task,
-          isActiveThisWeek,
-          weekLog
-        }),
+        onClick: () => {
+          setHighlightedTaskId(null);
+          setSelectedTaskInfo({
+            proj,
+            task,
+            isActiveThisWeek,
+            weekLog
+          });
+        },
         onMouseEnter: e => showTooltip(e, proj, task),
         onMouseMove: moveTooltip,
         onMouseLeave: hideTooltip,
-        className: `absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 z-10 border rounded-sm shadow-sm ${barClass} ${isPending ? 'ring-2 ring-red-400 ring-offset-1' : deadlineSoon ? 'ring-2 ring-orange-400 ring-offset-1' : ''}`,
+        className: `absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 border rounded-sm shadow-sm ${barClass} ${isHighlighted ? 'ring-2 ring-blue-500 ring-offset-1 z-20' : isPending ? 'ring-2 ring-red-400 ring-offset-1 z-10' : deadlineSoon ? 'ring-2 ring-orange-400 ring-offset-1 z-10' : 'z-10'}`,
         style: {
           left: `${leftPercent}%`,
           width: `${widthPercent}%`,
@@ -2482,19 +2524,19 @@ function App() {
   }, /*#__PURE__*/React.createElement("div", {
     className: "font-bold text-[13px] mb-1 text-yellow-200"
   }, tooltip.proj.name), /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-300 mb-0.5"
+    className: "text-slate-400 mb-0.5"
   }, "\uD83D\uDC64 ", tooltip.proj.owner, "\u3000\xB7\u3000", tooltip.proj.category), tooltip.proj.deliverable && /*#__PURE__*/React.createElement("div", {
     className: "text-amber-200/90 mb-0.5"
   }, "\uD83C\uDFAF ", tooltip.proj.deliverable), tooltip.proj.mpSaving && /*#__PURE__*/React.createElement("div", {
     className: "text-emerald-300 font-bold mb-0.5"
   }, "\uD83D\uDCA1 MP \u7BC0\u7701\uFF1A", tooltip.proj.mpSaving), tooltip.proj.nid && /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-300 mb-0.5"
+    className: "text-slate-400 mb-0.5"
   }, "\uD83D\uDD16 \u5C08\u6848 NID\uFF1A", tooltip.proj.nid), /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-300"
+    className: "text-slate-400"
   }, "\uD83D\uDCC5 ", tooltip.task.name), tooltip.task.nid && /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-400"
+    className: "text-slate-500"
   }, "\uD83D\uDD16 \u5340\u9593 NID\uFF1A", tooltip.task.nid), /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-400"
+    className: "text-slate-500"
   }, "W", tooltip.task.start, " \u2013 W", tooltip.task.end, "\uFF08", weekToMonth(tooltip.task.start, months), " ~ ", weekToMonth(tooltip.task.end, months), "\uFF09"), isTaskDeadlineSoon(tooltip.task) && /*#__PURE__*/React.createElement("div", {
     className: "mt-1 text-orange-300 font-bold"
   }, "\u23F0 \u6392\u7A0B\u5373\u5C07\u5230\u671F\uFF1A\u5269 ", tooltip.task.end - todayWeek + 1, " \u9031 \uFF08\u6642\u7A0B\u5DF2\u904E ", Math.round((todayWeek - tooltip.task.start + 1) / (tooltip.task.end - tooltip.task.start + 1) * 100), "%\uFF09"), tooltip.weekLog && /*#__PURE__*/React.createElement("div", {
@@ -2504,9 +2546,9 @@ function App() {
   }, STATUS_META[tooltip.weekLog.status]?.icon, " \u672C\u9031 W", currentWeek, "\uFF1A", STATUS_META[tooltip.weekLog.status]?.label, tooltip.weekLog.reporterRole === 'manager' && /*#__PURE__*/React.createElement("span", {
     className: "ml-1 text-yellow-300 text-[11px]"
   }, "\u270F\uFE0F(\u4E3B\u7BA1\u88DC\u767B)")), tooltip.weekLog.note && /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-300 whitespace-pre-wrap"
+    className: "text-slate-400 whitespace-pre-wrap"
   }, tooltip.weekLog.note)), tooltip.history.length > 0 && /*#__PURE__*/React.createElement("div", {
-    className: "mt-2 pt-2 border-t border-slate-700 text-slate-400"
+    className: "mt-2 pt-2 border-t border-slate-700 text-slate-500"
   }, "\u6B77\u53F2\u56DE\u5831\uFF1A", tooltip.history.map(([w, l]) => `W${w}${STATUS_META[l.status]?.icon || ''}`).join('　')), /*#__PURE__*/React.createElement("div", {
     className: "mt-1.5 text-[10px] text-slate-500"
   }, "\u9EDE\u64CA\u53EF\u958B\u555F\u8A73\u7D30 / \u56DE\u5831\u8996\u7A97"))), selectedTaskInfo && /*#__PURE__*/React.createElement(TaskModal, {
@@ -2663,8 +2705,13 @@ function App() {
     weeklyCommentMeta: weeklyCommentMeta,
     currentUser: currentUser,
     role: role,
+    highlightedTaskId: highlightedTaskId,
+    onHighlightTask: handleHighlightTask,
     onEditComment: userName => setCommentTarget(userName),
-    onClose: () => setShowWeeklyReport(false)
+    onClose: () => {
+      setHighlightedTaskId(null);
+      setShowWeeklyReport(false);
+    }
   }), commentTarget && /*#__PURE__*/React.createElement(CommentModal, {
     member: commentTarget,
     currentWeek: currentWeek,
@@ -2748,7 +2795,7 @@ function LoadingScreen() {
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-center"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "w-12 h-12 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"
+    className: "w-12 h-12 border-4 border-slate-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"
   }), /*#__PURE__*/React.createElement("div", {
     className: "text-slate-500 font-bold"
   }, "\u8F09\u5165\u8CC7\u6599\u4E2D\u2026")));
@@ -2795,19 +2842,19 @@ function AccessDeniedScreen({
   }, "\u7121\u6B0A\u9650\u700F\u89BD\u6B64\u9801\u9762"), /*#__PURE__*/React.createElement("p", {
     className: "text-sm text-slate-500 mb-4"
   }, "\u60A8\u7684\u5E33\u865F\u672A\u88AB\u6388\u6B0A\u700F\u89BD MSD \u5C08\u6848\u8FFD\u8E64\u7E3D\u8868\u3002"), /*#__PURE__*/React.createElement("div", {
-    className: "text-left text-sm bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4 space-y-1.5"
+    className: "text-left text-sm bg-slate-100 border border-slate-300 rounded-lg p-4 mb-4 space-y-1.5"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-400 font-bold mr-2"
+    className: "text-slate-500 font-bold mr-2"
   }, "\u767B\u5165\u5DE5\u865F"), /*#__PURE__*/React.createElement("span", {
     className: "font-mono font-bold text-slate-800"
   }, empId || '（無法取得）')), person && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-400 font-bold mr-2"
+    className: "text-slate-500 font-bold mr-2"
   }, "\u4EBA\u54E1\u540D\u518A"), /*#__PURE__*/React.createElement("span", {
     className: "text-slate-700 font-medium"
   }, person.name || '', " ", person.ename ? `(${person.ename})` : '', "\u30FB", person.deptname || [person.dept1, person.dept2, person.dept3].filter(Boolean).join('/') || '無部門資料'))), reason && /*#__PURE__*/React.createElement("div", {
     className: "text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg p-3 mb-5 text-left whitespace-pre-wrap"
   }, reason), /*#__PURE__*/React.createElement("p", {
-    className: "text-xs text-slate-400"
+    className: "text-xs text-slate-500"
   }, "\u82E5\u9700\u8981\u700F\u89BD\u6B0A\u9650\uFF0C\u8ACB\u806F\u7D61\u7CFB\u7D71\u7BA1\u7406\u54E1\uFF08\u4E3B\u7BA1\uFF09\u5C07\u60A8\u7684\u90E8\u9580\u6216\u5DE5\u865F\u52A0\u5165\u5141\u8A31\u6E05\u55AE\u3002")));
 }
 function LoginScreen({
@@ -2819,7 +2866,7 @@ function LoginScreen({
   return /*#__PURE__*/React.createElement("div", {
     className: "flex-1 flex justify-center items-center bg-slate-100 p-4"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-white p-10 rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full"
+    className: "bg-white p-10 rounded-2xl shadow-2xl border border-slate-300 max-w-md w-full"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-center mb-8"
   }, /*#__PURE__*/React.createElement("div", {
@@ -2830,7 +2877,7 @@ function LoginScreen({
   }, "\uD83D\uDCCA"), /*#__PURE__*/React.createElement("h2", {
     className: "text-2xl font-black text-slate-800"
   }, "MSD \u5C08\u6848\u8FFD\u8E64\u7CFB\u7D71"), /*#__PURE__*/React.createElement("p", {
-    className: "text-xs text-slate-400 mt-2"
+    className: "text-xs text-slate-500 mt-2"
   }, year, " \u5E74\u5EA6\u5C08\u6848\u6392\u7A0B \xB7 \u9031\u9032\u5EA6\u7BA1\u63A7")), /*#__PURE__*/React.createElement("button", {
     onClick: () => onLogin('管理部主管', 'manager'),
     className: "w-full text-white font-bold py-3.5 rounded-xl mb-6 shadow-md transition hover:opacity-90",
@@ -2840,11 +2887,11 @@ function LoginScreen({
   }, "\uD83D\uDC51 \u4E3B\u7BA1\u767B\u5165\uFF08\u8ABF\u6574\u6392\u7A0B / \u6AA2\u8996\u5168\u9AD4\uFF09"), /*#__PURE__*/React.createElement("div", {
     className: "relative flex py-2 items-center"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex-grow border-t border-slate-200"
+    className: "flex-grow border-t border-slate-300"
   }), /*#__PURE__*/React.createElement("span", {
-    className: "flex-shrink-0 mx-4 text-slate-400 text-xs font-bold uppercase tracking-wider"
+    className: "flex-shrink-0 mx-4 text-slate-500 text-xs font-bold uppercase tracking-wider"
   }, "\u5718\u968A\u6210\u54E1\u767B\u5165\uFF08\u56DE\u5831\u9032\u5EA6\uFF09"), /*#__PURE__*/React.createElement("div", {
-    className: "flex-grow border-t border-slate-200"
+    className: "flex-grow border-t border-slate-300"
   })), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-3 gap-3 mt-4"
   }, users.map(u => /*#__PURE__*/React.createElement("button", {
@@ -2852,7 +2899,7 @@ function LoginScreen({
     onClick: () => onLogin(u, 'member'),
     className: "bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 py-2.5 rounded-xl font-bold text-slate-700 hover:text-blue-700 transition shadow-sm text-sm"
   }, u))), empId && /*#__PURE__*/React.createElement("div", {
-    className: "mt-6 text-center text-[11px] text-slate-400"
+    className: "mt-6 text-center text-[11px] text-slate-500"
   }, "\uD83D\uDDA5\uFE0F \u5DF2\u5075\u6E2C\u5230 Windows \u5DE5\u865F\uFF1A", /*#__PURE__*/React.createElement("span", {
     className: "font-bold text-slate-500"
   }, empId), "\uFF08\u64CD\u4F5C\u7D00\u9304\u5C07\u4E00\u4F75\u8A18\u8F09\uFF09")));
@@ -2980,7 +3027,7 @@ function TaskModal({
   })))), /*#__PURE__*/React.createElement("div", {
     className: "p-6 space-y-6"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-slate-50 p-4 rounded-xl border border-slate-200"
+    className: "bg-slate-100 p-4 rounded-xl border border-slate-300"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex justify-between items-center mb-3"
   }, /*#__PURE__*/React.createElement("label", {
@@ -3002,7 +3049,7 @@ function TaskModal({
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-1/2"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "text-[10px] text-slate-400 font-bold"
+    className: "text-[10px] text-slate-500 font-bold"
   }, "\u958B\u59CB\u9031"), /*#__PURE__*/React.createElement("input", {
     type: "number",
     min: "1",
@@ -3018,7 +3065,7 @@ function TaskModal({
   })), /*#__PURE__*/React.createElement("div", {
     className: "w-1/2"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "text-[10px] text-slate-400 font-bold"
+    className: "text-[10px] text-slate-500 font-bold"
   }, "\u7D50\u675F\u9031"), /*#__PURE__*/React.createElement("input", {
     type: "number",
     min: "1",
@@ -3034,7 +3081,7 @@ function TaskModal({
   }))), /*#__PURE__*/React.createElement("div", {
     className: "mt-3"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "text-[10px] text-slate-400 font-bold"
+    className: "text-[10px] text-slate-500 font-bold"
   }, "NID\uFF08\u6B64\u5340\u9593\u5C0D\u61C9\u54EA\u7D44 NID\uFF0C\u9078\u586B\uFF09"), /*#__PURE__*/React.createElement("input", {
     type: "text",
     value: taskNid,
@@ -3069,12 +3116,12 @@ function TaskModal({
   }, "\uD83C\uDFC6 ", score, " \u5206")), weekLog?.updatedAt && /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] text-slate-500 mb-2 flex items-center gap-1.5"
   }, /*#__PURE__*/React.createElement("span", null, "\uD83D\uDD58 \u6700\u5F8C\u7DE8\u8F2F\uFF1A", weekLog.updatedAt), weekLog.reporter && /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-400"
+    className: "text-slate-500"
   }, "by ", weekLog.reporter), weekLog.reporterRole === 'manager' && /*#__PURE__*/React.createElement("span", {
     className: "px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-bold text-[10px]",
     title: "\u6B64\u7B46\u7531\u4E3B\u7BA1\u4EE3\u70BA\u4FEE\u6B63/\u88DC\u767B"
   }, "\u270F\uFE0F \u4E3B\u7BA1\u4FEE\u6B63")), canClockIn ? /*#__PURE__*/React.createElement("div", {
-    className: `p-4 rounded-xl border transition-colors ${status && status !== 'not_executed' ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`
+    className: `p-4 rounded-xl border transition-colors ${status && status !== 'not_executed' ? 'bg-blue-50 border-blue-200' : 'bg-slate-100 border-slate-300'}`
   }, isManager && !isMyTask && /*#__PURE__*/React.createElement("div", {
     className: "mb-3 bg-amber-100 border border-amber-400 text-amber-900 rounded-lg px-3.5 py-2.5 text-xs font-bold flex items-center"
   }, /*#__PURE__*/React.createElement("span", {
@@ -3098,7 +3145,7 @@ function TaskModal({
       setNoteError('');
       markModalDirty();
     },
-    className: `py-3 rounded-lg border text-sm font-bold transition ${status === key ? meta.tag + ' ring-2 ring-offset-1 ring-slate-300' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-400'}`
+    className: `py-3 rounded-lg border text-sm font-bold transition ${status === key ? meta.tag + ' ring-2 ring-offset-1 ring-slate-300' : 'bg-white text-slate-500 border-slate-300 hover:border-slate-400'}`
   }, meta.icon, " ", meta.label))), status && /*#__PURE__*/React.createElement("textarea", {
     value: note,
     onChange: e => {
@@ -3120,7 +3167,7 @@ function TaskModal({
     disabled: saving,
     className: "px-6 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg shadow-md"
   }, saving ? '儲存中…' : '儲存進度回報')), isManager && weekLog && /*#__PURE__*/React.createElement("div", {
-    className: "mt-4 pt-3 border-t border-slate-200"
+    className: "mt-4 pt-3 border-t border-slate-300"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-bold text-slate-500 mb-2"
   }, "\u4E3B\u7BA1\u8A55\u5206\u5FAE\u8ABF\uFF08\u9EDE\u64CA\u5373\u6642\u66F4\u65B0\u5206\u6578\uFF09"), /*#__PURE__*/React.createElement("div", {
@@ -3132,9 +3179,9 @@ function TaskModal({
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] font-bold leading-tight"
   }, o.label), /*#__PURE__*/React.createElement("div", {
-    className: `text-[10px] mt-0.5 ${score === o.value ? 'text-indigo-100' : 'text-slate-400'}`
+    className: `text-[10px] mt-0.5 ${score === o.value ? 'text-indigo-100' : 'text-slate-500'}`
   }, o.value, " \u5206")))))) : /*#__PURE__*/React.createElement("div", {
-    className: "bg-slate-50 border border-slate-200 p-4 rounded-xl text-sm"
+    className: "bg-slate-100 border border-slate-300 p-4 rounded-xl text-sm"
   }, role === 'member' && isMyTask && isActiveThisWeek && !isReportingWeek && /*#__PURE__*/React.createElement("div", {
     className: "mb-3 bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-lg px-3 py-2 text-xs font-bold"
   }, "\uD83D\uDD12 \u552F\u8B80\u6AA2\u8996\uFF1A\u50C5\u80FD\u56DE\u5831\u672C\u9031 W", String(todayWeek).padStart(2, '0'), " \u7684\u9032\u5EA6\uFF0C\u6B77\u53F2\u9031\u6B21\u53EA\u80FD\u700F\u89BD\u3002"), !isActiveThisWeek ? /*#__PURE__*/React.createElement("div", {
@@ -3151,9 +3198,9 @@ function TaskModal({
   }, "\uD83C\uDFC6 ", score, " \u5206")), /*#__PURE__*/React.createElement("div", {
     className: "font-bold mb-1"
   }, "\u5DE5\u4F5C\u8AAA\u660E\uFF1A"), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white p-3 rounded border border-slate-200 text-slate-700 whitespace-pre-wrap"
+    className: "bg-white p-3 rounded border border-slate-300 text-slate-700 whitespace-pre-wrap"
   }, weekLog.note || '（未填寫備註）'), isManager && /*#__PURE__*/React.createElement("div", {
-    className: "mt-3 pt-3 border-t border-slate-200"
+    className: "mt-3 pt-3 border-t border-slate-300"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-bold text-slate-500 mb-2"
   }, "\u4E3B\u7BA1\u8A55\u5206\uFF08\u9EDE\u64CA\u5373\u4FEE\u6539\u6B64\u9031\u5206\u6578\uFF09"), /*#__PURE__*/React.createElement("div", {
@@ -3165,7 +3212,7 @@ function TaskModal({
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] font-bold leading-tight"
   }, o.label), /*#__PURE__*/React.createElement("div", {
-    className: `text-[10px] mt-0.5 ${score === o.value ? 'text-indigo-100' : 'text-slate-400'}`
+    className: `text-[10px] mt-0.5 ${score === o.value ? 'text-indigo-100' : 'text-slate-500'}`
   }, o.value, " \u5206")))))) : /*#__PURE__*/React.createElement("div", {
     className: "text-slate-500 text-center py-2"
   }, "\uD83D\uDCCC W", String(currentWeek).padStart(2, '0'), " \u672A\u56DE\u5831\u6B64\u9805\u76EE\uFF08\u7DAD\u6301\u8A08\u756B\u4E2D\uFF0C\uD83C\uDFC6 0 \u5206\uFF09\u3002"))))));
@@ -3226,13 +3273,13 @@ function ExtraNoteModal({
     })))), /*#__PURE__*/React.createElement("div", {
       className: "p-6"
     }, /*#__PURE__*/React.createElement("p", {
-      className: "text-xs text-slate-400 mb-3"
+      className: "text-xs text-slate-500 mb-3"
     }, "\u6B77\u53F2\u9031\u6B21\u50C5\u4F9B\u700F\u89BD\uFF0C\u7121\u6CD5\u4FEE\u6539\u3002"), initialNote ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-      className: "text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-4 whitespace-pre-wrap"
+      className: "text-sm text-slate-700 bg-slate-100 border border-slate-300 rounded-lg p-4 whitespace-pre-wrap"
     }, initialNote), /*#__PURE__*/React.createElement(MetaLine, {
       meta: meta
     })) : /*#__PURE__*/React.createElement("div", {
-      className: "text-sm text-slate-400 italic text-center py-6"
+      className: "text-sm text-slate-500 italic text-center py-6"
     }, "\u8A72\u9031\u672A\u586B\u5BEB\u975E\u5C08\u6848\u4E8B\u9805"), /*#__PURE__*/React.createElement("div", {
       className: "flex justify-end pt-4"
     }, /*#__PURE__*/React.createElement("button", {
@@ -3293,7 +3340,7 @@ function ExtraNoteModal({
     }, "\uD83D\uDCED"), " \u672C\u9031\u5C1A\u672A\u586B\u5BEB\u3002"), /*#__PURE__*/React.createElement("p", {
       className: "text-sm text-slate-500 mb-4 border-l-4 border-orange-400 pl-3"
     }, "\u5C08\u6848\u5916\u7684\u9805\u76EE\uFF08\u65E5\u5E38\u7DAD\u904B\u3001\u81E8\u6642\u4EA4\u8FA6\u3001\u6703\u8B70\u3001\u6559\u80B2\u8A13\u7DF4\u7B49\uFF09\u8ACB\u586B\u5BEB\u65BC\u6B64\uFF0C\u6703\u5448\u73FE\u5728\u5718\u968A\u7E3D\u7D50\u770B\u677F\u3002", /*#__PURE__*/React.createElement("span", {
-      className: "block mt-1 text-slate-400"
+      className: "block mt-1 text-slate-500"
     }, "\u6B64\u6B04\u70BA\u9078\u586B\uFF0C\u96A8\u6642\u53EF\u6E05\u7A7A\u5167\u5BB9\u5F8C\u5132\u5B58\u3002")), /*#__PURE__*/React.createElement("textarea", {
       value: note,
       onChange: e => {
@@ -3426,7 +3473,7 @@ function DeliverableModal({
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-bold text-amber-800 mb-1"
   }, "\uD83C\uDFAF \u5177\u9AD4\u7522\u51FA\u9805\u76EE"), proj.deliverable || /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-400 italic"
+    className: "text-slate-500 italic"
   }, "\uFF08\u8CA0\u8CAC\u4EBA\u5C1A\u672A\u586B\u5BEB\uFF09")), proj.mpSaving && /*#__PURE__*/React.createElement("div", {
     className: "text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3 font-bold"
   }, "\uD83D\uDCA1 MP Saving\uFF1A", proj.mpSaving), /*#__PURE__*/React.createElement("div", {
@@ -3494,13 +3541,13 @@ function WeeklyPlanModal({
     })))), /*#__PURE__*/React.createElement("div", {
       className: "p-6"
     }, /*#__PURE__*/React.createElement("p", {
-      className: "text-xs text-slate-400 mb-3"
+      className: "text-xs text-slate-500 mb-3"
     }, "\u6B77\u53F2\u9031\u6B21\u50C5\u4F9B\u700F\u89BD\uFF0C\u7121\u6CD5\u4FEE\u6539\u3002"), initialNote ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-      className: "text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-4 whitespace-pre-wrap"
+      className: "text-sm text-slate-700 bg-slate-100 border border-slate-300 rounded-lg p-4 whitespace-pre-wrap"
     }, initialNote), /*#__PURE__*/React.createElement(MetaLine, {
       meta: meta
     })) : /*#__PURE__*/React.createElement("div", {
-      className: "text-sm text-slate-400 italic text-center py-6"
+      className: "text-sm text-slate-500 italic text-center py-6"
     }, "\u8A72\u9031\u672A\u586B\u5BEB\u4E0B\u9031\u9810\u8A08\u5DE5\u4F5C"), /*#__PURE__*/React.createElement("div", {
       className: "flex justify-end pt-4"
     }, /*#__PURE__*/React.createElement("button", {
@@ -3622,7 +3669,7 @@ function DeadlinePanel({
   })))), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 overflow-y-auto p-4 space-y-2.5"
   }, items.length === 0 ? /*#__PURE__*/React.createElement("div", {
-    className: "text-center text-slate-400 py-16"
+    className: "text-center text-slate-500 py-16"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-4xl mb-3"
   }, "\uD83C\uDF89"), /*#__PURE__*/React.createElement("div", {
@@ -3648,13 +3695,13 @@ function DeadlinePanel({
   }, proj.name), /*#__PURE__*/React.createElement("div", {
     className: "text-sm text-slate-600 mt-0.5 truncate"
   }, task.name), /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] text-slate-400 mt-1"
+    className: "text-[10px] text-slate-500 mt-1"
   }, "\uD83D\uDC64 ", proj.owner, " \xB7 \u6392\u7A0B W", task.start, "\u2013W", task.end)), /*#__PURE__*/React.createElement("div", {
     className: "flex-shrink-0 text-right"
   }, /*#__PURE__*/React.createElement("div", {
     className: `font-bold text-sm ${remain <= 1 ? 'text-red-600' : 'text-orange-600'}`
   }, "\u5269 ", remain, " \u9031"), /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] text-slate-400 mt-0.5"
+    className: "text-[10px] text-slate-500 mt-0.5"
   }, "\u5DF2\u904E ", elapsed, "%"))), /*#__PURE__*/React.createElement("div", {
     className: "mt-2 h-1.5 bg-white rounded-full overflow-hidden border border-orange-200"
   }, /*#__PURE__*/React.createElement("div", {
@@ -3781,7 +3828,7 @@ function PendingPanel({
     className: "text-xs text-slate-500 mt-1"
   }, "\u8ACB\u5B89\u6392 W", String(Math.min(currentWeek + 1, 53)).padStart(2, '0'), " \u9031\u9810\u8A08\u9032\u884C\u7684\u5DE5\u4F5C\u5167\u5BB9"), !planPending && /*#__PURE__*/React.createElement(MetaLine, {
     meta: planMeta,
-    className: "text-[10px] text-slate-400 mt-0.5"
+    className: "text-[10px] text-slate-500 mt-0.5"
   })), /*#__PURE__*/React.createElement("div", {
     className: `flex-shrink-0 font-bold text-xs bg-white border rounded-full px-3 py-1.5 transition ${planPending ? 'text-red-600 border-red-300 group-hover:bg-red-600 group-hover:text-white' : 'text-emerald-600 border-emerald-300 group-hover:bg-emerald-600 group-hover:text-white'}`
   }, planPending ? '立即填寫 ›' : '檢閱修改 ›')))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -3805,11 +3852,11 @@ function PendingPanel({
     className: "text-xs text-slate-500 mt-1"
   }, "\u65E5\u5E38\u7DAD\u904B\u3001\u81E8\u6642\u4EA4\u8FA6\u3001\u6703\u8B70\u7B49\u5C08\u6848\u5916\u9805\u76EE\uFF08\u9078\u586B\uFF0C\u4E0D\u8A08\u5165\u5B8C\u6210\u5EA6\uFF09"), extraFilled && /*#__PURE__*/React.createElement(MetaLine, {
     meta: extraMeta,
-    className: "text-[10px] text-slate-400 mt-0.5"
+    className: "text-[10px] text-slate-500 mt-0.5"
   })), /*#__PURE__*/React.createElement("div", {
     className: `flex-shrink-0 font-bold text-xs bg-white border rounded-full px-3 py-1.5 transition ${extraFilled ? 'text-emerald-600 border-emerald-300 group-hover:bg-emerald-600 group-hover:text-white' : 'text-orange-600 border-orange-300 group-hover:bg-orange-600 group-hover:text-white'}`
   }, extraFilled ? '檢閱修改 ›' : '前往填寫 ›')))), completed.length > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: "text-xs font-black text-slate-400 uppercase tracking-wider mb-2"
+    className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
   }, "\uD83D\uDFE2 ", wkLabel, "\u5DF2\u5B8C\u6210\u6253\u5361\u4EFB\u52D9 (", completed.length, " \u9805)"), /*#__PURE__*/React.createElement("div", {
     className: "space-y-2"
   }, completed.map(({
@@ -3822,7 +3869,7 @@ function PendingPanel({
       proj,
       task
     }, log),
-    className: "w-full text-left bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-3 transition group opacity-90"
+    className: "w-full text-left bg-slate-100 hover:bg-slate-100 border border-slate-300 rounded-xl p-3 transition group opacity-90"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between"
   }, /*#__PURE__*/React.createElement("div", {
@@ -3836,11 +3883,11 @@ function PendingPanel({
   }, STATUS_META[log.status]?.icon, " ", STATUS_META[log.status]?.label)), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-medium text-slate-700 mt-1 truncate"
   }, task.name), log.updatedAt && /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] text-slate-400 mt-0.5"
+    className: "text-[10px] text-slate-500 mt-0.5"
   }, "\uD83D\uDD58 \u6700\u5F8C\u7DE8\u8F2F ", log.updatedAt, log.reporterRole === 'manager' ? '・✏️ 主管修正' : '')), /*#__PURE__*/React.createElement("div", {
-    className: "flex-shrink-0 text-slate-500 font-bold text-xs bg-white border border-slate-200 rounded-full px-2.5 py-1 group-hover:border-slate-400 transition"
+    className: "flex-shrink-0 text-slate-500 font-bold text-xs bg-white border border-slate-300 rounded-full px-2.5 py-1 group-hover:border-slate-400 transition"
   }, "\u4FEE\u6539 \u203A"))))))), /*#__PURE__*/React.createElement("div", {
-    className: "p-4 bg-slate-50 border-t border-slate-200"
+    className: "p-4 bg-slate-100 border-t border-slate-300"
   }, allDone ? /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     className: "w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm rounded-xl shadow-md transition flex items-center justify-center gap-2"
@@ -3906,11 +3953,11 @@ function ManagerWeekPanel({
       overflow: 'hidden'
     }
   }, value) : /*#__PURE__*/React.createElement("div", {
-    className: "text-xs text-slate-400 italic mt-1"
+    className: "text-xs text-slate-500 italic mt-1"
   }, emptyText), value && /*#__PURE__*/React.createElement(MetaLine, {
     meta: meta,
     showManagerTag: showManagerTag,
-    className: "text-[10px] text-slate-400 mt-0.5"
+    className: "text-[10px] text-slate-500 mt-0.5"
   })), /*#__PURE__*/React.createElement("div", {
     className: "flex-shrink-0 text-slate-600 font-bold text-xs bg-white border border-slate-300 rounded-full px-3 py-1.5 group-hover:bg-slate-700 group-hover:text-white transition"
   }, "\u7DE8\u8F2F \u203A")));
@@ -3961,7 +4008,7 @@ function ManagerWeekPanel({
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
   }, "\uD83D\uDCCC W", wk, " \u6392\u5B9A\u4EFB\u52D9\u6253\u5361 (", rows.length, " \u9805)"), rows.length === 0 ? /*#__PURE__*/React.createElement("div", {
-    className: "bg-slate-50 border border-slate-200 rounded-xl p-4 text-center text-slate-400 text-xs italic"
+    className: "bg-slate-100 border border-slate-300 rounded-xl p-4 text-center text-slate-500 text-xs italic"
   }, "\u6B64\u9031\u7121\u6392\u5B9A\u4EFB\u52D9") : /*#__PURE__*/React.createElement("div", {
     className: "space-y-2.5"
   }, rows.map(({
@@ -3971,7 +4018,7 @@ function ManagerWeekPanel({
   }) => /*#__PURE__*/React.createElement("button", {
     key: task.id,
     onClick: () => onSelectTask(proj, task, log),
-    className: `w-full text-left border rounded-xl p-3 transition group shadow-sm ${log ? 'bg-slate-50 hover:bg-slate-100 border-slate-200' : 'bg-yellow-50 hover:bg-yellow-100 border-yellow-300'}`
+    className: `w-full text-left border rounded-xl p-3 transition group shadow-sm ${log ? 'bg-slate-100 hover:bg-slate-100 border-slate-300' : 'bg-yellow-50 hover:bg-yellow-100 border-yellow-300'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between"
   }, /*#__PURE__*/React.createElement("div", {
@@ -3990,7 +4037,7 @@ function ManagerWeekPanel({
   }, "\u270F\uFE0F\u4E3B\u7BA1")), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-medium text-slate-700 mt-1 truncate"
   }, task.name), log?.updatedAt && /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] text-slate-400 mt-0.5"
+    className: "text-[10px] text-slate-500 mt-0.5"
   }, "\uD83D\uDD58 \u6700\u5F8C\u7DE8\u8F2F ", log.updatedAt, log.reporter ? `（${log.reporter}）` : '')), /*#__PURE__*/React.createElement("div", {
     className: "flex-shrink-0 text-slate-600 font-bold text-xs bg-white border border-slate-300 rounded-full px-2.5 py-1 group-hover:bg-slate-700 group-hover:text-white transition"
   }, log ? '修改 ›' : '補登 ›')))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -4000,7 +4047,7 @@ function ManagerWeekPanel({
   }, editRow('📝', '非專案事項', extra, '未填寫（可代為補登）', 'bg-orange-50/70 hover:bg-orange-100/70 border-orange-200', () => onEditExtra(member), extraMeta), editRow('📅', '下週預計執行工作', plan, '未填寫（可代為補登）', 'bg-indigo-50/70 hover:bg-indigo-100/70 border-indigo-200', () => onEditPlan(member), planMeta))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
   }, "\uD83D\uDC51 \u4E3B\u7BA1\u56DE\u8986\uFF08\u6210\u54E1\u4E0D\u53EF\u7570\u52D5\uFF09"), editRow('💬', `對 ${member} 的 W${wk} 週報回覆`, comment, '尚未回覆（選填）', 'bg-violet-50/70 hover:bg-violet-100/70 border-violet-200', () => onEditComment(member), commentMeta, false))), /*#__PURE__*/React.createElement("div", {
-    className: "p-4 bg-slate-50 border-t border-slate-200"
+    className: "p-4 bg-slate-100 border-t border-slate-300"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     className: "w-full py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-xl transition"
@@ -4075,13 +4122,13 @@ function CommentModal({
     showManagerTag: false,
     className: "text-[11px] text-violet-700 font-medium mt-1"
   })) : /*#__PURE__*/React.createElement("div", {
-    className: "mb-4 bg-slate-50 border border-slate-300 text-slate-600 rounded-lg px-3 py-2.5 text-sm font-bold flex items-center"
+    className: "mb-4 bg-slate-100 border border-slate-300 text-slate-600 rounded-lg px-3 py-2.5 text-sm font-bold flex items-center"
   }, /*#__PURE__*/React.createElement("span", {
     className: "mr-2"
   }, "\uD83D\uDCED"), " \u672C\u9031\u5C1A\u672A\u56DE\u8986\u6B64\u6210\u54E1\u3002"), /*#__PURE__*/React.createElement("p", {
     className: "text-sm text-slate-500 mb-4 border-l-4 border-violet-400 pl-3"
   }, "\u91DD\u5C0D ", member, " \u672C\u9031\u7684\u56DE\u5831\u7D50\u679C\u7D66\u4E88\u56DE\u994B\u6216\u5EFA\u8B70\uFF08\u5DE5\u4F5C\u65B9\u5411\u3001\u512A\u5148\u9806\u5E8F\u3001\u63D0\u9192\u4E8B\u9805\u7B49\uFF09\u3002", /*#__PURE__*/React.createElement("span", {
-    className: "block mt-1 text-slate-400"
+    className: "block mt-1 text-slate-500"
   }, "\u6B64\u6B04\u70BA\u9078\u586B\uFF0C\u96A8\u6642\u53EF\u6E05\u7A7A\u5167\u5BB9\u5F8C\u5132\u5B58\u3002")), /*#__PURE__*/React.createElement("textarea", {
     value: text,
     onChange: e => {
@@ -4107,7 +4154,7 @@ function CommentModal({
 function MetaLine({
   meta,
   showManagerTag = true,
-  className = 'text-[10px] text-slate-400 mt-1'
+  className = 'text-[10px] text-slate-500 mt-1'
 }) {
   if (!meta || !meta.at) return null;
   return /*#__PURE__*/React.createElement("div", {
@@ -4131,6 +4178,8 @@ function WeeklyReportDashboard({
   weeklyCommentMeta = {},
   currentUser,
   role,
+  highlightedTaskId,
+  onHighlightTask,
   onEditComment,
   onClose
 }) {
@@ -4301,17 +4350,21 @@ function WeeklyReportDashboard({
   }, /*#__PURE__*/React.createElement("div", {
     className: "space-y-2.5"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-xs font-bold text-slate-400 border-b border-slate-100 pb-1"
+    className: "text-xs font-bold text-slate-500 border-b border-slate-200 pb-1"
   }, "\uD83D\uDCCC \u5C08\u6848\u57F7\u884C\u9805\u76EE"), activeTasks.length > 0 ? activeTasks.map(({
     proj,
     task,
     log
   }) => /*#__PURE__*/React.createElement("div", {
     key: task.id,
-    className: `text-sm p-2.5 rounded-lg border ${log.status === 'not_executed' ? 'bg-slate-100 border-slate-200 opacity-80' : log.status === 'monitor' ? 'bg-sky-50/70 border-sky-200' : 'bg-green-50/60 border-green-200'}`
+    onClick: onHighlightTask ? () => onHighlightTask(proj, task) : undefined,
+    title: onHighlightTask ? '點擊在左側甘特圖高亮此項目的計畫區間' : undefined,
+    className: `text-sm p-2.5 rounded-lg border ${onHighlightTask ? 'cursor-pointer' : ''} ${highlightedTaskId === task.id ? 'ring-2 ring-blue-500 border-blue-400 bg-blue-50/70' : log.status === 'not_executed' ? 'bg-slate-100 border-slate-300 opacity-80' : log.status === 'monitor' ? 'bg-sky-50/70 border-sky-200' : 'bg-green-50/60 border-green-200'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "font-bold text-slate-700 text-xs leading-snug break-words"
-  }, proj.name), /*#__PURE__*/React.createElement("div", {
+  }, proj.name, highlightedTaskId === task.id && /*#__PURE__*/React.createElement("span", {
+    className: "ml-1 text-blue-600 text-[10px]"
+  }, "\u25C0 \u7518\u7279\u5716\u5DF2\u9AD8\u4EAE")), /*#__PURE__*/React.createElement("div", {
     className: "flex flex-wrap items-center gap-1 mt-1"
   }, /*#__PURE__*/React.createElement("span", {
     className: `px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_META[log.status]?.tag}`
@@ -4324,31 +4377,31 @@ function WeeklyReportDashboard({
   }, "\u270F\uFE0F\u4E3B\u7BA1")), /*#__PURE__*/React.createElement("div", {
     className: "text-slate-600 my-1 font-medium text-xs"
   }, task.name), log.note && /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-700 text-xs bg-white p-1.5 rounded border border-slate-100 whitespace-pre-wrap"
+    className: "text-slate-700 text-xs bg-white p-1.5 rounded border border-slate-200 whitespace-pre-wrap"
   }, log.note), log.updatedAt && /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] text-slate-400 mt-1"
+    className: "text-[10px] text-slate-500 mt-1"
   }, "\uD83D\uDD58 \u6700\u5F8C\u7DE8\u8F2F ", log.updatedAt, log.reporter ? `（${log.reporter}）` : ''))) : /*#__PURE__*/React.createElement("div", {
-    className: "text-sm text-slate-400 italic py-2"
+    className: "text-sm text-slate-500 italic py-2"
   }, "\u672C\u9031\u7121\u5C08\u6848\u6295\u5165"), pendingTasks.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5"
   }, "\u5C1A\u6709 ", pendingTasks.length, " \u9805\u672C\u9031\u6392\u5B9A\u4EFB\u52D9\u672A\u56DE\u5831")), /*#__PURE__*/React.createElement("div", {
     className: "space-y-2.5 md:border-l md:border-slate-100 md:pl-4"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-xs font-bold text-slate-400 border-b border-slate-100 pb-1"
+    className: "text-xs font-bold text-slate-500 border-b border-slate-200 pb-1"
   }, "\uD83D\uDCDD \u65E5\u5E38\u71DF\u904B / \u81E8\u6642\u4EA4\u8FA6\uFF08\u975E\u5C08\u6848\uFF09"), extraNote ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-sm text-slate-700 bg-orange-50 p-3 rounded-lg border border-orange-200 whitespace-pre-wrap"
   }, extraNote), /*#__PURE__*/React.createElement(MetaLine, {
     meta: extraMeta
   })) : /*#__PURE__*/React.createElement("div", {
-    className: "text-sm text-slate-400 italic py-2"
+    className: "text-sm text-slate-500 italic py-2"
   }, "\u7121\u586B\u5BEB\u5176\u4ED6\u9805\u76EE"), /*#__PURE__*/React.createElement("div", {
-    className: "text-xs font-bold text-slate-400 border-b border-slate-100 pb-1 pt-1"
+    className: "text-xs font-bold text-slate-500 border-b border-slate-200 pb-1 pt-1"
   }, "\uD83D\uDCC5 \u4E0B\u9031\u9810\u8A08\u57F7\u884C\u5DE5\u4F5C"), weekPlan ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-sm text-slate-700 bg-indigo-50 p-3 rounded-lg border border-indigo-200 whitespace-pre-wrap"
   }, weekPlan), /*#__PURE__*/React.createElement(MetaLine, {
     meta: planMeta
   })) : /*#__PURE__*/React.createElement("div", {
-    className: "text-sm text-slate-400 italic py-2"
+    className: "text-sm text-slate-500 italic py-2"
   }, "\u672A\u586B\u5BEB")), comment && /*#__PURE__*/React.createElement("div", {
     className: "md:col-span-2"
   }, /*#__PURE__*/React.createElement("div", {
@@ -4360,7 +4413,7 @@ function WeeklyReportDashboard({
     showManagerTag: false
   })));
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-y-0 right-0 w-full max-w-2xl bg-slate-50 shadow-2xl z-[120] flex flex-col border-l border-slate-200"
+    className: "fixed inset-y-0 right-0 w-full max-w-2xl bg-slate-100 shadow-2xl z-[120] flex flex-col border-l border-slate-300"
   }, /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-4 text-white flex justify-between items-center shadow-md",
     style: {
@@ -4394,9 +4447,9 @@ function WeeklyReportDashboard({
     strokeWidth: 2,
     d: "M6 18L18 6M6 6l12 12"
   }))))), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white px-6 py-2 border-b border-slate-200 flex items-center gap-2 flex-wrap"
+    className: "bg-white px-6 py-2 border-b border-slate-300 flex items-center gap-2 flex-wrap"
   }, !isManager && /*#__PURE__*/React.createElement("label", {
-    className: "flex items-center space-x-1.5 cursor-pointer select-none bg-slate-50 border border-slate-200 rounded-lg px-2 py-1"
+    className: "flex items-center space-x-1.5 cursor-pointer select-none bg-slate-100 border border-slate-300 rounded-lg px-2 py-1"
   }, /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: onlyMine,
@@ -4408,12 +4461,12 @@ function WeeklyReportDashboard({
   }), /*#__PURE__*/React.createElement("span", {
     className: "font-medium text-slate-700 text-[11px]"
   }, "\u53EA\u770B\u6211\u7684\u9031\u5831")), showTeamView && /*#__PURE__*/React.createElement(React.Fragment, null, !isManager && /*#__PURE__*/React.createElement("div", {
-    className: "h-4 border-l border-slate-200"
+    className: "h-4 border-l border-slate-300"
   }), /*#__PURE__*/React.createElement("button", {
     onClick: expandAll,
     className: "text-[11px] text-blue-600 hover:text-blue-800 font-bold"
   }, "\u5C55\u958B\u5168\u90E8"), /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-300"
+    className: "text-slate-400"
   }, "|"), /*#__PURE__*/React.createElement("button", {
     onClick: collapseAll,
     className: "text-[11px] text-blue-600 hover:text-blue-800 font-bold"
@@ -4434,12 +4487,12 @@ function WeeklyReportDashboard({
     const isCopiedUser = copiedUser === user;
     return /*#__PURE__*/React.createElement("div", {
       key: user,
-      className: "bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"
+      className: "bg-white dark:bg-slate-800/80 rounded-xl shadow-sm border border-slate-300 dark:border-slate-700 overflow-hidden"
     }, /*#__PURE__*/React.createElement("div", {
-      className: `bg-slate-200 px-4 py-2 border-b border-slate-300 font-bold text-slate-800 flex items-center ${showTeamView ? 'cursor-pointer hover:bg-slate-200/70 transition' : ''}`,
+      className: `bg-slate-200 dark:bg-slate-800 px-4 py-2 border-b border-slate-300 dark:border-slate-700 font-bold text-slate-800 dark:text-slate-100 flex items-center ${showTeamView ? 'cursor-pointer hover:bg-slate-200/70 dark:hover:bg-slate-700/70 transition' : ''}`,
       onClick: showTeamView ? () => toggleExpand(user) : undefined
     }, showTeamView && /*#__PURE__*/React.createElement("span", {
-      className: "mr-1.5 text-slate-400 text-xs select-none"
+      className: "mr-1.5 text-slate-600 dark:text-slate-400 text-xs select-none"
     }, isExpanded ? '▼' : '▶'), /*#__PURE__*/React.createElement("div", {
       className: "w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs mr-2 flex-shrink-0"
     }, user[0]), /*#__PURE__*/React.createElement("span", {
@@ -4447,49 +4500,49 @@ function WeeklyReportDashboard({
     }, user), total > 0 && /*#__PURE__*/React.createElement("div", {
       className: "flex items-center flex-1 max-w-[260px]"
     }, /*#__PURE__*/React.createElement("div", {
-      className: "flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden"
+      className: "flex-1 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full overflow-hidden"
     }, /*#__PURE__*/React.createElement("div", {
       className: `h-full rounded-full transition-all ${rate === 100 ? 'bg-green-500' : rate >= 50 ? 'bg-blue-500' : 'bg-yellow-400'}`,
       style: {
         width: `${rate}%`
       }
     })), /*#__PURE__*/React.createElement("span", {
-      className: "ml-2 text-[10px] font-bold text-slate-500 whitespace-nowrap"
+      className: "ml-2 text-[10px] font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap"
     }, activeTasks.length, "/", total, " \u56DE\u5831"), /*#__PURE__*/React.createElement("span", {
-      className: `ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${s.weekScore >= total ? 'bg-green-100 text-green-800 border-green-400' : 'bg-indigo-100 text-indigo-800 border-indigo-400'}`,
+      className: `ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${s.weekScore >= total ? 'bg-green-100 text-green-800 border-green-400 dark:bg-green-900/40 dark:text-green-300 dark:border-green-700/50' : 'bg-indigo-100 text-indigo-800 border-indigo-400 dark:bg-indigo-900/40 dark:text-indigo-300 dark:border-indigo-700/50'}`,
       title: `本週得分＝各任務打卡分數加總（回報預設 1 分、主管可調 0.3~1；未回報 0 分）／滿分＝本週排定任務數`
     }, "\uD83C\uDFC6 ", s.weekScore, "/", total, " \u5206")), !isExpanded && showTeamView && /*#__PURE__*/React.createElement("div", {
       className: "ml-auto flex items-center gap-1.5 text-[10px]"
     }, activeTasks.length > 0 && /*#__PURE__*/React.createElement("span", {
-      className: "bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold border border-green-300"
+      className: "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded font-bold border border-green-300 dark:border-green-700/50"
     }, "\u2705", activeTasks.filter(a => a.log.status === 'executed').length), activeTasks.filter(a => a.log.status === 'monitor').length > 0 && /*#__PURE__*/React.createElement("span", {
-      className: "bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded font-bold border border-sky-300"
+      className: "bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 px-1.5 py-0.5 rounded font-bold border border-sky-300 dark:border-sky-700/50"
     }, "\uD83D\uDC41\uFE0F", activeTasks.filter(a => a.log.status === 'monitor').length), pendingTasks.length > 0 && /*#__PURE__*/React.createElement("span", {
-      className: "bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-bold border border-yellow-300"
+      className: "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300 px-1.5 py-0.5 rounded font-bold border border-yellow-300 dark:border-yellow-700/50"
     }, "\u2757", pendingTasks.length), extraNote && /*#__PURE__*/React.createElement("span", {
-      className: "bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-bold border border-orange-300"
+      className: "bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded font-bold border border-orange-300 dark:border-orange-700/50"
     }, "\uD83D\uDCDD"), weekPlan && /*#__PURE__*/React.createElement("span", {
-      className: "bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold border border-indigo-300"
+      className: "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded font-bold border border-indigo-300 dark:border-indigo-700/50"
     }, "\uD83D\uDCC5"), s.comment && /*#__PURE__*/React.createElement("span", {
-      className: "bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-bold border border-violet-300",
+      className: "bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 px-1.5 py-0.5 rounded font-bold border border-violet-300 dark:border-violet-700/50",
       title: "\u5DF2\u6709\u4E3B\u7BA1\u56DE\u8986"
     }, "\uD83D\uDCAC")), /*#__PURE__*/React.createElement("button", {
       onClick: e => {
         e.stopPropagation();
         copyUserReport(s);
       },
-      className: `ml-auto px-2 py-0.5 rounded text-[10px] font-bold transition border ${isCopiedUser ? 'bg-green-500 border-green-400 text-white' : 'bg-slate-200 hover:bg-slate-300 border-slate-300 text-slate-600'}`,
+      className: `ml-auto px-2 py-0.5 rounded text-[10px] font-bold transition border ${isCopiedUser ? 'bg-green-500 border-green-400 text-white dark:bg-green-700 dark:border-green-600' : 'bg-slate-100 hover:bg-slate-300 border-slate-400 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:border-slate-600 dark:text-slate-200'}`,
       title: `複製 ${user} 的週報文字`
     }, isCopiedUser ? '✓ 已複製' : '📋 複製週報'), isManager && onEditComment && /*#__PURE__*/React.createElement("button", {
       onClick: e => {
         e.stopPropagation();
         onEditComment(user);
       },
-      className: `ml-1.5 px-2 py-0.5 rounded text-[10px] font-bold transition border ${s.comment ? 'bg-violet-100 hover:bg-violet-200 border-violet-400 text-violet-800' : 'bg-slate-200 hover:bg-slate-300 border-slate-300 text-slate-600'}`,
+      className: `ml-1.5 px-2 py-0.5 rounded text-[10px] font-bold transition border ${s.comment ? 'bg-violet-100 hover:bg-violet-200 border-violet-400 text-violet-800 dark:bg-violet-900/40 dark:hover:bg-violet-900/60 dark:border-violet-700/50 dark:text-violet-300' : 'bg-slate-200 hover:bg-slate-300 border-slate-300 text-slate-600 dark:bg-slate-700 dark:hover:bg-slate-600 dark:border-slate-600 dark:text-slate-300'}`,
       title: s.comment ? `編輯對 ${user} 的本週回覆` : `回覆 ${user} 的本週週報（選填）`
     }, s.comment ? '💬 編輯回覆' : '💬 主管回覆')), isExpanded && renderCardBody(s));
   }), visibleSummary.filter(s => s.activeTasks.length > 0 || s.extraNote || s.weekPlan || s.pendingTasks.length > 0).length === 0 && /*#__PURE__*/React.createElement("div", {
-    className: "text-center text-slate-400 italic py-12"
+    className: "text-center text-slate-500 italic py-12"
   }, "\u672C\u9031\u5C1A\u7121\u56DE\u5831\u8CC7\u6599")));
 }
 function ProjectEditModal({
@@ -4934,13 +4987,13 @@ function UsageStatsPanel({
   const maxDay = Math.max(1, ...dayBars.map(d => d.count));
   const maxUser = stats ? Math.max(1, ...(stats.byUser || []).map(u => Number(u.count))) : 1;
   const kpi = (label, value, sub) => /*#__PURE__*/React.createElement("div", {
-    className: "bg-white border border-slate-200 rounded-xl p-3 text-center shadow-sm"
+    className: "bg-white border border-slate-300 rounded-xl p-3 text-center shadow-sm"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] font-bold text-slate-500"
   }, label), /*#__PURE__*/React.createElement("div", {
     className: "text-2xl font-black text-slate-800 mt-0.5"
   }, value), sub && /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] text-slate-400 mt-0.5"
+    className: "text-[10px] text-slate-500 mt-0.5"
   }, sub));
   return /*#__PURE__*/React.createElement("div", {
     className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end"
@@ -4976,27 +5029,27 @@ function UsageStatsPanel({
     strokeWidth: 2,
     d: "M6 18L18 6M6 6l12 12"
   })))), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white px-5 py-2 border-b border-slate-200 flex items-center gap-1.5"
+    className: "bg-white px-5 py-2 border-b border-slate-300 flex items-center gap-1.5"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-[11px] font-bold text-slate-500 mr-1"
   }, "\u7D71\u8A08\u5340\u9593"), [7, 30, 90].map(d => /*#__PURE__*/React.createElement("button", {
     key: d,
     onClick: () => setDays(d),
-    className: `px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${days === d ? 'bg-teal-600 text-white border-teal-700' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`
+    className: `px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${days === d ? 'bg-teal-600 text-white border-teal-700' : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'}`
   }, "\u8FD1 ", d, " \u5929"))), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 overflow-y-auto p-5 space-y-5"
   }, loadError ? /*#__PURE__*/React.createElement("div", {
     className: "bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm font-bold"
   }, "\u274C \u8F09\u5165\u5931\u6557\uFF1A", loadError) : !stats ? /*#__PURE__*/React.createElement("div", {
-    className: "text-center text-slate-400 py-10"
+    className: "text-center text-slate-500 py-10"
   }, "\u8F09\u5165\u4E2D\u2026") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 gap-3"
   }, kpi('今日登入', stats.today), kpi('近 7 天', stats.last7), kpi(`近 ${stats.days} 天`, stats.lastN, `手動 ${stats.manualN}・自動 ${stats.autoN}`), kpi('活躍使用者', stats.uniqueUsers, `近 ${stats.days} 天有登入的人數`)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
   }, "\uD83D\uDCC5 \u6BCF\u65E5\u767B\u5165\u6B21\u6578\uFF08\u8FD1 ", stats.days, " \u5929\uFF09"), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white border border-slate-200 rounded-xl p-3 shadow-sm"
+    className: "bg-white border border-slate-300 rounded-xl p-3 shadow-sm"
   }, stats.lastN === 0 ? /*#__PURE__*/React.createElement("div", {
-    className: "text-center text-slate-400 italic text-xs py-6"
+    className: "text-center text-slate-500 italic text-xs py-6"
   }, "\u6B64\u5340\u9593\u5C1A\u7121\u767B\u5165\u7D00\u9304") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "flex items-end gap-px h-24"
   }, dayBars.map(d => /*#__PURE__*/React.createElement("div", {
@@ -5009,16 +5062,16 @@ function UsageStatsPanel({
       height: d.count > 0 ? `${Math.max(8, Math.round(d.count / maxDay * 100))}%` : 2
     }
   })))), /*#__PURE__*/React.createElement("div", {
-    className: "flex justify-between text-[10px] text-slate-400 mt-1.5 font-medium"
+    className: "flex justify-between text-[10px] text-slate-500 mt-1.5 font-medium"
   }, /*#__PURE__*/React.createElement("span", null, dayBars[0]?.label), /*#__PURE__*/React.createElement("span", null, "\u55AE\u65E5\u6700\u9AD8 ", maxDay, " \u6B21"), /*#__PURE__*/React.createElement("span", null, dayBars[dayBars.length - 1]?.label))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
   }, "\uD83D\uDC65 \u5404\u4F7F\u7528\u8005\u767B\u5165\u6B21\u6578\uFF08\u8FD1 ", stats.days, " \u5929\uFF09"), (stats.byUser || []).length === 0 ? /*#__PURE__*/React.createElement("div", {
-    className: "bg-slate-50 border border-slate-200 rounded-xl p-4 text-center text-slate-400 text-xs italic"
+    className: "bg-slate-100 border border-slate-300 rounded-xl p-4 text-center text-slate-500 text-xs italic"
   }, "\u6B64\u5340\u9593\u5C1A\u7121\u767B\u5165\u7D00\u9304") : /*#__PURE__*/React.createElement("div", {
     className: "space-y-2"
   }, stats.byUser.map(u => /*#__PURE__*/React.createElement("div", {
     key: u.user,
-    className: "bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm"
+    className: "bg-white border border-slate-300 rounded-xl px-3 py-2 shadow-sm"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("span", {
@@ -5035,11 +5088,11 @@ function UsageStatsPanel({
       width: `${Math.max(4, Math.round(Number(u.count) / maxUser * 100))}%`
     }
   })), /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] text-slate-400 mt-1"
+    className: "text-[10px] text-slate-500 mt-1"
   }, "\u6700\u5F8C\u767B\u5165 ", u.lastAt))))), /*#__PURE__*/React.createElement("div", {
-    className: "text-[11px] text-slate-400 leading-relaxed"
+    className: "text-[11px] text-slate-500 leading-relaxed"
   }, "\u203B \u6BCF\u6B21\u65BC\u767B\u5165\u756B\u9762\u9078\u64C7\u8EAB\u5206\u3001\u6216\u91CD\u65B0\u6574\u7406\uFF0F\u91CD\u958B\u5206\u9801\u81EA\u52D5\u9084\u539F\u767B\u5165\uFF0C\u7686\u8A08\u4E00\u6B21\u3002\u7E3D\u7D2F\u8A08\uFF08\u542B\u66F4\u65E9\u671F\u9593\uFF09\uFF1A", stats.total, " \u6B21\u3002"))), /*#__PURE__*/React.createElement("div", {
-    className: "p-4 bg-slate-50 border-t border-slate-200"
+    className: "p-4 bg-slate-100 border-t border-slate-300"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     className: "w-full py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-xl transition"
@@ -5246,14 +5299,14 @@ function AccessPanel({
   })))), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 overflow-y-auto p-5 space-y-5"
   }, loading ? /*#__PURE__*/React.createElement("div", {
-    className: "text-center text-slate-400 py-10"
+    className: "text-center text-slate-500 py-10"
   }, "\u8F09\u5165\u4E2D\u2026") : loadError ? /*#__PURE__*/React.createElement("div", {
     className: "bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm font-bold"
   }, "\u274C \u8F09\u5165\u5931\u6557\uFF1A", loadError, /*#__PURE__*/React.createElement("button", {
     onClick: load,
     className: "ml-2 underline"
   }, "\u91CD\u8A66")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    className: `rounded-xl border p-4 ${enabled ? 'bg-rose-50 border-rose-300' : 'bg-slate-50 border-slate-200'}`
+    className: `rounded-xl border p-4 ${enabled ? 'bg-rose-50 border-rose-300' : 'bg-slate-100 border-slate-300'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -5269,7 +5322,7 @@ function AccessPanel({
   }, "\u26A0\uFE0F \u4FEE\u6539\u898F\u5247\u7ACB\u5373\u751F\u6548\u65BC\u300C\u4E0B\u4E00\u6B21\u9032\u7AD9/\u91CD\u65B0\u6574\u7406\u300D\uFF1B\u5DF2\u5728\u700F\u89BD\u4E2D\u7684\u4F7F\u7528\u8005\u4E0D\u6703\u88AB\u4E2D\u9014\u8E22\u51FA\u3002")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
   }, "\u2795 \u65B0\u589E\u5141\u8A31\u898F\u5247"), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white border border-slate-200 rounded-xl p-3.5 space-y-2.5 shadow-sm"
+    className: "bg-white border border-slate-300 rounded-xl p-3.5 space-y-2.5 shadow-sm"
   }, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 gap-2"
   }, RULE_FIELDS.map(f => /*#__PURE__*/React.createElement("label", {
@@ -5303,7 +5356,7 @@ function AccessPanel({
   }))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 text-[11px] text-slate-400 leading-snug"
+    className: "flex-1 text-[11px] text-slate-500 leading-snug"
   }, "\u4EFB\u586B\u4E00\u6B04\u4EE5\u4E0A\uFF1B", /*#__PURE__*/React.createElement("span", {
     className: "font-bold text-slate-600"
   }, "\u540C\u4E00\u689D\u898F\u5247\u5167\u586B\u591A\u500B\u6B04\u4F4D\uFF1D\u5168\u90E8\u7B26\u5408\u624D\u901A\u904E\uFF08\u4E14\uFF09"), "\uFF0C \u591A\u689D\u898F\u5247\u4E4B\u9593\u4EFB\u4E00\u7B26\u5408\u5373\u653E\u884C\uFF08\u6216\uFF09\u3002\u53EA\u586B\u5DE5\u865F\uFF1D\u767D\u540D\u55AE\u76F4\u63A5\u653E\u884C\uFF08\u4E0D\u67E5\u540D\u518A\uFF09\u3002"), /*#__PURE__*/React.createElement("button", {
@@ -5318,7 +5371,7 @@ function AccessPanel({
     className: "space-y-2"
   }, rules.map(r => /*#__PURE__*/React.createElement("div", {
     key: r.id,
-    className: "bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-sm"
+    className: "bg-white border border-slate-300 rounded-xl px-3 py-2 shadow-sm"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("div", {
@@ -5326,11 +5379,11 @@ function AccessPanel({
   }, RULE_FIELDS.filter(f => r[f.key]).map((f, i) => /*#__PURE__*/React.createElement(React.Fragment, {
     key: f.key
   }, i > 0 && /*#__PURE__*/React.createElement("span", {
-    className: "text-[10px] font-black text-slate-400"
+    className: "text-[10px] font-black text-slate-500"
   }, "\u4E14"), /*#__PURE__*/React.createElement("span", {
     className: `px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap ${f.chip}`
   }, f.label, "\uFF1D", r[f.key])))), /*#__PURE__*/React.createElement("span", {
-    className: "ml-auto flex-shrink-0 text-[10px] text-slate-400",
+    className: "ml-auto flex-shrink-0 text-[10px] text-slate-500",
     title: `建立者 ${r.createdBy || '-'}`
   }, r.createdAt), /*#__PURE__*/React.createElement("button", {
     onClick: () => deleteRule(r),
@@ -5342,7 +5395,7 @@ function AccessPanel({
   }, "\uD83D\uDCDD ", r.note))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
   }, "\uD83E\uDDEA \u4EE5\u5DE5\u865F\u6E2C\u8A66\u898F\u5247\uFF08\u4E0D\u53D7\u7E3D\u958B\u95DC\u5F71\u97FF\uFF09"), /*#__PURE__*/React.createElement("div", {
-    className: "bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5"
+    className: "bg-slate-100 border border-slate-300 rounded-xl p-3.5 space-y-2.5"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex gap-2"
   }, /*#__PURE__*/React.createElement("input", {
@@ -5370,7 +5423,7 @@ function AccessPanel({
   }, testResult.person.name, testResult.person.ename ? `（${testResult.person.ename}）` : '', "\u30FB", testResult.person.deptname || [testResult.person.dept1, testResult.person.dept2, testResult.person.dept3].filter(Boolean).join(' / ') || '無部門資料'), testResult.reason && /*#__PURE__*/React.createElement("div", {
     className: "mt-1 font-medium"
   }, testResult.reason)))))), /*#__PURE__*/React.createElement("div", {
-    className: "p-4 bg-slate-50 border-t border-slate-200"
+    className: "p-4 bg-slate-100 border-t border-slate-300"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     className: "w-full py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-xl transition"
@@ -5463,7 +5516,7 @@ function MemberPanel({
     strokeWidth: 2,
     d: "M6 18L18 6M6 6l12 12"
   })))), /*#__PURE__*/React.createElement("div", {
-    className: "p-4 border-b border-slate-200 bg-slate-50"
+    className: "p-4 border-b border-slate-300 bg-slate-100"
   }, /*#__PURE__*/React.createElement("label", {
     className: "text-xs font-bold text-slate-500"
   }, "\u65B0\u589E\u6210\u54E1"), /*#__PURE__*/React.createElement("div", {
@@ -5490,17 +5543,17 @@ function MemberPanel({
   }, saving ? '新增中…' : '＋ 新增')), error && /*#__PURE__*/React.createElement("div", {
     className: "mt-1.5 text-xs text-red-600 font-bold"
   }, error), /*#__PURE__*/React.createElement("p", {
-    className: "mt-2 text-[11px] text-slate-400 leading-relaxed"
+    className: "mt-2 text-[11px] text-slate-500 leading-relaxed"
   }, "\u65B0\u589E\u5F8C\u6210\u54E1\u6703\u51FA\u73FE\u5728\u767B\u5165\u756B\u9762\u8207\u7518\u7279\u5716\uFF0C\u53EF\u76F4\u63A5\u70BA\u5176\u65B0\u589E\u5C08\u6848\u4E26\u958B\u59CB\u6BCF\u9031\u6253\u5361\u56DE\u5831\u3002 \u82E5\u8F38\u5165\u66FE\u88AB\u79FB\u9664\u7684\u540C\u540D\u6210\u54E1\uFF0C\u6703\u81EA\u52D5\u91CD\u65B0\u555F\u7528\u4E26\u9084\u539F\u5176\u6B77\u53F2\u8CC7\u6599\u3002")), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 overflow-y-auto p-4 space-y-2"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-xs font-bold text-slate-400 mb-1"
+    className: "text-xs font-bold text-slate-500 mb-1"
   }, "\u73FE\u6709\u6210\u54E1\uFF08", users.length, " \u4F4D\uFF09"), users.map(u => {
     const projCount = projects.filter(p => p.owner === u).length;
     const isEditing = editing?.old === u;
     return /*#__PURE__*/React.createElement("div", {
       key: u,
-      className: "flex items-center bg-white border border-slate-200 rounded-xl p-3 shadow-sm"
+      className: "flex items-center bg-white border border-slate-300 rounded-xl p-3 shadow-sm"
     }, /*#__PURE__*/React.createElement("div", {
       className: "w-8 h-8 rounded-full text-white flex items-center justify-center text-sm mr-3 flex-shrink-0",
       style: {
@@ -5536,13 +5589,13 @@ function MemberPanel({
     }, "\u2715")), editing.error ? /*#__PURE__*/React.createElement("div", {
       className: "mt-1 text-[11px] text-red-600 font-bold"
     }, editing.error) : /*#__PURE__*/React.createElement("div", {
-      className: "mt-1 text-[11px] text-slate-400"
+      className: "mt-1 text-[11px] text-slate-500"
     }, "\u6539\u540D\u5F8C\u5176\u5C08\u6848\u8207\u6B77\u53F2\u56DE\u5831\u81EA\u52D5\u8DDF\u96A8\u65B0\u540D\u7A31")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
       className: "flex-1 min-w-0"
     }, /*#__PURE__*/React.createElement("div", {
       className: "font-bold text-sm text-slate-700 truncate"
     }, u), /*#__PURE__*/React.createElement("div", {
-      className: "text-[11px] text-slate-400"
+      className: "text-[11px] text-slate-500"
     }, year, " \u5E74\u5EA6\u5C08\u6848 ", projCount, " \u9805")), /*#__PURE__*/React.createElement("button", {
       onClick: () => setEditing({
         old: u,
@@ -5557,7 +5610,7 @@ function MemberPanel({
       title: projCount > 0 ? '名下仍有專案，需先刪除或改派專案才能移除' : '移除成員（軟刪除，歷史回報保留）'
     }, "\u79FB\u9664")));
   }), users.length === 0 && /*#__PURE__*/React.createElement("div", {
-    className: "text-center text-slate-400 py-10 text-sm"
+    className: "text-center text-slate-500 py-10 text-sm"
   }, "\u5C1A\u7121\u6210\u54E1\uFF0C\u8ACB\u65BC\u4E0A\u65B9\u65B0\u589E\u3002"))));
 }
 function AuditPanel({
@@ -5603,7 +5656,7 @@ function AuditPanel({
     strokeWidth: 2,
     d: "M6 18L18 6M6 6l12 12"
   })))), /*#__PURE__*/React.createElement("div", {
-    className: "p-3 border-b border-slate-200 bg-slate-50"
+    className: "p-3 border-b border-slate-300 bg-slate-100"
   }, /*#__PURE__*/React.createElement("input", {
     value: filter,
     onChange: e => setFilter(e.target.value),
@@ -5614,9 +5667,9 @@ function AuditPanel({
   }, error ? /*#__PURE__*/React.createElement("div", {
     className: "text-red-600 bg-red-50 border border-red-100 rounded-lg p-3"
   }, error) : logs === null ? /*#__PURE__*/React.createElement("div", {
-    className: "text-center text-slate-400 py-10"
+    className: "text-center text-slate-500 py-10"
   }, "\u8F09\u5165\u4E2D\u2026") : shown.length === 0 ? /*#__PURE__*/React.createElement("div", {
-    className: "text-center text-slate-400 py-10"
+    className: "text-center text-slate-500 py-10"
   }, "\u6C92\u6709\u7B26\u5408\u7684\u7D00\u9304") : shown.map(l => {
     const meta = AUDIT_ACTION_META[l.action] || {
       label: l.action,
@@ -5627,7 +5680,7 @@ function AuditPanel({
       // title 保留技術識別碼(如 t101-1@2026W9),畫面上只顯示後端翻譯好的白話摘要(summary)
       React.createElement("div", {
         key: l.id,
-        className: "border border-slate-200 rounded-lg p-2.5 hover:bg-slate-50",
+        className: "border border-slate-300 rounded-lg p-2.5 hover:bg-slate-50",
         title: `${l.entityType}${l.entityId ? ' ' + l.entityId : ''}`
       }, /*#__PURE__*/React.createElement("div", {
         className: "flex items-center gap-2"
@@ -5638,10 +5691,10 @@ function AuditPanel({
       }, AUDIT_ENTITY_LABELS[l.entityType] || l.entityType), /*#__PURE__*/React.createElement("span", {
         className: "flex-shrink-0 text-slate-500 font-medium ml-1"
       }, l.actor, l.role === 'manager' ? '（主管）' : '', l.empId && /*#__PURE__*/React.createElement("span", {
-        className: "ml-1 px-1 py-px rounded bg-slate-100 text-slate-400 font-mono text-[10px]",
+        className: "ml-1 px-1 py-px rounded bg-slate-100 text-slate-500 font-mono text-[10px]",
         title: "\u64CD\u4F5C\u8005 Windows \u5DE5\u865F"
       }, l.empId)), /*#__PURE__*/React.createElement("span", {
-        className: "ml-auto flex-shrink-0 text-slate-400"
+        className: "ml-auto flex-shrink-0 text-slate-500"
       }, l.at)), /*#__PURE__*/React.createElement("div", {
         className: "mt-1 text-slate-600 break-all leading-relaxed",
         style: {

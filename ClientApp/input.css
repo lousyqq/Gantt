@@ -42,10 +42,15 @@
 .dark .text-slate-400 { color: #7787A0; }
 .dark .text-slate-300 { color: #64748B; }
 
+/* 進度條軌道:深色下做成近黑凹槽,與 slate-200 的卡片/標題底色明確區隔(彩色填色才看得出長度)
+   註:bg-slate-300/80(工具列分隔線)是另一個 class,不受此規則影響 */
+.dark .bg-slate-300 { background-color: #0F172A; }
+
 /* 中性邊框 */
 .dark .border-slate-100 { border-color: #1E293B; }
 .dark .border-slate-200 { border-color: #334155; }
 .dark .border-slate-300 { border-color: #475569; }
+.dark .border-slate-400 { border-color: #64748B; }
 
 /* =====================================================================
    彩色語意色的完整深色矩陣：所有色底（-50 卡片／-100 晶片，含透明變體）
