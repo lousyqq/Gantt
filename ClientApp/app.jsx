@@ -593,8 +593,20 @@ function App() {
     setHighlightedTaskId(willClear ? null : task.id);
     if (willClear) return;
     setCollapsedOwners(prev => { const s = new Set(prev); s.delete(proj.owner); return s; });
+    // 聚焦執行者:左側甘特只留這位成員的專案,主管講評時不被其他人的列干擾(關閉看板即還原全部成員)
+    setOnlyMine(false);
+    setOwnerFilter(proj.owner);
     setPendingScrollProj(proj.id);
   }, [highlightedTaskId]);
+
+  // 關閉團隊看板:清除高亮與成員聚焦,甘特還原為「全部成員 ＋ 全部展開」(與登入預設一致)
+  const closeWeeklyReport = useCallback(() => {
+    setHighlightedTaskId(null);
+    setShowWeeklyReport(false);
+    setOwnerFilter('all');
+    setOnlyMine(role === 'member');
+    setCollapsedOwners(new Set());
+  }, [role]);
 
   // 每次登入角色時：預設開啟各成員的週檢視、展開清單頁面；成員預設顯示個人專案，主管預設為全部成員
   // 登入身分寫入 localStorage:重新整理/重開分頁不再被登出(登出時清除;內網固定使用者,風險可接受)
@@ -941,7 +953,7 @@ function App() {
         if (addingInterval) { closeGuard(() => setAddingInterval(null)); e.preventDefault(); return; }
         if (showExtraNoteModal) { closeGuard(() => { setShowExtraNoteModal(false); setNoteTargetUser(null); }); e.preventDefault(); return; }
         if (showWeeklyPlanModal) { closeGuard(() => { setShowWeeklyPlanModal(false); setNoteTargetUser(null); }); e.preventDefault(); return; }
-        if (showWeeklyReport) { setHighlightedTaskId(null); setShowWeeklyReport(false); e.preventDefault(); return; }
+        if (showWeeklyReport) { closeWeeklyReport(); e.preventDefault(); return; }
         if (showPendingPanel) { setShowPendingPanel(false); e.preventDefault(); return; }
         if (showRetroPanel) { setShowRetroPanel(false); e.preventDefault(); return; }
         if (showWeekEditPanel) { setShowWeekEditPanel(false); e.preventDefault(); return; }
@@ -979,7 +991,7 @@ function App() {
     };
     window.addEventListener('keydown', handler, true);   // capture phase
     return () => window.removeEventListener('keydown', handler, true);
-  }, [currentUser, weekW, isOverview, isResults, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showUsagePanel, showAdminMenu, showDeadlinePanel, goToCurrentWeek]);
+  }, [currentUser, weekW, isOverview, isResults, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showUsagePanel, showAdminMenu, showDeadlinePanel, goToCurrentWeek, closeWeeklyReport]);
 
   const existingCategories = useMemo(
     () => [...new Set(projects.map(p => p.category).filter(Boolean))].sort(),
@@ -1987,7 +1999,7 @@ function App() {
           currentUser={currentUser} role={role}
           highlightedTaskId={highlightedTaskId} onHighlightTask={handleHighlightTask}
           onEditComment={(userName) => setCommentTarget(userName)}
-          onClose={() => { setHighlightedTaskId(null); setShowWeeklyReport(false); }}
+          onClose={closeWeeklyReport}
         />
       )}
       {commentTarget && (

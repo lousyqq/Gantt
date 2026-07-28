@@ -718,8 +718,20 @@ function App() {
       s.delete(proj.owner);
       return s;
     });
+    // 聚焦執行者:左側甘特只留這位成員的專案,主管講評時不被其他人的列干擾(關閉看板即還原全部成員)
+    setOnlyMine(false);
+    setOwnerFilter(proj.owner);
     setPendingScrollProj(proj.id);
   }, [highlightedTaskId]);
+
+  // 關閉團隊看板:清除高亮與成員聚焦,甘特還原為「全部成員 ＋ 全部展開」(與登入預設一致)
+  const closeWeeklyReport = useCallback(() => {
+    setHighlightedTaskId(null);
+    setShowWeeklyReport(false);
+    setOwnerFilter('all');
+    setOnlyMine(role === 'member');
+    setCollapsedOwners(new Set());
+  }, [role]);
 
   // 每次登入角色時：預設開啟各成員的週檢視、展開清單頁面；成員預設顯示個人專案，主管預設為全部成員
   // 登入身分寫入 localStorage:重新整理/重開分頁不再被登出(登出時清除;內網固定使用者,風險可接受)
@@ -1212,8 +1224,7 @@ function App() {
           return;
         }
         if (showWeeklyReport) {
-          setHighlightedTaskId(null);
-          setShowWeeklyReport(false);
+          closeWeeklyReport();
           e.preventDefault();
           return;
         }
@@ -1286,7 +1297,7 @@ function App() {
     };
     window.addEventListener('keydown', handler, true); // capture phase
     return () => window.removeEventListener('keydown', handler, true);
-  }, [currentUser, weekW, isOverview, isResults, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showUsagePanel, showAdminMenu, showDeadlinePanel, goToCurrentWeek]);
+  }, [currentUser, weekW, isOverview, isResults, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showUsagePanel, showAdminMenu, showDeadlinePanel, goToCurrentWeek, closeWeeklyReport]);
   const existingCategories = useMemo(() => [...new Set(projects.map(p => p.category).filter(Boolean))].sort(), [projects]);
 
   // 搜尋/類型篩選會隱藏同成員內的部分專案列,此時拖曳落點會與畫面不一致,故暫停拖曳排序
@@ -2708,10 +2719,7 @@ function App() {
     highlightedTaskId: highlightedTaskId,
     onHighlightTask: handleHighlightTask,
     onEditComment: userName => setCommentTarget(userName),
-    onClose: () => {
-      setHighlightedTaskId(null);
-      setShowWeeklyReport(false);
-    }
+    onClose: closeWeeklyReport
   }), commentTarget && /*#__PURE__*/React.createElement(CommentModal, {
     member: commentTarget,
     currentWeek: currentWeek,

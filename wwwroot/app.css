@@ -3245,7 +3245,7 @@ video {
 
 /* blue */
 
-.dark .bg-blue-50,.dark .bg-blue-50\/40 {
+.dark .bg-blue-50,.dark .bg-blue-50\/40,.dark .bg-blue-50\/70 {
   background-color:#172338;
 }
 
@@ -3515,6 +3515,71 @@ video {
   border-color:#1E6B64;
 }
 
+/* =====================================================================
+   hover: 變體（Tailwind 產生的是獨立 class，不會套用上面的基底規則，必須另外映射）
+   原則：hover 底色比同色基底再亮一階，深色下才有「滑過」的回饋，且不會變成淺色底配亮字。
+   ===================================================================== */
+
+.dark .hover\:bg-blue-50:hover,.dark .hover\:bg-blue-50\/40:hover {
+  background-color:#1E3A5F;
+}
+
+.dark .hover\:bg-sky-50:hover {
+  background-color:#163450;
+}
+
+.dark .hover\:bg-indigo-50:hover,.dark .hover\:bg-indigo-100\/70:hover {
+  background-color:#2A3160;
+}
+
+.dark .hover\:bg-violet-100\/70:hover,.dark .hover\:bg-violet-200:hover {
+  background-color:#352A55;
+}
+
+.dark .hover\:bg-purple-100:hover {
+  background-color:#3A2A55;
+}
+
+.dark .hover\:bg-pink-100:hover {
+  background-color:#4A2438;
+}
+
+.dark .hover\:bg-rose-100:hover {
+  background-color:#4A1C28;
+}
+
+.dark .hover\:bg-red-50:hover,.dark .hover\:bg-red-50\/40:hover {
+  background-color:#3A1616;
+}
+
+.dark .hover\:bg-orange-100\/70:hover,.dark .hover\:bg-orange-200:hover {
+  background-color:#4A3316;
+}
+
+.dark .hover\:bg-amber-50\/40:hover {
+  background-color:#3A2C10;
+}
+
+.dark .hover\:bg-green-50:hover,.dark .hover\:bg-green-100:hover {
+  background-color:#1E4522;
+}
+
+.dark .hover\:bg-emerald-50\/40:hover,.dark .hover\:bg-emerald-100\/70:hover {
+  background-color:#1A4630;
+}
+
+.dark .hover\:bg-teal-100:hover {
+  background-color:#1A4642;
+}
+
+.dark .hover\:bg-slate-200\/70:hover {
+  background-color:#3E4C61;
+}
+
+.dark .hover\:bg-slate-300:hover {
+  background-color:#475569;
+}
+
 /* -200 晶片底（少數以 -200 當底色的小標籤） */
 
 .dark .bg-yellow-200 {
@@ -3527,6 +3592,25 @@ video {
 
 .dark .bg-violet-200 {
   background-color:#352A55;
+}
+
+/* 實心動作按鈕/徽章（白字）：深色下加深底色，白字對比從 ~3.3 提升到 6+，投影清楚
+   註：bg-green-500 是進度條「填色」，需維持明亮以顯示長度，故不在此加深 */
+
+.dark .bg-green-600 {
+  background-color:#166534;
+}
+
+.dark .hover\:bg-green-500:hover {
+  background-color:#15803D;
+}
+
+.dark .bg-red-600 {
+  background-color:#991B1B;
+}
+
+.dark .hover\:bg-red-500:hover {
+  background-color:#B91C1C;
 }
 
 /* 亮橘/琥珀實心按鈕（bg-amber-500 白字在淺色下已偏低對比）：深色下轉深琥珀，白字清晰、投影不刺眼 */

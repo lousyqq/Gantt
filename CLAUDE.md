@@ -14,7 +14,7 @@ MSD 專案追蹤總表 — ASP.NET Core 9 Minimal API 後端 + React SPA 前端�
 ## 維護規則（最重要）
 
 - **絕對禁止更改 `old.sql`／`new.sql`**：兩檔為遠端正式環境已執行完畢的架構基準。遠端已有正式資料，
-  **嚴禁刪庫／刪表重建**。所有 DB 結構異動一律新增編號遷移檔 `14_xxx.sql`… 往下遞增（10~13 已存在）、
+  **嚴禁刪庫／刪表重建**。所有 DB 結構異動一律新增編號遷移檔 `15_xxx.sql`… 往下遞增（10~15 已存在）、
   冪等設計，並**追加紀錄至 `DB_table.md`**。歷史逐檔 01~09 在 `backup_sql/`（僅供參考）。
 - `sim_create_WEB_notes_person.sql` 僅開發機用（模擬遠端名冊 VIEW），**遠端勿執行**。
 
@@ -30,6 +30,11 @@ MSD 專案追蹤總表 — ASP.NET Core 9 Minimal API 後端 + React SPA 前端�
   （**快取破壞**——內網部署後才不會舊 CSS 配新 JS 造成白底白字）。開發可用 `npm run watch:js`＋`watch:css`。
 - React/ReactDOM 本地化於 `wwwroot/lib/`（內網禁 CDN）。
 - **彈窗彩色標題列一律行內樣式** `style={{backgroundColor}}`（快取到舊 CSS 時新 class 不存在會看不到字）。
+- **新增彩色 class 必須同步補 `.dark` 映射**（`ClientApp/input.css`）。深色模式是「以 `.dark` 覆寫指定 class」實作，
+  漏映射的元素在深色下會維持**淺色底**、但文字已被調亮 → 淺底配亮字看不見（曾重複發生）。
+  ⚠ Tailwind 各變體是**獨立 class**，要分別映射：`bg-blue-50`／`bg-blue-50/70`／`hover:bg-blue-50` 是三個不同 class
+  （hover 只有滑鼠移過去才現形，最難用肉眼發現）。`npm run build` 會跑 `scripts/check-dark-coverage.js` 自動檢查並列出缺漏
+  （僅警告不中斷建置），也可單獨執行 `npm run check:dark`。
 
 ## 後端建置與執行
 
@@ -116,6 +121,10 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
 ## 前端建置工具
 
 `@babel/cli`＋`@babel/preset-react` 編譯 JSX、`tailwindcss` CLI 編譯 CSS（content 指向 `./ClientApp/**/*.jsx`）。
+
+`scripts/`（皆為純 Node、無額外套件，只在開發機執行；內網主機不需要 npm/node）：
+- `stamp-assets.js`——建置後蓋資產版本戳（快取破壞）
+- `check-dark-coverage.js`——檢查 app.jsx 用到的彩色 class 是否都有 `.dark` 映射
 
 ## 目前待辦
 
