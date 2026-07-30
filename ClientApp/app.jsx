@@ -20,6 +20,11 @@ const getTodayWeek = (scheduleYear = DEFAULT_SCHEDULE_YEAR, weeksTotal = WEEKS_T
 };
 const DEFAULT_CURRENT_WEEK = getTodayWeek();
 const NAVY = '#001F5B';
+// 品牌色的「按鈕」版本:深色模式下提亮成 #2563EB(見 input.css 的 --brand-btn)。
+// 為什麼要分成兩個常數:NAVY 用在標題列/表頭那種大面積色塊,深色下維持深海軍藍才好看;
+// 但同一個 #001F5B 拿來當「按鈕填色」時,坐在 #1E293B 的工具列/彈窗上對比只有 1.07,
+// 按鈕會完全融進背景。帶 fallback 是為了快取到舊 CSS 時仍退回原色,不會變透明底配白字。
+const BRAND_BTN = 'var(--brand-btn, #001F5B)';
 const GOLD = '#FDD075';
 
 // 2026 年的預設週→月對照(fallback);實際以 bootstrap 回傳的 weeks(ScheduleWeeks)為準
@@ -1288,13 +1293,13 @@ function App() {
   const hideTooltip = () => setTooltip(null);
 
   // 瀏覽權限卡控:檢查完成前顯示載入畫面;卡控啟用且未通過 → 整頁無權限畫面(不顯示登入與任何資料)
-  if (!accessCheck) return <div className="min-h-screen bg-slate-100 flex flex-col"><LoadingScreen /></div>;
+  if (!accessCheck) return <div className="min-h-screen bg-slate-100 app-bg flex flex-col"><LoadingScreen /></div>;
   if (accessCheck.enabled && !accessCheck.allowed) {
     return <AccessDeniedScreen empId={empId} reason={accessCheck.reason} person={accessCheck.person} />;
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 font-sans flex flex-col relative overflow-hidden">
+    <div className="min-h-screen bg-slate-100 app-bg font-sans flex flex-col relative overflow-hidden">
       <header className="text-white px-4 py-2 flex justify-between items-center z-50 shadow-md" style={{ backgroundColor: NAVY }}>
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
@@ -1470,7 +1475,7 @@ function App() {
               <div className="flex-1 min-w-[8px]"></div>
               {/* 常駐精簡圖例(不用 hidden xl:flex,窄螢幕也要看得到):標籤精簡+title 補完整說明;
                   「⏰即將到期」不放圖例(左側同名按鈕已表達,避免同列重複出現) */}
-              <div className="flex-shrink-0 flex items-center gap-2 text-[11px] text-slate-600 border border-slate-300 rounded-lg bg-white px-2 py-0.5">
+              <div className="flex-shrink-0 flex items-center gap-2 text-[11px] text-slate-600 border border-slate-300 rounded-lg bg-white ctl-raised px-2 py-0.5">
                 <span className="flex items-center" title="黃色斜紋條＝計畫區間(排定的起訖週)"><span className="w-3 h-2.5 mr-1 rounded-sm border" style={{ backgroundImage: 'repeating-linear-gradient(45deg,#FFF6D6,#FFF6D6 3px,#FDEDB8 3px,#FDEDB8 6px)', borderColor: '#B45309' }}></span>計畫</span>
                 <span className="flex items-center" title="綠色＝該週回報「有執行」"><span className="w-2.5 h-2.5 bg-green-700 mr-1 rounded-sm"></span>有執行</span>
                 <span className="flex items-center" title="藍色＝該週回報「Monitor(例行監控)」"><span className="w-2.5 h-2.5 bg-sky-700 mr-1 rounded-sm"></span>Monitor</span>
@@ -1499,7 +1504,7 @@ function App() {
                 const on = typeFilter.has(key);
                 return (
                   <button key={key} onClick={() => toggleTypeFilter(key)}
-                    className={`px-1.5 py-0.5 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`}
+                    className={`px-1.5 py-0.5 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white ctl-raised text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`}
                     title={meta.label}>
                     {key}·{meta.label}
                   </button>
@@ -1518,7 +1523,7 @@ function App() {
               </label>
             ) : (
               <select value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)}
-                className="border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white font-medium text-slate-700">
+                className="border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white ctl-raised font-medium text-slate-700">
                 <option value="all">全部成員</option>
                 {users.map(u => <option key={u} value={u}>{u}</option>)}
               </select>
@@ -1529,43 +1534,43 @@ function App() {
             <select value={scheduleYear}
               onChange={e => { const y = parseInt(e.target.value); setScheduleYear(y); setCurrentWeek(getTodayWeek(y)); }}
               title="切換排程年度(年度資料由 DB 的 ScheduleWeeks 決定)"
-              className="border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white font-bold text-slate-700">
+              className="border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white ctl-raised font-bold text-slate-700">
               {(years.length ? years : [scheduleYear]).map(y => <option key={y} value={y}>{y} 年度</option>)}
             </select>
 
             {/* 檢視切換:週檢視=可打卡操作(可水平捲動);年度總覽=52 週縮放進一頁供主管瀏覽全貌 */}
             {/* 檢視切換: 週檢視=可打卡操作; 年度總覽=整年全景; 成果清單=具體產出與MP總表 */}
             {/* 成員切入成果清單:改用成員下拉、預設看自己;切回週檢視/年度總覽:還原「只看我的」預設 */}
-            <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: NAVY }}>
+            <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: BRAND_BTN }}>
               <button onClick={() => { if (isResults && role === 'member') { setOnlyMine(true); setOwnerFilter('all'); } setIsOverview(false); setIsResults(false); savePref('overview', false); }}
                 className={`px-2 py-1 font-bold transition ${!isOverview && !isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
-                style={!isOverview && !isResults ? { backgroundColor: NAVY } : {}}>週檢視</button>
+                style={!isOverview && !isResults ? { backgroundColor: BRAND_BTN } : {}}>週檢視</button>
               <button onClick={() => { if (isResults && role === 'member') { setOnlyMine(true); setOwnerFilter('all'); } setIsOverview(true); setIsResults(false); savePref('overview', true); }}
                 className={`px-2 py-1 font-bold transition ${isOverview && !isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
-                style={isOverview && !isResults ? { backgroundColor: NAVY } : {}}
+                style={isOverview && !isResults ? { backgroundColor: BRAND_BTN } : {}}
                 title="整年 52 週自動縮放至一個畫面寬(無水平捲軸),滑鼠停留甘特條可看細節">年度總覽</button>
               <button onClick={() => { if (role === 'member') { setOnlyMine(false); setOwnerFilter(currentUser); } setIsOverview(false); setIsResults(true); }}
                 className={`px-2 py-1 font-bold transition ${isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
-                style={isResults ? { backgroundColor: NAVY } : {}}
+                style={isResults ? { backgroundColor: BRAND_BTN } : {}}
                 title="檢視全年度所有專案的具體產出項目與 MP Saving 統計(高階主管瀏覽視角,唯讀)">成果清單</button>
             </div>
             {!isOverview && !isResults && (
               <button onClick={goToCurrentWeek} title={`回到本週 W${String(todayWeek).padStart(2, '0')} 並置中（快捷鍵 H）`}
-                className="flex items-center text-white px-2 py-1 rounded-lg font-bold shadow-sm transition hover:opacity-90" style={{ backgroundColor: NAVY }}>
+                className="flex items-center text-white px-2 py-1 rounded-lg font-bold shadow-sm transition hover:opacity-90" style={{ backgroundColor: BRAND_BTN }}>
                 <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                 回到本週
               </button>
             )}
             <div className="h-5 w-px bg-slate-300/80 mx-1 flex-shrink-0"></div>
             {!isOverview && !isResults && (
-              <button onClick={() => { const v = !isCompact; setIsCompact(v); savePref('compact', v); }} className="text-slate-600 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-300 font-medium transition">
+              <button onClick={() => { const v = !isCompact; setIsCompact(v); savePref('compact', v); }} className="text-slate-600 bg-slate-100 ctl-raised hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-300 font-medium transition">
                 {isCompact ? '寬鬆模式' : '緊湊模式'}
               </button>
             )}
             {role === 'manager' && (
               // 長文字縮短:完整說明放 title;開啟時下方另有整條琥珀色警示列,資訊不會漏
               <button onClick={toggleRetroCheckin}
-                className={`px-2 py-1 rounded-lg font-bold border shadow-sm transition flex items-center gap-1 ${allowRetroCheckin ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'}`}
+                className={`px-2 py-1 rounded-lg font-bold border shadow-sm transition flex items-center gap-1 ${allowRetroCheckin ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600' : 'bg-slate-100 ctl-raised hover:bg-slate-200 text-slate-700 border-slate-300'}`}
                 title={allowRetroCheckin ? '目前開放全體成員回報/調正今年度的所有歷史週次紀錄，點擊關閉' : '目前成員僅能回報當週，點擊開放歷史補登'}>
                 <span>{allowRetroCheckin ? '🔓 補登 ON' : '🔒 僅限當週'}</span>
               </button>
@@ -1595,7 +1600,7 @@ function App() {
             </div>
           )}
 
-          <div ref={ganttRef} className="flex-1 overflow-auto bg-slate-100 relative">
+          <div ref={ganttRef} className="flex-1 overflow-auto bg-slate-100 app-bg relative">
             {isResults ? (
               <ResultsView
                 projects={filteredProjects}
@@ -1676,9 +1681,9 @@ function App() {
                         <td colSpan={isOverview ? 1 : 3} className="sticky left-0 z-40 border-r border-blue-200 p-0 shadow-[3px_0_6px_rgba(0,0,0,0.06)]" style={{ width: isOverview ? 240 : 490, minWidth: isOverview ? 240 : 490, maxWidth: isOverview ? 240 : 490, backgroundColor: 'var(--gantt-group)' }}>
                           <div className="flex items-center text-blue-900 font-bold text-[13px] px-2 py-1.5 border-l-4" style={{ borderColor: NAVY }}>
                             <svg className={`w-4 h-4 mr-1 text-blue-500 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                            <div className="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs mr-2 flex-shrink-0" style={{ backgroundColor: NAVY }}>{group.owner[0]}</div>
+                            <div className="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs mr-2 flex-shrink-0" style={{ backgroundColor: BRAND_BTN }}>{group.owner[0]}</div>
                             {group.owner}
-                            <span className="ml-2 px-1.5 py-0.5 bg-white text-blue-600 rounded text-[10px] font-medium border border-blue-100">{group.projects.length} 項</span>
+                            <span className="ml-2 px-1.5 py-0.5 bg-white ctl-raised text-blue-600 rounded text-[10px] font-medium border border-blue-100">{group.projects.length} 項</span>
                             {gActive > 0 && (
                               <div className="ml-2 flex items-center gap-1.5">
                                 {!isOverview && (
@@ -1694,7 +1699,7 @@ function App() {
                             {role === 'manager' && !isOverview && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); setEditingProject({ mode: 'add', owner: group.owner }); }}
-                                className="ml-auto flex-shrink-0 flex items-center gap-1 bg-white text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-300 rounded px-2 py-0.5 text-[10px] font-bold transition shadow-sm"
+                                className="ml-auto flex-shrink-0 flex items-center gap-1 bg-white ctl-raised text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-300 rounded px-2 py-0.5 text-[10px] font-bold transition shadow-sm"
                                 title={`為 ${group.owner} 新增專案`}>
                                 ＋ 新增專案
                               </button>
@@ -1729,7 +1734,7 @@ function App() {
                                     draggable
                                     onDragStart={() => setDragState({ id: proj.id, owner: group.owner })}
                                     onDragEnd={() => { setDragState(null); setDragOverId(null); }}
-                                    className="flex-shrink-0 mr-1 cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-500 select-none text-[13px] leading-none"
+                                    className="flex-shrink-0 mr-1 cursor-grab active:cursor-grabbing text-slate-500 hover:text-slate-600 select-none text-[13px] leading-none"
                                     title="拖曳以調整排序">⠿</span>
                                 )
                               )}
@@ -2083,7 +2088,7 @@ function StatChip({ label, value, className }) {
 
 function LoadingScreen() {
   return (
-    <div className="flex-1 flex justify-center items-center bg-slate-100 p-4">
+    <div className="flex-1 flex justify-center items-center bg-slate-100 app-bg p-4">
       <div className="text-center">
         <div className="w-12 h-12 border-4 border-slate-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
         <div className="text-slate-500 font-bold">載入資料中…</div>
@@ -2094,13 +2099,13 @@ function LoadingScreen() {
 
 function ErrorScreen({ message, onRetry }) {
   return (
-    <div className="flex-1 flex justify-center items-center bg-slate-100 p-4">
-      <div className="bg-white p-10 rounded-2xl shadow-2xl border border-red-200 max-w-md w-full text-center">
+    <div className="flex-1 flex justify-center items-center bg-slate-100 app-bg p-4">
+      <div className="bg-white p-10 rounded-2xl shadow-2xl modal-card border border-red-200 max-w-md w-full text-center">
         <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl">⚠️</div>
         <h2 className="text-xl font-black text-slate-800 mb-2">無法連線資料庫</h2>
         <p className="text-sm text-slate-500 mb-3">系統無法從後端讀取資料，請確認後端服務與資料庫連線後再試一次。</p>
         <div className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg p-3 mb-5 text-left whitespace-pre-wrap break-words max-h-40 overflow-y-auto">{message}</div>
-        <button onClick={onRetry} className="w-full text-white font-bold py-3 rounded-xl shadow-md transition hover:opacity-90" style={{ backgroundColor: '#001F5B' }}>重新載入</button>
+        <button onClick={onRetry} className="w-full text-white font-bold py-3 rounded-xl shadow-md transition hover:opacity-90" style={{ backgroundColor: BRAND_BTN }}>重新載入</button>
       </div>
     </div>
   );
@@ -2109,8 +2114,8 @@ function ErrorScreen({ message, onRetry }) {
 // 瀏覽權限未通過的整頁封鎖畫面(卡控啟用時取代整個 App,不顯示登入與資料)
 function AccessDeniedScreen({ empId, reason, person }) {
   return (
-    <div className="min-h-screen flex justify-center items-center bg-slate-100 p-4">
-      <div className="bg-white p-10 rounded-2xl shadow-2xl border border-red-200 max-w-md w-full text-center">
+    <div className="min-h-screen flex justify-center items-center bg-slate-100 app-bg p-4">
+      <div className="bg-white p-10 rounded-2xl shadow-2xl modal-card border border-red-200 max-w-md w-full text-center">
         <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl">🚫</div>
         <h2 className="text-xl font-black text-slate-800 mb-2">無權限瀏覽此頁面</h2>
         <p className="text-sm text-slate-500 mb-4">您的帳號未被授權瀏覽 MSD 專案追蹤總表。</p>
@@ -2133,14 +2138,14 @@ function AccessDeniedScreen({ empId, reason, person }) {
 
 function LoginScreen({ onLogin, users, year, empId }) {
   return (
-    <div className="flex-1 flex justify-center items-center bg-slate-100 p-4">
-      <div className="bg-white p-10 rounded-2xl shadow-2xl border border-slate-300 max-w-md w-full">
+    <div className="flex-1 flex justify-center items-center bg-slate-100 login-bg p-4">
+      <div className="bg-white p-10 rounded-2xl shadow-2xl modal-card dark:shadow-none border border-slate-300 max-w-md w-full">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg text-2xl" style={{ backgroundColor: '#001F5B' }}>📊</div>
+          <div className="w-16 h-16 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg text-2xl" style={{ backgroundColor: 'var(--brand-btn, #001F5B)' }}>📊</div>
           <h2 className="text-2xl font-black text-slate-800">MSD 專案追蹤系統</h2>
           <p className="text-xs text-slate-500 mt-2">{year} 年度專案排程 · 週進度管控</p>
         </div>
-        <button onClick={() => onLogin('管理部主管', 'manager')} className="w-full text-white font-bold py-3.5 rounded-xl mb-6 shadow-md transition hover:opacity-90" style={{ backgroundColor: '#001F5B' }}>👑 主管登入（調整排程 / 檢視全體）</button>
+        <button onClick={() => onLogin('管理部主管', 'manager')} className="w-full text-white font-bold py-3.5 rounded-xl mb-6 shadow-md transition hover:opacity-90" style={{ backgroundColor: 'var(--brand-btn, #001F5B)' }}>👑 主管登入（調整排程 / 檢視全體）</button>
         <div className="relative flex py-2 items-center">
           <div className="flex-grow border-t border-slate-300"></div>
           <span className="flex-shrink-0 mx-4 text-slate-500 text-xs font-bold uppercase tracking-wider">團隊成員登入（回報進度）</span>
@@ -2149,7 +2154,7 @@ function LoginScreen({ onLogin, users, year, empId }) {
         <div className="grid grid-cols-3 gap-3 mt-4">
           {users.map(u => (
             <button key={u} onClick={() => onLogin(u, 'member')}
-              className="bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 py-2.5 rounded-xl font-bold text-slate-700 hover:text-blue-700 transition shadow-sm text-sm">
+              className="bg-white login-chip border border-slate-300 hover:border-blue-500 hover:bg-blue-50 py-2.5 rounded-xl font-bold text-slate-700 hover:text-blue-700 transition shadow-sm text-sm">
               {u}
             </button>
           ))}
@@ -2210,8 +2215,8 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[100] flex justify-center items-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex justify-between items-start" style={{ backgroundColor: isManager ? '#001F5B' : '#334155' }}>
           <div className="pr-3">
             <div className="text-xs text-white/80 font-medium mb-1 flex items-center">
@@ -2251,7 +2256,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
             {scheduleError && <div className="mt-2 text-xs text-red-600 font-bold">{scheduleError}</div>}
             {isManager && (
               <div className="mt-3 flex gap-2">
-                <button onClick={submitSchedule} disabled={saving} className="flex-1 text-white px-4 py-1.5 rounded text-sm font-bold transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: '#001F5B' }}>{saving ? '儲存中…' : '儲存排程'}</button>
+                <button onClick={submitSchedule} disabled={saving} className="flex-1 text-white px-4 py-1.5 rounded text-sm font-bold transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: BRAND_BTN }}>{saving ? '儲存中…' : '儲存排程'}</button>
                 <button onClick={() => onDeleteTask(proj, task)}
                   className="flex-shrink-0 px-3 py-1.5 rounded text-sm font-bold text-red-600 bg-red-50 border border-red-200 hover:bg-red-100 transition"
                   title="刪除此計畫區間（軟刪除，可由資料庫還原）">🗑 刪除區間</button>
@@ -2295,7 +2300,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                   <div className="grid grid-cols-3 gap-2">
                     {Object.entries(STATUS_META).map(([key, meta]) => (
                       <button key={key} onClick={() => { setStatus(key); setNoteError(''); markModalDirty(); }}
-                        className={`py-3 rounded-lg border text-sm font-bold transition ${status === key ? meta.tag + ' ring-2 ring-offset-1 ring-slate-300' : 'bg-white text-slate-500 border-slate-300 hover:border-slate-400'}`}>
+                        className={`py-3 rounded-lg border text-sm font-bold transition ${status === key ? meta.tag + ' ring-2 ring-offset-1 ring-slate-300' : 'bg-white ctl-raised text-slate-500 border-slate-300 hover:border-slate-400'}`}>
                         {meta.icon} {meta.label}
                       </button>
                     ))}
@@ -2308,7 +2313,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                   {noteError && <div className="text-xs text-red-600 font-bold">{noteError}</div>}
                 </div>
                 <div className="flex justify-end space-x-3 pt-4">
-                  <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 bg-white border border-slate-300 rounded-lg font-bold hover:bg-slate-50">取消</button>
+                  <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 bg-white ctl-raised border border-slate-300 rounded-lg font-bold hover:bg-slate-50">取消</button>
                   <button onClick={submitLog} disabled={saving} className="px-6 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg shadow-md">{saving ? '儲存中…' : '儲存進度回報'}</button>
                 </div>
                 {isManager && weekLog && (
@@ -2317,7 +2322,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                     <div className="grid grid-cols-5 gap-1.5">
                       {SCORE_OPTIONS.map(o => (
                         <button key={o.value} onClick={() => onUpdateScore(task.id, o.value)}
-                          className={`px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`}>
+                          className={`px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white ctl-raised text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`}>
                           <div className="text-[11px] font-bold leading-tight">{o.label}</div>
                           <div className={`text-[10px] mt-0.5 ${score === o.value ? 'text-indigo-100' : 'text-slate-500'}`}>{o.value} 分</div>
                         </button>
@@ -2351,7 +2356,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                         <div className="grid grid-cols-5 gap-1.5">
                           {SCORE_OPTIONS.map(o => (
                             <button key={o.value} onClick={() => onUpdateScore(task.id, o.value)}
-                              className={`px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`}>
+                              className={`px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white ctl-raised text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`}>
                               <div className="text-[11px] font-bold leading-tight">{o.label}</div>
                               <div className={`text-[10px] mt-0.5 ${score === o.value ? 'text-indigo-100' : 'text-slate-500'}`}>{o.value} 分</div>
                             </button>
@@ -2384,8 +2389,8 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, targetUser, meta, 
   };
   if (readOnly) {
     return (
-      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[110] flex justify-center items-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
           <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#475569' }}>
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🔒 W{currentWeek} 非專案工作（唯讀）</h3>
             <button onClick={onClose} className="text-white/60 hover:text-white"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
@@ -2410,8 +2415,8 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, targetUser, meta, 
   }
   return (
     // 注意:全站慣例 — 所有彈出視窗/面板的遮罩都「不」綁 onClick 關閉(避免誤點視窗外遺失輸入),一律用「取消」「×」或送出按鈕關閉;新增 Modal 請沿用
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[110] flex justify-center items-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#C2410C' }}>
           <h3 className="font-bold text-lg flex items-center" style={{ color: '#FFFFFF' }}>📝 填寫 W{currentWeek} 非專案工作{targetUser ? `（${targetUser}）` : ''}</h3>
           <button onClick={onClose} className="text-white/60 hover:text-white"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
@@ -2468,8 +2473,8 @@ function DeliverableModal({ proj, role, currentUser, onClose, onSave }) {
     try { await onSave(proj.id, text.trim(), mpSaving.trim()); } finally { setSaving(false); }
   };
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[130] flex justify-center items-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex justify-between items-start" style={{ backgroundColor: '#B45309' }}>
           <div className="pr-3">
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🎯 具體產出與 MP 效益</h3>
@@ -2541,8 +2546,8 @@ function WeeklyPlanModal({ currentWeek, initialNote, readOnly, targetUser, meta,
   };
   if (readOnly) {
     return (
-      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[110] flex justify-center items-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
           <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#475569' }}>
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🔒 W{currentWeek} 下週預計工作（唯讀）</h3>
             <button onClick={onClose} className="text-white/60 hover:text-white"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
@@ -2566,8 +2571,8 @@ function WeeklyPlanModal({ currentWeek, initialNote, readOnly, targetUser, meta,
     );
   }
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[110] flex justify-center items-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#6366F1' }}>
           <h3 className="font-bold text-lg flex items-center" style={{ color: '#FFFFFF' }}>📅 填寫 W{currentWeek} 下週預計執行工作{targetUser ? `（${targetUser}）` : ''}</h3>
           <button onClick={onClose} className="text-white/60 hover:text-white"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
@@ -2614,13 +2619,13 @@ function WeeklyPlanModal({ currentWeek, initialNote, readOnly, targetUser, meta,
 // 即將到期清單面板:列出剩餘 ≤2 週或已過 70% 時程的任務,依剩餘週數排序,點擊可定位並開啟任務視窗
 function DeadlinePanel({ items, onClose, onSelect }) {
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end">
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end">
       <div className="w-full max-w-sm bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
         {/* 標題列顏色一律用行內樣式:企業內網若快取到舊版 app.css,新 class 不存在會變白底白字 */}
-        <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#EA580C' }}>
+        <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: 'var(--hdr-deadline, #EA580C)' }}>
           <div>
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>⏰ 即將到期清單</h3>
-            <p className="text-xs mt-0.5" style={{ color: '#FFEDD5' }}>剩餘 ≤2 週或時程已過 70% 的計畫區間</p>
+            <p className="text-xs mt-0.5" style={{ color: '#FFF7ED' }}>剩餘 ≤2 週或時程已過 70% 的計畫區間</p>
           </div>
           <button onClick={onClose} className="text-white/70 hover:text-white p-1"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
@@ -2663,7 +2668,7 @@ function PendingPanel({ pending = [], completed = [], currentWeek, planPending =
   const wkLabel = retro ? `W${String(currentWeek).padStart(2, '0')}` : '本週';   // 補登模式所有文案以週次取代「本週」
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end">
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end">
       <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
         {/* 方案C：整合式表頭與回報進度條(補登模式改琥珀色標題列) */}
         <div className="px-5 py-4 text-white flex flex-col space-y-3" style={{ backgroundColor: retro ? '#92400E' : '#001F5B' }}>
@@ -2865,7 +2870,7 @@ function ManagerWeekPanel({ week, todayWeek, users = [], projects, taskLogs, ext
   );
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end">
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end">
       <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 text-white flex flex-col space-y-3" style={{ backgroundColor: '#92400E' }}>
           <div className="flex justify-between items-center">
@@ -2969,8 +2974,8 @@ function CommentModal({ member, currentWeek, initialComment, meta, onClose, onSa
     try { await onSave(text.trim()); } finally { setSaving(false); }
   };
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[140] flex justify-center items-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[140] flex justify-center items-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* 標題列顏色一律用行內樣式:企業內網若快取到舊版 app.css,新 class 不存在會變白底白字 */}
         <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#7C3AED' }}>
           <div>
@@ -3356,8 +3361,8 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[130] flex justify-center items-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#001F5B' }}>
           <div>
             <h3 className="font-bold text-lg">{isEdit ? '✎ 編輯專案' : '＋ 新增專案'}</h3>
@@ -3382,7 +3387,7 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
           <div>
             <label className="text-xs font-bold text-slate-500">類型</label>
             <select value={type} onChange={e => { setType(e.target.value); markModalDirty(); }}
-              className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white">
+              className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white ctl-raised">
               {Object.entries(PROJECT_TYPES).map(([key, meta]) => (
                 <option key={key} value={key}>{key.toUpperCase()}·{meta.label}</option>
               ))}
@@ -3392,7 +3397,7 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
             <div>
               <label className="text-xs font-bold text-slate-500">負責人</label>
               <select value={owner} onChange={e => { setOwner(e.target.value); markModalDirty(); }}
-                className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white">
+                className="mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white ctl-raised">
                 {(users.includes(owner) ? users : [owner, ...users]).map(u => <option key={u} value={u}>{u}</option>)}
               </select>
               {owner !== info.owner && (
@@ -3408,7 +3413,7 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
           {error && <div className="text-xs text-red-600 font-bold">{error}</div>}
           <div className="flex justify-end space-x-3 pt-2">
             <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
-            <button onClick={submit} disabled={saving} className="px-6 py-2 text-sm text-white font-bold rounded-lg shadow-md transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: '#001F5B' }}>{saving ? '儲存中…' : isEdit ? '儲存變更' : '新增專案'}</button>
+            <button onClick={submit} disabled={saving} className="px-6 py-2 text-sm text-white font-bold rounded-lg shadow-md transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: BRAND_BTN }}>{saving ? '儲存中…' : isEdit ? '儲存變更' : '新增專案'}</button>
           </div>
         </div>
       </div>
@@ -3435,8 +3440,8 @@ function IntervalModal({ project, currentWeek, weeksTotal = WEEKS_TOTAL, onClose
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[130] flex justify-center items-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#001F5B' }}>
           <div>
             <h3 className="font-bold text-lg">＋ 新增計畫區間</h3>
@@ -3470,7 +3475,7 @@ function IntervalModal({ project, currentWeek, weeksTotal = WEEKS_TOTAL, onClose
           {error && <div className="text-xs text-red-600 font-bold">{error}</div>}
           <div className="flex justify-end space-x-3 pt-2">
             <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
-            <button onClick={submit} disabled={saving} className="px-6 py-2 text-sm text-white font-bold rounded-lg shadow-md transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: '#001F5B' }}>{saving ? '新增中…' : '新增區間'}</button>
+            <button onClick={submit} disabled={saving} className="px-6 py-2 text-sm text-white font-bold rounded-lg shadow-md transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: BRAND_BTN }}>{saving ? '新增中…' : '新增區間'}</button>
           </div>
         </div>
       </div>
@@ -3487,8 +3492,8 @@ function ConfirmModal({ info, onCancel }) {
     try { await info.onConfirm(); } finally { setBusy(false); }
   };
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[150] flex justify-center items-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[150] flex justify-center items-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex items-center" style={{ backgroundColor: '#DC2626' }}>
           <span className="text-xl mr-2">⚠️</span>
           <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>{info.title}</h3>
@@ -3557,7 +3562,7 @@ function UsageStatsPanel({ onClose }) {
   const maxUser = stats ? Math.max(1, ...(stats.byUser || []).map(u => Number(u.count))) : 1;
 
   const kpi = (label, value, sub) => (
-    <div className="bg-white border border-slate-300 rounded-xl p-3 text-center shadow-sm">
+    <div className="bg-white ctl-raised border border-slate-300 rounded-xl p-3 text-center shadow-sm">
       <div className="text-[11px] font-bold text-slate-500">{label}</div>
       <div className="text-2xl font-black text-slate-800 mt-0.5">{value}</div>
       {sub && <div className="text-[10px] text-slate-500 mt-0.5">{sub}</div>}
@@ -3565,12 +3570,12 @@ function UsageStatsPanel({ onClose }) {
   );
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end">
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end">
       <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#0F766E' }}>
           <div>
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>📈 使用統計</h3>
-            <p className="text-xs mt-0.5" style={{ color: '#99F6E4' }}>登入次數（含重新整理自動登入），評估網頁使用率</p>
+            <p className="text-xs mt-0.5" style={{ color: '#CCFBF1' }}>登入次數（含重新整理自動登入），評估網頁使用率</p>
           </div>
           <button onClick={onClose} className="text-white/70 hover:text-white p-1"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
         </div>
@@ -3580,7 +3585,7 @@ function UsageStatsPanel({ onClose }) {
           <span className="text-[11px] font-bold text-slate-500 mr-1">統計區間</span>
           {[7, 30, 90].map(d => (
             <button key={d} onClick={() => setDays(d)}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${days === d ? 'bg-teal-600 text-white border-teal-700' : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'}`}>
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${days === d ? 'bg-teal-700 text-white border-teal-800' : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'}`}>
               近 {d} 天
             </button>
           ))}
@@ -3604,7 +3609,7 @@ function UsageStatsPanel({ onClose }) {
               {/* ② 每日趨勢 */}
               <div>
                 <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-2">📅 每日登入次數（近 {stats.days} 天）</div>
-                <div className="bg-white border border-slate-300 rounded-xl p-3 shadow-sm">
+                <div className="bg-white ctl-raised border border-slate-300 rounded-xl p-3 shadow-sm">
                   {stats.lastN === 0 ? (
                     <div className="text-center text-slate-500 italic text-xs py-6">此區間尚無登入紀錄</div>
                   ) : (
@@ -3765,7 +3770,7 @@ function AccessPanel({ currentUser, role, empId, showToast, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end">
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end">
       <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#9F1239' }}>
           <div>
@@ -3948,7 +3953,7 @@ function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[115] flex justify-end">
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[115] flex justify-end">
       <div className="w-full max-w-sm bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: NAVY }}>
           <div>
@@ -3966,7 +3971,7 @@ function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose
               placeholder="輸入新成員顯示名稱…" autoFocus
               className={`flex-1 border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 ${error ? 'border-red-400' : 'border-slate-300'}`} />
             <button onClick={submit} disabled={saving}
-              className="flex-shrink-0 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: NAVY }}>
+              className="flex-shrink-0 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: BRAND_BTN }}>
               {saving ? '新增中…' : '＋ 新增'}
             </button>
           </div>
@@ -3983,8 +3988,8 @@ function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose
             const projCount = projects.filter(p => p.owner === u).length;
             const isEditing = editing?.old === u;
             return (
-              <div key={u} className="flex items-center bg-white border border-slate-300 rounded-xl p-3 shadow-sm">
-                <div className="w-8 h-8 rounded-full text-white flex items-center justify-center text-sm mr-3 flex-shrink-0" style={{ backgroundColor: NAVY }}>{u[0]}</div>
+              <div key={u} className="flex items-center bg-white ctl-raised border border-slate-300 rounded-xl p-3 shadow-sm">
+                <div className="w-8 h-8 rounded-full text-white flex items-center justify-center text-sm mr-3 flex-shrink-0" style={{ backgroundColor: BRAND_BTN }}>{u[0]}</div>
                 {isEditing ? (
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
@@ -3993,7 +3998,7 @@ function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose
                         onKeyDown={e => { if (e.key === 'Enter') submitRename(); if (e.key === 'Escape') setEditing(null); }}
                         className={`flex-1 min-w-0 border rounded-lg px-2 py-1 text-sm outline-none focus:border-blue-500 ${editing.error ? 'border-red-400' : 'border-slate-300'}`} />
                       <button onClick={submitRename} disabled={renaming}
-                        className="flex-shrink-0 px-2 py-1 rounded-lg text-xs font-bold text-white transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: NAVY }}>
+                        className="flex-shrink-0 px-2 py-1 rounded-lg text-xs font-bold text-white transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: BRAND_BTN }}>
                         {renaming ? '…' : '✓ 儲存'}
                       </button>
                       <button onClick={() => setEditing(null)}
@@ -4049,7 +4054,7 @@ function AuditPanel({ onClose }) {
   }, [logs, filter]);
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[115] flex justify-end">
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[115] flex justify-end">
       <div className="w-full max-w-lg bg-white h-full shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: NAVY }}>
           <div>

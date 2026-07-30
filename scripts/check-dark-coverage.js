@@ -23,11 +23,15 @@ const COLORS = 'orange|yellow|amber|green|emerald|teal|sky|blue|indigo|violet|pu
 //  1) 彩色淡底(卡片/晶片):bg-{color}-{50|100|200},含 /40 /70 /80 等透明度變體
 //  2) 上述的 hover: 變體
 //  3) 彩色文字:text-{color}-{600..900}(在深底上需調亮)
-//  4) 實心動作按鈕(白字):bg-{green|red}-600 及其 hover
+//  4) 上述的 hover: 變體(淺色慣例是 hover 時「加深」,深色下會比底色還暗 → 滑過去看不見)
+//  5) 實心動作按鈕(白字):bg-{green|red}-600 及其 hover
+// 註:文字類的 (?<!hover:) 不可省 —— 少了它,hover:text-blue-800 會被當成 text-blue-800,
+//    只要基底色有映射就誤判為通過(此漏洞曾讓工具列的「展開/收合」hover 態漏網)。
 const PATTERNS = [
   { name: '彩色底', re: new RegExp(`(?<!hover:)bg-(${COLORS})-(50|100|200)(\\/[0-9]+)?`, 'g') },
   { name: 'hover 底', re: new RegExp(`hover:bg-(${COLORS}|slate)-(50|100|200|300)(\\/[0-9]+)?`, 'g') },
-  { name: '彩色文字', re: new RegExp(`text-(${COLORS})-(600|700|800|900)`, 'g') },
+  { name: '彩色文字', re: new RegExp(`(?<!hover:)text-(${COLORS})-(600|700|800|900)`, 'g') },
+  { name: 'hover 文字', re: new RegExp(`hover:text-(${COLORS})-(600|700|800|900)`, 'g') },
   { name: '實心按鈕', re: new RegExp(`(?<!hover:)bg-(green|red)-600`, 'g') },
 ];
 

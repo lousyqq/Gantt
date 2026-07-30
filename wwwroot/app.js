@@ -25,6 +25,11 @@ const getTodayWeek = (scheduleYear = DEFAULT_SCHEDULE_YEAR, weeksTotal = WEEKS_T
 };
 const DEFAULT_CURRENT_WEEK = getTodayWeek();
 const NAVY = '#001F5B';
+// 品牌色的「按鈕」版本:深色模式下提亮成 #2563EB(見 input.css 的 --brand-btn)。
+// 為什麼要分成兩個常數:NAVY 用在標題列/表頭那種大面積色塊,深色下維持深海軍藍才好看;
+// 但同一個 #001F5B 拿來當「按鈕填色」時,坐在 #1E293B 的工具列/彈窗上對比只有 1.07,
+// 按鈕會完全融進背景。帶 fallback 是為了快取到舊 CSS 時仍退回原色,不會變透明底配白字。
+const BRAND_BTN = 'var(--brand-btn, #001F5B)';
 const GOLD = '#FDD075';
 
 // 2026 年的預設週→月對照(fallback);實際以 bootstrap 回傳的 weeks(ScheduleWeeks)為準
@@ -1663,7 +1668,7 @@ function App() {
 
   // 瀏覽權限卡控:檢查完成前顯示載入畫面;卡控啟用且未通過 → 整頁無權限畫面(不顯示登入與任何資料)
   if (!accessCheck) return /*#__PURE__*/React.createElement("div", {
-    className: "min-h-screen bg-slate-100 flex flex-col"
+    className: "min-h-screen bg-slate-100 app-bg flex flex-col"
   }, /*#__PURE__*/React.createElement(LoadingScreen, null));
   if (accessCheck.enabled && !accessCheck.allowed) {
     return /*#__PURE__*/React.createElement(AccessDeniedScreen, {
@@ -1673,7 +1678,7 @@ function App() {
     });
   }
   return /*#__PURE__*/React.createElement("div", {
-    className: "min-h-screen bg-slate-100 font-sans flex flex-col relative overflow-hidden"
+    className: "min-h-screen bg-slate-100 app-bg font-sans flex flex-col relative overflow-hidden"
   }, /*#__PURE__*/React.createElement("header", {
     className: "text-white px-4 py-2 flex justify-between items-center z-50 shadow-md",
     style: {
@@ -1935,7 +1940,7 @@ function App() {
   }, "\u203A"))), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 min-w-[8px]"
   }), /*#__PURE__*/React.createElement("div", {
-    className: "flex-shrink-0 flex items-center gap-2 text-[11px] text-slate-600 border border-slate-300 rounded-lg bg-white px-2 py-0.5"
+    className: "flex-shrink-0 flex items-center gap-2 text-[11px] text-slate-600 border border-slate-300 rounded-lg bg-white ctl-raised px-2 py-0.5"
   }, /*#__PURE__*/React.createElement("span", {
     className: "flex items-center",
     title: "\u9EC3\u8272\u659C\u7D0B\u689D\uFF1D\u8A08\u756B\u5340\u9593(\u6392\u5B9A\u7684\u8D77\u8A16\u9031)"
@@ -1997,7 +2002,7 @@ function App() {
     return /*#__PURE__*/React.createElement("button", {
       key: key,
       onClick: () => toggleTypeFilter(key),
-      className: `px-1.5 py-0.5 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`,
+      className: `px-1.5 py-0.5 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white ctl-raised text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`,
       title: meta.label
     }, key, "\xB7", meta.label);
   }), typeFilter.size > 0 && /*#__PURE__*/React.createElement("button", {
@@ -2017,7 +2022,7 @@ function App() {
   }, "\u53EA\u770B\u6211\u7684\u5C08\u6848")) : /*#__PURE__*/React.createElement("select", {
     value: ownerFilter,
     onChange: e => setOwnerFilter(e.target.value),
-    className: "border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white font-medium text-slate-700"
+    className: "border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white ctl-raised font-medium text-slate-700"
   }, /*#__PURE__*/React.createElement("option", {
     value: "all"
   }, "\u5168\u90E8\u6210\u54E1"), users.map(u => /*#__PURE__*/React.createElement("option", {
@@ -2033,14 +2038,14 @@ function App() {
       setCurrentWeek(getTodayWeek(y));
     },
     title: "\u5207\u63DB\u6392\u7A0B\u5E74\u5EA6(\u5E74\u5EA6\u8CC7\u6599\u7531 DB \u7684 ScheduleWeeks \u6C7A\u5B9A)",
-    className: "border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white font-bold text-slate-700"
+    className: "border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white ctl-raised font-bold text-slate-700"
   }, (years.length ? years : [scheduleYear]).map(y => /*#__PURE__*/React.createElement("option", {
     key: y,
     value: y
   }, y, " \u5E74\u5EA6"))), /*#__PURE__*/React.createElement("div", {
     className: "flex rounded-lg overflow-hidden border",
     style: {
-      borderColor: NAVY
+      borderColor: BRAND_BTN
     }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => {
@@ -2054,7 +2059,7 @@ function App() {
     },
     className: `px-2 py-1 font-bold transition ${!isOverview && !isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`,
     style: !isOverview && !isResults ? {
-      backgroundColor: NAVY
+      backgroundColor: BRAND_BTN
     } : {}
   }, "\u9031\u6AA2\u8996"), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
@@ -2068,7 +2073,7 @@ function App() {
     },
     className: `px-2 py-1 font-bold transition ${isOverview && !isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`,
     style: isOverview && !isResults ? {
-      backgroundColor: NAVY
+      backgroundColor: BRAND_BTN
     } : {},
     title: "\u6574\u5E74 52 \u9031\u81EA\u52D5\u7E2E\u653E\u81F3\u4E00\u500B\u756B\u9762\u5BEC(\u7121\u6C34\u5E73\u6372\u8EF8),\u6ED1\u9F20\u505C\u7559\u7518\u7279\u689D\u53EF\u770B\u7D30\u7BC0"
   }, "\u5E74\u5EA6\u7E3D\u89BD"), /*#__PURE__*/React.createElement("button", {
@@ -2082,7 +2087,7 @@ function App() {
     },
     className: `px-2 py-1 font-bold transition ${isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`,
     style: isResults ? {
-      backgroundColor: NAVY
+      backgroundColor: BRAND_BTN
     } : {},
     title: "\u6AA2\u8996\u5168\u5E74\u5EA6\u6240\u6709\u5C08\u6848\u7684\u5177\u9AD4\u7522\u51FA\u9805\u76EE\u8207 MP Saving \u7D71\u8A08(\u9AD8\u968E\u4E3B\u7BA1\u700F\u89BD\u8996\u89D2,\u552F\u8B80)"
   }, "\u6210\u679C\u6E05\u55AE")), !isOverview && !isResults && /*#__PURE__*/React.createElement("button", {
@@ -2090,7 +2095,7 @@ function App() {
     title: `回到本週 W${String(todayWeek).padStart(2, '0')} 並置中（快捷鍵 H）`,
     className: "flex items-center text-white px-2 py-1 rounded-lg font-bold shadow-sm transition hover:opacity-90",
     style: {
-      backgroundColor: NAVY
+      backgroundColor: BRAND_BTN
     }
   }, /*#__PURE__*/React.createElement("svg", {
     className: "w-3.5 h-3.5 mr-1",
@@ -2110,13 +2115,13 @@ function App() {
       setIsCompact(v);
       savePref('compact', v);
     },
-    className: "text-slate-600 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-300 font-medium transition"
+    className: "text-slate-600 bg-slate-100 ctl-raised hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-300 font-medium transition"
   }, isCompact ? '寬鬆模式' : '緊湊模式'), role === 'manager' &&
   /*#__PURE__*/
   // 長文字縮短:完整說明放 title;開啟時下方另有整條琥珀色警示列,資訊不會漏
   React.createElement("button", {
     onClick: toggleRetroCheckin,
-    className: `px-2 py-1 rounded-lg font-bold border shadow-sm transition flex items-center gap-1 ${allowRetroCheckin ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'}`,
+    className: `px-2 py-1 rounded-lg font-bold border shadow-sm transition flex items-center gap-1 ${allowRetroCheckin ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600' : 'bg-slate-100 ctl-raised hover:bg-slate-200 text-slate-700 border-slate-300'}`,
     title: allowRetroCheckin ? '目前開放全體成員回報/調正今年度的所有歷史週次紀錄，點擊關閉' : '目前成員僅能回報當週，點擊開放歷史補登'
   }, /*#__PURE__*/React.createElement("span", null, allowRetroCheckin ? '🔓 補登 ON' : '🔒 僅限當週')), !isResults && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "h-5 w-px bg-slate-300/80 mx-1 flex-shrink-0"
@@ -2141,7 +2146,7 @@ function App() {
     className: "px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold shadow-sm transition"
   }, "\u95DC\u9589\u8C41\u514D\u671F")), /*#__PURE__*/React.createElement("div", {
     ref: ganttRef,
-    className: "flex-1 overflow-auto bg-slate-100 relative"
+    className: "flex-1 overflow-auto bg-slate-100 app-bg relative"
   }, isResults ? /*#__PURE__*/React.createElement(ResultsView, {
     projects: filteredProjects,
     role: role,
@@ -2309,10 +2314,10 @@ function App() {
     })), /*#__PURE__*/React.createElement("div", {
       className: "w-6 h-6 rounded-full text-white flex items-center justify-center text-xs mr-2 flex-shrink-0",
       style: {
-        backgroundColor: NAVY
+        backgroundColor: BRAND_BTN
       }
     }, group.owner[0]), group.owner, /*#__PURE__*/React.createElement("span", {
-      className: "ml-2 px-1.5 py-0.5 bg-white text-blue-600 rounded text-[10px] font-medium border border-blue-100"
+      className: "ml-2 px-1.5 py-0.5 bg-white ctl-raised text-blue-600 rounded text-[10px] font-medium border border-blue-100"
     }, group.projects.length, " \u9805"), gActive > 0 && /*#__PURE__*/React.createElement("div", {
       className: "ml-2 flex items-center gap-1.5"
     }, !isOverview && /*#__PURE__*/React.createElement("div", {
@@ -2332,7 +2337,7 @@ function App() {
           owner: group.owner
         });
       },
-      className: "ml-auto flex-shrink-0 flex items-center gap-1 bg-white text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-300 rounded px-2 py-0.5 text-[10px] font-bold transition shadow-sm",
+      className: "ml-auto flex-shrink-0 flex items-center gap-1 bg-white ctl-raised text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-300 rounded px-2 py-0.5 text-[10px] font-bold transition shadow-sm",
       title: `為 ${group.owner} 新增專案`
     }, "\uFF0B \u65B0\u589E\u5C08\u6848"))), /*#__PURE__*/React.createElement("td", {
       colSpan: weeksTotal,
@@ -2399,7 +2404,7 @@ function App() {
         setDragState(null);
         setDragOverId(null);
       },
-      className: "flex-shrink-0 mr-1 cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-500 select-none text-[13px] leading-none",
+      className: "flex-shrink-0 mr-1 cursor-grab active:cursor-grabbing text-slate-500 hover:text-slate-600 select-none text-[13px] leading-none",
       title: "\u62D6\u66F3\u4EE5\u8ABF\u6574\u6392\u5E8F"
     }, "\u283F")), /*#__PURE__*/React.createElement("div", {
       className: `flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`
@@ -2799,7 +2804,7 @@ function StatChip({
 }
 function LoadingScreen() {
   return /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 flex justify-center items-center bg-slate-100 p-4"
+    className: "flex-1 flex justify-center items-center bg-slate-100 app-bg p-4"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-center"
   }, /*#__PURE__*/React.createElement("div", {
@@ -2813,9 +2818,9 @@ function ErrorScreen({
   onRetry
 }) {
   return /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 flex justify-center items-center bg-slate-100 p-4"
+    className: "flex-1 flex justify-center items-center bg-slate-100 app-bg p-4"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-white p-10 rounded-2xl shadow-2xl border border-red-200 max-w-md w-full text-center"
+    className: "bg-white p-10 rounded-2xl shadow-2xl modal-card border border-red-200 max-w-md w-full text-center"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl"
   }, "\u26A0\uFE0F"), /*#__PURE__*/React.createElement("h2", {
@@ -2828,7 +2833,7 @@ function ErrorScreen({
     onClick: onRetry,
     className: "w-full text-white font-bold py-3 rounded-xl shadow-md transition hover:opacity-90",
     style: {
-      backgroundColor: '#001F5B'
+      backgroundColor: BRAND_BTN
     }
   }, "\u91CD\u65B0\u8F09\u5165")));
 }
@@ -2840,9 +2845,9 @@ function AccessDeniedScreen({
   person
 }) {
   return /*#__PURE__*/React.createElement("div", {
-    className: "min-h-screen flex justify-center items-center bg-slate-100 p-4"
+    className: "min-h-screen flex justify-center items-center bg-slate-100 app-bg p-4"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-white p-10 rounded-2xl shadow-2xl border border-red-200 max-w-md w-full text-center"
+    className: "bg-white p-10 rounded-2xl shadow-2xl modal-card border border-red-200 max-w-md w-full text-center"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl"
   }, "\uD83D\uDEAB"), /*#__PURE__*/React.createElement("h2", {
@@ -2872,15 +2877,15 @@ function LoginScreen({
   empId
 }) {
   return /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 flex justify-center items-center bg-slate-100 p-4"
+    className: "flex-1 flex justify-center items-center bg-slate-100 login-bg p-4"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-white p-10 rounded-2xl shadow-2xl border border-slate-300 max-w-md w-full"
+    className: "bg-white p-10 rounded-2xl shadow-2xl modal-card dark:shadow-none border border-slate-300 max-w-md w-full"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-center mb-8"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-16 h-16 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg text-2xl",
     style: {
-      backgroundColor: '#001F5B'
+      backgroundColor: 'var(--brand-btn, #001F5B)'
     }
   }, "\uD83D\uDCCA"), /*#__PURE__*/React.createElement("h2", {
     className: "text-2xl font-black text-slate-800"
@@ -2890,7 +2895,7 @@ function LoginScreen({
     onClick: () => onLogin('管理部主管', 'manager'),
     className: "w-full text-white font-bold py-3.5 rounded-xl mb-6 shadow-md transition hover:opacity-90",
     style: {
-      backgroundColor: '#001F5B'
+      backgroundColor: 'var(--brand-btn, #001F5B)'
     }
   }, "\uD83D\uDC51 \u4E3B\u7BA1\u767B\u5165\uFF08\u8ABF\u6574\u6392\u7A0B / \u6AA2\u8996\u5168\u9AD4\uFF09"), /*#__PURE__*/React.createElement("div", {
     className: "relative flex py-2 items-center"
@@ -2905,7 +2910,7 @@ function LoginScreen({
   }, users.map(u => /*#__PURE__*/React.createElement("button", {
     key: u,
     onClick: () => onLogin(u, 'member'),
-    className: "bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 py-2.5 rounded-xl font-bold text-slate-700 hover:text-blue-700 transition shadow-sm text-sm"
+    className: "bg-white login-chip border border-slate-300 hover:border-blue-500 hover:bg-blue-50 py-2.5 rounded-xl font-bold text-slate-700 hover:text-blue-700 transition shadow-sm text-sm"
   }, u))), empId && /*#__PURE__*/React.createElement("div", {
     className: "mt-6 text-center text-[11px] text-slate-500"
   }, "\uD83D\uDDA5\uFE0F \u5DF2\u5075\u6E2C\u5230 Windows \u5DE5\u865F\uFF1A", /*#__PURE__*/React.createElement("span", {
@@ -3002,9 +3007,9 @@ function TaskModal({
     }
   };
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex justify-center items-center p-4"
+    className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[100] flex justify-center items-center p-4"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto",
+    className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-4 text-white flex justify-between items-start",
@@ -3110,7 +3115,7 @@ function TaskModal({
     disabled: saving,
     className: "flex-1 text-white px-4 py-1.5 rounded text-sm font-bold transition hover:opacity-90 disabled:opacity-50",
     style: {
-      backgroundColor: '#001F5B'
+      backgroundColor: BRAND_BTN
     }
   }, saving ? '儲存中…' : '儲存排程'), /*#__PURE__*/React.createElement("button", {
     onClick: () => onDeleteTask(proj, task),
@@ -3153,7 +3158,7 @@ function TaskModal({
       setNoteError('');
       markModalDirty();
     },
-    className: `py-3 rounded-lg border text-sm font-bold transition ${status === key ? meta.tag + ' ring-2 ring-offset-1 ring-slate-300' : 'bg-white text-slate-500 border-slate-300 hover:border-slate-400'}`
+    className: `py-3 rounded-lg border text-sm font-bold transition ${status === key ? meta.tag + ' ring-2 ring-offset-1 ring-slate-300' : 'bg-white ctl-raised text-slate-500 border-slate-300 hover:border-slate-400'}`
   }, meta.icon, " ", meta.label))), status && /*#__PURE__*/React.createElement("textarea", {
     value: note,
     onChange: e => {
@@ -3169,7 +3174,7 @@ function TaskModal({
     className: "flex justify-end space-x-3 pt-4"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
-    className: "px-4 py-2 text-sm text-slate-500 bg-white border border-slate-300 rounded-lg font-bold hover:bg-slate-50"
+    className: "px-4 py-2 text-sm text-slate-500 bg-white ctl-raised border border-slate-300 rounded-lg font-bold hover:bg-slate-50"
   }, "\u53D6\u6D88"), /*#__PURE__*/React.createElement("button", {
     onClick: submitLog,
     disabled: saving,
@@ -3183,7 +3188,7 @@ function TaskModal({
   }, SCORE_OPTIONS.map(o => /*#__PURE__*/React.createElement("button", {
     key: o.value,
     onClick: () => onUpdateScore(task.id, o.value),
-    className: `px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`
+    className: `px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white ctl-raised text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] font-bold leading-tight"
   }, o.label), /*#__PURE__*/React.createElement("div", {
@@ -3216,7 +3221,7 @@ function TaskModal({
   }, SCORE_OPTIONS.map(o => /*#__PURE__*/React.createElement("button", {
     key: o.value,
     onClick: () => onUpdateScore(task.id, o.value),
-    className: `px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`
+    className: `px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white ctl-raised text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] font-bold leading-tight"
   }, o.label), /*#__PURE__*/React.createElement("div", {
@@ -3251,9 +3256,9 @@ function ExtraNoteModal({
   };
   if (readOnly) {
     return /*#__PURE__*/React.createElement("div", {
-      className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4"
+      className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[110] flex justify-center items-center p-4"
     }, /*#__PURE__*/React.createElement("div", {
-      className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden",
+      className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden",
       onClick: e => e.stopPropagation()
     }, /*#__PURE__*/React.createElement("div", {
       className: "px-6 py-4 text-white flex justify-between items-center",
@@ -3299,9 +3304,9 @@ function ExtraNoteModal({
     /*#__PURE__*/
     // 注意:全站慣例 — 所有彈出視窗/面板的遮罩都「不」綁 onClick 關閉(避免誤點視窗外遺失輸入),一律用「取消」「×」或送出按鈕關閉;新增 Modal 請沿用
     React.createElement("div", {
-      className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4"
+      className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[110] flex justify-center items-center p-4"
     }, /*#__PURE__*/React.createElement("div", {
-      className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden",
+      className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden",
       onClick: e => e.stopPropagation()
     }, /*#__PURE__*/React.createElement("div", {
       className: "px-6 py-4 text-white flex justify-between items-center",
@@ -3397,9 +3402,9 @@ function DeliverableModal({
     }
   };
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4"
+    className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[130] flex justify-center items-center p-4"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden",
+    className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-4 text-white flex justify-between items-start",
@@ -3519,9 +3524,9 @@ function WeeklyPlanModal({
   };
   if (readOnly) {
     return /*#__PURE__*/React.createElement("div", {
-      className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4"
+      className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[110] flex justify-center items-center p-4"
     }, /*#__PURE__*/React.createElement("div", {
-      className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden",
+      className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden",
       onClick: e => e.stopPropagation()
     }, /*#__PURE__*/React.createElement("div", {
       className: "px-6 py-4 text-white flex justify-between items-center",
@@ -3564,9 +3569,9 @@ function WeeklyPlanModal({
     }, "\u95DC\u9589")))));
   }
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex justify-center items-center p-4"
+    className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[110] flex justify-center items-center p-4"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden",
+    className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-4 text-white flex justify-between items-center",
@@ -3642,14 +3647,14 @@ function DeadlinePanel({
   onSelect
 }) {
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end"
+    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-sm bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
     className: "px-5 py-4 text-white flex justify-between items-center",
     style: {
-      backgroundColor: '#EA580C'
+      backgroundColor: 'var(--hdr-deadline, #EA580C)'
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
     className: "font-bold text-lg",
@@ -3659,7 +3664,7 @@ function DeadlinePanel({
   }, "\u23F0 \u5373\u5C07\u5230\u671F\u6E05\u55AE"), /*#__PURE__*/React.createElement("p", {
     className: "text-xs mt-0.5",
     style: {
-      color: '#FFEDD5'
+      color: '#FFF7ED'
     }
   }, "\u5269\u9918 \u22642 \u9031\u6216\u6642\u7A0B\u5DF2\u904E 70% \u7684\u8A08\u756B\u5340\u9593")), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
@@ -3740,7 +3745,7 @@ function PendingPanel({
   const wkLabel = retro ? `W${String(currentWeek).padStart(2, '0')}` : '本週'; // 補登模式所有文案以週次取代「本週」
 
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end"
+    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-md bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
@@ -3970,7 +3975,7 @@ function ManagerWeekPanel({
     className: "flex-shrink-0 text-slate-600 font-bold text-xs bg-white border border-slate-300 rounded-full px-3 py-1.5 group-hover:bg-slate-700 group-hover:text-white transition"
   }, "\u7DE8\u8F2F \u203A")));
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end"
+    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-md bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
@@ -4085,9 +4090,9 @@ function CommentModal({
     }
   };
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[140] flex justify-center items-center p-4"
+    className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[140] flex justify-center items-center p-4"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden",
+    className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-4 text-white flex justify-between items-center",
@@ -4596,9 +4601,9 @@ function ProjectEditModal({
     }
   };
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4"
+    className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[130] flex justify-center items-center p-4"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden",
+    className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-md overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-4 text-white flex justify-between items-center",
@@ -4663,7 +4668,7 @@ function ProjectEditModal({
       setType(e.target.value);
       markModalDirty();
     },
-    className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white"
+    className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white ctl-raised"
   }, Object.entries(PROJECT_TYPES).map(([key, meta]) => /*#__PURE__*/React.createElement("option", {
     key: key,
     value: key
@@ -4675,7 +4680,7 @@ function ProjectEditModal({
       setOwner(e.target.value);
       markModalDirty();
     },
-    className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white"
+    className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white ctl-raised"
   }, (users.includes(owner) ? users : [owner, ...users]).map(u => /*#__PURE__*/React.createElement("option", {
     key: u,
     value: u
@@ -4704,7 +4709,7 @@ function ProjectEditModal({
     disabled: saving,
     className: "px-6 py-2 text-sm text-white font-bold rounded-lg shadow-md transition hover:opacity-90 disabled:opacity-50",
     style: {
-      backgroundColor: '#001F5B'
+      backgroundColor: BRAND_BTN
     }
   }, saving ? '儲存中…' : isEdit ? '儲存變更' : '新增專案')))));
 }
@@ -4742,9 +4747,9 @@ function IntervalModal({
     }
   };
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[130] flex justify-center items-center p-4"
+    className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[130] flex justify-center items-center p-4"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden",
+    className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-md overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-4 text-white flex justify-between items-center",
@@ -4838,7 +4843,7 @@ function IntervalModal({
     disabled: saving,
     className: "px-6 py-2 text-sm text-white font-bold rounded-lg shadow-md transition hover:opacity-90 disabled:opacity-50",
     style: {
-      backgroundColor: '#001F5B'
+      backgroundColor: BRAND_BTN
     }
   }, saving ? '新增中…' : '新增區間')))));
 }
@@ -4859,9 +4864,9 @@ function ConfirmModal({
     }
   };
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[150] flex justify-center items-center p-4"
+    className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[150] flex justify-center items-center p-4"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden",
+    className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-sm overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
     className: "px-6 py-4 text-white flex items-center",
@@ -4995,7 +5000,7 @@ function UsageStatsPanel({
   const maxDay = Math.max(1, ...dayBars.map(d => d.count));
   const maxUser = stats ? Math.max(1, ...(stats.byUser || []).map(u => Number(u.count))) : 1;
   const kpi = (label, value, sub) => /*#__PURE__*/React.createElement("div", {
-    className: "bg-white border border-slate-300 rounded-xl p-3 text-center shadow-sm"
+    className: "bg-white ctl-raised border border-slate-300 rounded-xl p-3 text-center shadow-sm"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] font-bold text-slate-500"
   }, label), /*#__PURE__*/React.createElement("div", {
@@ -5004,7 +5009,7 @@ function UsageStatsPanel({
     className: "text-[10px] text-slate-500 mt-0.5"
   }, sub));
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end"
+    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-md bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
@@ -5021,7 +5026,7 @@ function UsageStatsPanel({
   }, "\uD83D\uDCC8 \u4F7F\u7528\u7D71\u8A08"), /*#__PURE__*/React.createElement("p", {
     className: "text-xs mt-0.5",
     style: {
-      color: '#99F6E4'
+      color: '#CCFBF1'
     }
   }, "\u767B\u5165\u6B21\u6578\uFF08\u542B\u91CD\u65B0\u6574\u7406\u81EA\u52D5\u767B\u5165\uFF09\uFF0C\u8A55\u4F30\u7DB2\u9801\u4F7F\u7528\u7387")), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
@@ -5043,7 +5048,7 @@ function UsageStatsPanel({
   }, "\u7D71\u8A08\u5340\u9593"), [7, 30, 90].map(d => /*#__PURE__*/React.createElement("button", {
     key: d,
     onClick: () => setDays(d),
-    className: `px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${days === d ? 'bg-teal-600 text-white border-teal-700' : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'}`
+    className: `px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${days === d ? 'bg-teal-700 text-white border-teal-800' : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'}`
   }, "\u8FD1 ", d, " \u5929"))), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 overflow-y-auto p-5 space-y-5"
   }, loadError ? /*#__PURE__*/React.createElement("div", {
@@ -5055,7 +5060,7 @@ function UsageStatsPanel({
   }, kpi('今日登入', stats.today), kpi('近 7 天', stats.last7), kpi(`近 ${stats.days} 天`, stats.lastN, `手動 ${stats.manualN}・自動 ${stats.autoN}`), kpi('活躍使用者', stats.uniqueUsers, `近 ${stats.days} 天有登入的人數`)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
   }, "\uD83D\uDCC5 \u6BCF\u65E5\u767B\u5165\u6B21\u6578\uFF08\u8FD1 ", stats.days, " \u5929\uFF09"), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white border border-slate-300 rounded-xl p-3 shadow-sm"
+    className: "bg-white ctl-raised border border-slate-300 rounded-xl p-3 shadow-sm"
   }, stats.lastN === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "text-center text-slate-500 italic text-xs py-6"
   }, "\u6B64\u5340\u9593\u5C1A\u7121\u767B\u5165\u7D00\u9304") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
@@ -5272,7 +5277,7 @@ function AccessPanel({
     }
   };
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[105] flex justify-end"
+    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-md bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
@@ -5497,7 +5502,7 @@ function MemberPanel({
     if (ok) setEditing(null);
   };
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[115] flex justify-end"
+    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[115] flex justify-end"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-sm bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
@@ -5546,7 +5551,7 @@ function MemberPanel({
     disabled: saving,
     className: "flex-shrink-0 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition hover:opacity-90 disabled:opacity-50",
     style: {
-      backgroundColor: NAVY
+      backgroundColor: BRAND_BTN
     }
   }, saving ? '新增中…' : '＋ 新增')), error && /*#__PURE__*/React.createElement("div", {
     className: "mt-1.5 text-xs text-red-600 font-bold"
@@ -5561,11 +5566,11 @@ function MemberPanel({
     const isEditing = editing?.old === u;
     return /*#__PURE__*/React.createElement("div", {
       key: u,
-      className: "flex items-center bg-white border border-slate-300 rounded-xl p-3 shadow-sm"
+      className: "flex items-center bg-white ctl-raised border border-slate-300 rounded-xl p-3 shadow-sm"
     }, /*#__PURE__*/React.createElement("div", {
       className: "w-8 h-8 rounded-full text-white flex items-center justify-center text-sm mr-3 flex-shrink-0",
       style: {
-        backgroundColor: NAVY
+        backgroundColor: BRAND_BTN
       }
     }, u[0]), isEditing ? /*#__PURE__*/React.createElement("div", {
       className: "flex-1 min-w-0"
@@ -5589,7 +5594,7 @@ function MemberPanel({
       disabled: renaming,
       className: "flex-shrink-0 px-2 py-1 rounded-lg text-xs font-bold text-white transition hover:opacity-90 disabled:opacity-50",
       style: {
-        backgroundColor: NAVY
+        backgroundColor: BRAND_BTN
       }
     }, renaming ? '…' : '✓ 儲存'), /*#__PURE__*/React.createElement("button", {
       onClick: () => setEditing(null),
@@ -5637,7 +5642,7 @@ function AuditPanel({
     return logs.filter(l => `${l.actor} ${l.empId || ''} ${l.action} ${l.entityType} ${l.entityId || ''} ${l.summary || ''} ${l.newValue || ''} ${l.detail || ''} ${l.at}`.toLowerCase().includes(kw));
   }, [logs, filter]);
   return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[115] flex justify-end"
+    className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[115] flex justify-end"
   }, /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-lg bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
