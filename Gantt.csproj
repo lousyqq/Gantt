@@ -8,7 +8,9 @@
 
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="9.0.0" />
+    <!-- 9.0.0 有兩個高嚴重性弱點(GHSA-2p3q-h3hg-jcqq / GHSA-8prm-248r-h957),升到 9.0.x 最新修補版。
+         ⚠ 維持 9.0.x(不跳 10.x):TargetFramework 是 net9.0,內網主機裝的是 .NET 9 執行階段。 -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="9.0.18" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.1" />
     <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
   </ItemGroup>

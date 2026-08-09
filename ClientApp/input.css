@@ -33,6 +33,10 @@
   --hdr-deadline: #EA580C;
 }
 .dark {
+  /* 瀏覽器原生控制項(日期選擇器的日曆圖示與彈出月曆、<select> 下拉清單、捲軸)不吃 Tailwind 的 class,
+     只認 color-scheme。不設的話深色下會是:日曆圖示深灰配深底幾乎看不見、點開的月曆與下拉清單整片白。
+     (異動紀錄面板加入日期區間篩選時發現;既有的 8 個 <select> 也一併受惠。) */
+  color-scheme: dark;
   --gantt-sticky: #0B1220;
   --gantt-group: #17233A;
   --gantt-group-hover: #1F2F4A;
@@ -131,7 +135,7 @@
 .dark .bg-indigo-50,.dark .bg-indigo-50\/70 { background-color:#2B315F; }
 .dark .bg-indigo-100,.dark .bg-indigo-100\/70 { background-color:#37407F; }
 .dark .text-indigo-600,.dark .text-indigo-700,.dark .text-indigo-800,.dark .text-indigo-900 { color:#A5B4FC; }
-.dark .border-indigo-200,.dark .border-indigo-300 { border-color:#5367C7; }
+.dark .border-indigo-200,.dark .border-indigo-300,.dark .border-indigo-400 { border-color:#5367C7; }
 
 /* violet */
 .dark .bg-violet-50,.dark .bg-violet-50\/70 { background-color:#392C60; }
@@ -175,7 +179,9 @@
 .dark .bg-amber-50,.dark .bg-amber-50\/40,.dark .bg-amber-50\/70 { background-color:#433210; }
 .dark .bg-amber-100,.dark .bg-amber-100\/80 { background-color:#574218; }
 .dark .text-amber-600,.dark .text-amber-700,.dark .text-amber-800,.dark .text-amber-900 { color:#FCD34D; }
-.dark .border-amber-200,.dark .border-amber-300,.dark .border-amber-400 { border-color:#7C5A16; }
+.dark .border-amber-200,.dark .border-amber-300,.dark .border-amber-400,.dark .border-amber-500 { border-color:#7C5A16; }
+/* 催報名單鈕的 hover:bg-amber-200 — 沿用階梯:-100(#574218,L≈0.060)再上一階 → L≈0.093 */
+.dark .hover\:bg-amber-200:hover { background-color:#6B5220; }
 
 /* yellow */
 .dark .bg-yellow-50 { background-color:#3C3417; }
@@ -209,7 +215,8 @@
 .dark .hover\:bg-blue-50:hover,.dark .hover\:bg-blue-50\/40:hover { background-color:#2E456F; }
 .dark .hover\:bg-sky-50:hover { background-color:#204775; }
 .dark .hover\:bg-indigo-50:hover { background-color:#38407D; }
-.dark .hover\:bg-indigo-100\/70:hover { background-color:#414C96; }
+.dark .hover\:bg-indigo-100:hover,.dark .hover\:bg-indigo-100\/70:hover { background-color:#414C96; }
+.dark .hover\:bg-violet-50:hover { background-color:#4A3A7E; }
 .dark .hover\:bg-violet-100\/70:hover { background-color:#584595; }
 .dark .hover\:bg-violet-200:hover { background-color:#6550AC; }
 .dark .hover\:bg-purple-100:hover { background-color:#5F4390; }
@@ -229,7 +236,7 @@
 
 /* hover 文字色:同理是獨立 class。淺色模式的慣例是 hover 時「加深」(text-blue-600→800),
    但深色模式底色本來就深,加深等於滑過去反而看不見 → 深色一律改成「更亮一階」。 */
-.dark .hover\:text-blue-700:hover,.dark .hover\:text-blue-800:hover { color:#BFDBFE; }
+.dark .hover\:text-blue-700:hover,.dark .hover\:text-blue-800:hover,.dark .hover\:text-blue-900:hover { color:#BFDBFE; }
 
 /* -200 晶片底（少數以 -200 當底色的小標籤）：需高於同色 -100 一階 */
 .dark .bg-yellow-200 { background-color:#5D512A; }
@@ -278,3 +285,45 @@
 .dark .login-bg { background-color:#0B1220; }            /* 最深:頁面底 */
 .dark .login-chip { background-color:#334155; }          /* 最亮:成員鈕(浮起=可點) */
 .dark .login-chip:hover { background-color:#1E3A5F; }    /* hover 轉品牌藍 */
+
+/* =====================================================================
+   鍵盤焦點指示
+   Tailwind 的 preflight 會把所有元素的 outline 拿掉（實測 outline-style: none），
+   而本專案未補回任何 :focus-visible 樣式 → 按 Tab 時完全看不出焦點在哪一顆按鈕。
+   除了無障礙，投影演示時想用鍵盤操作也等於游標隱形。
+   用 :focus-visible（不是 :focus）：滑鼠點擊不會出現外框，只有鍵盤操作時顯示，
+   不影響既有的滑鼠使用體感。
+   採「外框＋外環」雙層：深色底用亮藍外框、外圈再補一圈深色，
+   讓外框落在任何底色上都看得見（深藍 header、白色彈窗、彩色晶片皆可）。
+   ===================================================================== */
+:where(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid #2563EB;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.dark :where(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline-color: #7DB1FF;
+}
+/* 深藍 header／表頭那類大面積深色塊上的控制項：藍框會融進底色，改用亮金(與 GOLD 同色系)。
+   對 #001F5B 底：藍框 3.04(剛好及格)、金框 10.7。深色模式的 header 底色不變，故一併指定，
+   否則 .dark 那條(特異性 0,1,0)會蓋掉這條(0,0,1)。 */
+header :where(button, a, input, select):focus-visible,
+thead :where(button, a, input, select):focus-visible,
+.dark header :where(button, a, input, select):focus-visible,
+.dark thead :where(button, a, input, select):focus-visible {
+  outline-color: #FDD075;
+}
+/* 彈窗最外層容器只在「沒有可聚焦子元素可搶焦點」時才拿到焦點（useModalFocus），
+   它是版面容器不是控制項，不需要外框 */
+.modal-scrim:focus-visible, .modal-scrim:focus { outline: none; }
+
+/* =====================================================================
+   header 系統週數輸入框（WeekNumberInput）
+   type=number 的上下微調鈕在深藍 header 上是一塊灰色方塊，而且會吃掉約 16px 寬度
+   （週次最多兩位數，欄位本身只有 36px）。隱藏它不影響鍵盤：
+   ↑↓ 仍可加減、也仍受 min/max 限制，只是不畫那顆鈕。
+   ⚠ Firefox 要 appearance:textfield，WebKit 要 ::-webkit-*-spin-button，兩者都得寫。
+   ===================================================================== */
+.week-input { -moz-appearance: textfield; appearance: textfield; }
+.week-input::-webkit-outer-spin-button,
+.week-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }

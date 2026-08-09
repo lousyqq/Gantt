@@ -554,6 +554,18 @@ video {
   display: none;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 .pointer-events-none {
   pointer-events: none;
 }
@@ -576,11 +588,6 @@ video {
 
 .inset-0 {
   inset: 0px;
-}
-
-.inset-y-0 {
-  top: 0px;
-  bottom: 0px;
 }
 
 .-bottom-px {
@@ -759,12 +766,12 @@ video {
   margin-bottom: 2rem;
 }
 
-.ml-1 {
-  margin-left: 0.25rem;
+.ml-0\.5 {
+  margin-left: 0.125rem;
 }
 
-.ml-1\.5 {
-  margin-left: 0.375rem;
+.ml-1 {
+  margin-left: 0.25rem;
 }
 
 .ml-2 {
@@ -919,12 +926,24 @@ video {
   height: 100%;
 }
 
+.h-screen {
+  height: 100vh;
+}
+
 .max-h-40 {
   max-height: 10rem;
 }
 
+.max-h-56 {
+  max-height: 14rem;
+}
+
 .max-h-\[90vh\] {
   max-height: 90vh;
+}
+
+.min-h-0 {
+  min-height: 0px;
 }
 
 .min-h-screen {
@@ -1039,10 +1058,6 @@ video {
   max-width: 1560px;
 }
 
-.max-w-\[260px\] {
-  max-width: 260px;
-}
-
 .max-w-\[300px\] {
   max-width: 300px;
 }
@@ -1154,6 +1169,10 @@ video {
   resize: none;
 }
 
+.resize {
+  resize: both;
+}
+
 .grid-cols-1 {
   grid-template-columns: repeat(1, minmax(0, 1fr));
 }
@@ -1192,6 +1211,10 @@ video {
 
 .items-center {
   align-items: center;
+}
+
+.items-baseline {
+  align-items: baseline;
 }
 
 .justify-end {
@@ -1404,6 +1427,10 @@ video {
   border-width: 1px;
 }
 
+.border-0 {
+  border-width: 0px;
+}
+
 .border-2 {
   border-width: 2px;
 }
@@ -1438,6 +1465,10 @@ video {
 
 .border-t-2 {
   border-top-width: 2px;
+}
+
+.border-dashed {
+  border-style: dashed;
 }
 
 .border-\[\#001F5B\] {
@@ -1552,11 +1583,6 @@ video {
   border-color: rgb(199 210 254 / var(--tw-border-opacity, 1));
 }
 
-.border-indigo-300 {
-  --tw-border-opacity: 1;
-  border-color: rgb(165 180 252 / var(--tw-border-opacity, 1));
-}
-
 .border-indigo-400 {
   --tw-border-opacity: 1;
   border-color: rgb(129 140 248 / var(--tw-border-opacity, 1));
@@ -1661,11 +1687,6 @@ video {
   border-color: rgb(186 230 253 / var(--tw-border-opacity, 1));
 }
 
-.border-sky-300 {
-  --tw-border-opacity: 1;
-  border-color: rgb(125 211 252 / var(--tw-border-opacity, 1));
-}
-
 .border-sky-400 {
   --tw-border-opacity: 1;
   border-color: rgb(56 189 248 / var(--tw-border-opacity, 1));
@@ -1689,6 +1710,11 @@ video {
 .border-slate-400 {
   --tw-border-opacity: 1;
   border-color: rgb(148 163 184 / var(--tw-border-opacity, 1));
+}
+
+.border-slate-500 {
+  --tw-border-opacity: 1;
+  border-color: rgb(100 116 139 / var(--tw-border-opacity, 1));
 }
 
 .border-slate-600 {
@@ -1740,6 +1766,11 @@ video {
   border-color: rgb(167 139 250 / var(--tw-border-opacity, 1));
 }
 
+.border-violet-500 {
+  --tw-border-opacity: 1;
+  border-color: rgb(139 92 246 / var(--tw-border-opacity, 1));
+}
+
 .border-white\/10 {
   border-color: rgb(255 255 255 / 0.1);
 }
@@ -1750,6 +1781,10 @@ video {
 
 .border-white\/30 {
   border-color: rgb(255 255 255 / 0.3);
+}
+
+.border-white\/40 {
+  border-color: rgb(255 255 255 / 0.4);
 }
 
 .border-yellow-200 {
@@ -1843,13 +1878,14 @@ video {
   background-color: rgb(180 83 9 / 0.8);
 }
 
+.bg-amber-800 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(146 64 14 / var(--tw-bg-opacity, 1));
+}
+
 .bg-blue-100 {
   --tw-bg-opacity: 1;
   background-color: rgb(219 234 254 / var(--tw-bg-opacity, 1));
-}
-
-.bg-blue-100\/80 {
-  background-color: rgb(219 234 254 / 0.8);
 }
 
 .bg-blue-50 {
@@ -2054,6 +2090,11 @@ video {
   background-color: rgb(240 249 255 / 0.7);
 }
 
+.bg-sky-600 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(2 132 199 / var(--tw-bg-opacity, 1));
+}
+
 .bg-sky-700 {
   --tw-bg-opacity: 1;
   background-color: rgb(3 105 161 / var(--tw-bg-opacity, 1));
@@ -2132,6 +2173,10 @@ video {
 .bg-teal-700 {
   --tw-bg-opacity: 1;
   background-color: rgb(15 118 110 / var(--tw-bg-opacity, 1));
+}
+
+.bg-transparent {
+  background-color: transparent;
 }
 
 .bg-violet-100 {
@@ -2657,6 +2702,11 @@ video {
   color: rgb(120 53 15 / var(--tw-text-opacity, 1));
 }
 
+.text-amber-950 {
+  --tw-text-opacity: 1;
+  color: rgb(69 26 3 / var(--tw-text-opacity, 1));
+}
+
 .text-blue-200 {
   --tw-text-opacity: 1;
   color: rgb(191 219 254 / var(--tw-text-opacity, 1));
@@ -2812,11 +2862,6 @@ video {
   color: rgb(159 18 57 / var(--tw-text-opacity, 1));
 }
 
-.text-sky-700 {
-  --tw-text-opacity: 1;
-  color: rgb(3 105 161 / var(--tw-text-opacity, 1));
-}
-
 .text-sky-800 {
   --tw-text-opacity: 1;
   color: rgb(7 89 133 / var(--tw-text-opacity, 1));
@@ -2966,6 +3011,12 @@ video {
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
 }
 
+.shadow-\[-4px_0_12px_rgba\(0\2c 0\2c 0\2c 0\.18\)\] {
+  --tw-shadow: -4px 0 12px rgba(0,0,0,0.18);
+  --tw-shadow-colored: -4px 0 12px var(--tw-shadow-color);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+
 .shadow-\[3px_0_6px_rgba\(0\2c 0\2c 0\2c 0\.06\)\] {
   --tw-shadow: 3px 0 6px rgba(0,0,0,0.06);
   --tw-shadow-colored: 3px 0 6px var(--tw-shadow-color);
@@ -3075,12 +3126,22 @@ video {
   --tw-ring-color: rgb(100 116 139 / var(--tw-ring-opacity, 1));
 }
 
+.ring-yellow-600 {
+  --tw-ring-opacity: 1;
+  --tw-ring-color: rgb(202 138 4 / var(--tw-ring-opacity, 1));
+}
+
 .ring-offset-1 {
   --tw-ring-offset-width: 1px;
 }
 
 .ring-offset-2 {
   --tw-ring-offset-width: 2px;
+}
+
+.blur {
+  --tw-blur: blur(8px);
+  filter: var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow);
 }
 
 .filter {
@@ -3165,6 +3226,10 @@ video {
 }
 
 .dark {
+  /* 瀏覽器原生控制項(日期選擇器的日曆圖示與彈出月曆、<select> 下拉清單、捲軸)不吃 Tailwind 的 class,
+     只認 color-scheme。不設的話深色下會是:日曆圖示深灰配深底幾乎看不見、點開的月曆與下拉清單整片白。
+     (異動紀錄面板加入日期區間篩選時發現;既有的 8 個 <select> 也一併受惠。) */
+  color-scheme: dark;
   --gantt-sticky: #0B1220;
   --gantt-group: #17233A;
   --gantt-group-hover: #1F2F4A;
@@ -3386,7 +3451,7 @@ video {
   color:#A5B4FC;
 }
 
-.dark .border-indigo-200,.dark .border-indigo-300 {
+.dark .border-indigo-200,.dark .border-indigo-300,.dark .border-indigo-400 {
   border-color:#5367C7;
 }
 
@@ -3520,8 +3585,14 @@ video {
   color:#FCD34D;
 }
 
-.dark .border-amber-200,.dark .border-amber-300,.dark .border-amber-400 {
+.dark .border-amber-200,.dark .border-amber-300,.dark .border-amber-400,.dark .border-amber-500 {
   border-color:#7C5A16;
+}
+
+/* 催報名單鈕的 hover:bg-amber-200 — 沿用階梯:-100(#574218,L≈0.060)再上一階 → L≈0.093 */
+
+.dark .hover\:bg-amber-200:hover {
+  background-color:#6B5220;
 }
 
 /* yellow */
@@ -3617,8 +3688,12 @@ video {
   background-color:#38407D;
 }
 
-.dark .hover\:bg-indigo-100\/70:hover {
+.dark .hover\:bg-indigo-100:hover,.dark .hover\:bg-indigo-100\/70:hover {
   background-color:#414C96;
+}
+
+.dark .hover\:bg-violet-50:hover {
+  background-color:#4A3A7E;
 }
 
 .dark .hover\:bg-violet-100\/70:hover {
@@ -3688,7 +3763,7 @@ video {
 /* hover 文字色:同理是獨立 class。淺色模式的慣例是 hover 時「加深」(text-blue-600→800),
    但深色模式底色本來就深,加深等於滑過去反而看不見 → 深色一律改成「更亮一階」。 */
 
-.dark .hover\:text-blue-700:hover,.dark .hover\:text-blue-800:hover {
+.dark .hover\:text-blue-700:hover,.dark .hover\:text-blue-800:hover,.dark .hover\:text-blue-900:hover {
   color:#BFDBFE;
 }
 
@@ -3805,6 +3880,65 @@ video {
 
 /* hover 轉品牌藍 */
 
+/* =====================================================================
+   鍵盤焦點指示
+   Tailwind 的 preflight 會把所有元素的 outline 拿掉（實測 outline-style: none），
+   而本專案未補回任何 :focus-visible 樣式 → 按 Tab 時完全看不出焦點在哪一顆按鈕。
+   除了無障礙，投影演示時想用鍵盤操作也等於游標隱形。
+   用 :focus-visible（不是 :focus）：滑鼠點擊不會出現外框，只有鍵盤操作時顯示，
+   不影響既有的滑鼠使用體感。
+   採「外框＋外環」雙層：深色底用亮藍外框、外圈再補一圈深色，
+   讓外框落在任何底色上都看得見（深藍 header、白色彈窗、彩色晶片皆可）。
+   ===================================================================== */
+
+:where(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid #2563EB;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.dark :where(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline-color: #7DB1FF;
+}
+
+/* 深藍 header／表頭那類大面積深色塊上的控制項：藍框會融進底色，改用亮金(與 GOLD 同色系)。
+   對 #001F5B 底：藍框 3.04(剛好及格)、金框 10.7。深色模式的 header 底色不變，故一併指定，
+   否則 .dark 那條(特異性 0,1,0)會蓋掉這條(0,0,1)。 */
+
+header :where(button, a, input, select):focus-visible,
+thead :where(button, a, input, select):focus-visible,
+.dark header :where(button, a, input, select):focus-visible,
+.dark thead :where(button, a, input, select):focus-visible {
+  outline-color: #FDD075;
+}
+
+/* 彈窗最外層容器只在「沒有可聚焦子元素可搶焦點」時才拿到焦點（useModalFocus），
+   它是版面容器不是控制項，不需要外框 */
+
+.modal-scrim:focus-visible, .modal-scrim:focus {
+  outline: none;
+}
+
+/* =====================================================================
+   header 系統週數輸入框（WeekNumberInput）
+   type=number 的上下微調鈕在深藍 header 上是一塊灰色方塊，而且會吃掉約 16px 寬度
+   （週次最多兩位數，欄位本身只有 36px）。隱藏它不影響鍵盤：
+   ↑↓ 仍可加減、也仍受 min/max 限制，只是不畫那顆鈕。
+   ⚠ Firefox 要 appearance:textfield，WebKit 要 ::-webkit-*-spin-button，兩者都得寫。
+   ===================================================================== */
+
+.week-input {
+  -moz-appearance: textfield;
+  -webkit-appearance: textfield;
+          appearance: textfield;
+}
+
+.week-input::-webkit-outer-spin-button,
+.week-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .hover\:z-20:hover {
   z-index: 20;
 }
@@ -3840,6 +3974,11 @@ video {
   border-color: rgb(129 140 248 / var(--tw-border-opacity, 1));
 }
 
+.hover\:border-indigo-500:hover {
+  --tw-border-opacity: 1;
+  border-color: rgb(99 102 241 / var(--tw-border-opacity, 1));
+}
+
 .hover\:border-red-200:hover {
   --tw-border-opacity: 1;
   border-color: rgb(254 202 202 / var(--tw-border-opacity, 1));
@@ -3865,8 +4004,17 @@ video {
   border-color: rgb(71 85 105 / var(--tw-border-opacity, 1));
 }
 
+.hover\:border-white\/80:hover {
+  border-color: rgb(255 255 255 / 0.8);
+}
+
 .hover\:bg-\[var\(--gantt-group-hover\)\]:hover {
   background-color: var(--gantt-group-hover);
+}
+
+.hover\:bg-amber-200:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(253 230 138 / var(--tw-bg-opacity, 1));
 }
 
 .hover\:bg-amber-400:hover {
@@ -3886,6 +4034,11 @@ video {
 .hover\:bg-amber-700:hover {
   --tw-bg-opacity: 1;
   background-color: rgb(180 83 9 / var(--tw-bg-opacity, 1));
+}
+
+.hover\:bg-amber-900:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(120 53 15 / var(--tw-bg-opacity, 1));
 }
 
 .hover\:bg-blue-100:hover {
@@ -3938,6 +4091,11 @@ video {
 .hover\:bg-green-500:hover {
   --tw-bg-opacity: 1;
   background-color: rgb(34 197 94 / var(--tw-bg-opacity, 1));
+}
+
+.hover\:bg-indigo-100:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(224 231 255 / var(--tw-bg-opacity, 1));
 }
 
 .hover\:bg-indigo-100\/70:hover {
@@ -4059,6 +4217,11 @@ video {
   background-color: rgb(221 214 254 / var(--tw-bg-opacity, 1));
 }
 
+.hover\:bg-violet-50:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(245 243 255 / var(--tw-bg-opacity, 1));
+}
+
 .hover\:bg-violet-700:hover {
   --tw-bg-opacity: 1;
   background-color: rgb(109 40 217 / var(--tw-bg-opacity, 1));
@@ -4097,6 +4260,11 @@ video {
   color: rgb(30 64 175 / var(--tw-text-opacity, 1));
 }
 
+.hover\:text-blue-900:hover {
+  --tw-text-opacity: 1;
+  color: rgb(30 58 138 / var(--tw-text-opacity, 1));
+}
+
 .hover\:text-slate-600:hover {
   --tw-text-opacity: 1;
   color: rgb(71 85 105 / var(--tw-text-opacity, 1));
@@ -4119,8 +4287,17 @@ video {
   opacity: 0.9;
 }
 
+.hover\:brightness-95:hover {
+  --tw-brightness: brightness(.95);
+  filter: var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow);
+}
+
 .focus\:w-52:focus {
   width: 13rem;
+}
+
+.focus\:border-solid:focus {
+  border-style: solid;
 }
 
 .focus\:border-blue-500:focus {
@@ -4244,6 +4421,10 @@ video {
   color: rgb(255 255 255 / var(--tw-text-opacity, 1));
 }
 
+.dark\:border-amber-700\/50:is(.dark *) {
+  border-color: rgb(180 83 9 / 0.5);
+}
+
 .dark\:border-green-600:is(.dark *) {
   --tw-border-opacity: 1;
   border-color: rgb(22 163 74 / var(--tw-border-opacity, 1));
@@ -4257,19 +4438,6 @@ video {
   border-color: rgb(67 56 202 / 0.5);
 }
 
-.dark\:border-orange-700\/50:is(.dark *) {
-  border-color: rgb(194 65 12 / 0.5);
-}
-
-.dark\:border-sky-700\/50:is(.dark *) {
-  border-color: rgb(3 105 161 / 0.5);
-}
-
-.dark\:border-slate-600:is(.dark *) {
-  --tw-border-opacity: 1;
-  border-color: rgb(71 85 105 / var(--tw-border-opacity, 1));
-}
-
 .dark\:border-slate-700:is(.dark *) {
   --tw-border-opacity: 1;
   border-color: rgb(51 65 85 / var(--tw-border-opacity, 1));
@@ -4279,8 +4447,13 @@ video {
   border-color: rgb(109 40 217 / 0.5);
 }
 
-.dark\:border-yellow-700\/50:is(.dark *) {
-  border-color: rgb(161 98 7 / 0.5);
+.dark\:bg-amber-900\/40:is(.dark *) {
+  background-color: rgb(120 53 15 / 0.4);
+}
+
+.dark\:bg-green-500:is(.dark *) {
+  --tw-bg-opacity: 1;
+  background-color: rgb(34 197 94 / var(--tw-bg-opacity, 1));
 }
 
 .dark\:bg-green-700:is(.dark *) {
@@ -4296,17 +4469,9 @@ video {
   background-color: rgb(49 46 129 / 0.4);
 }
 
-.dark\:bg-orange-900\/40:is(.dark *) {
-  background-color: rgb(124 45 18 / 0.4);
-}
-
-.dark\:bg-sky-900\/40:is(.dark *) {
-  background-color: rgb(12 74 110 / 0.4);
-}
-
-.dark\:bg-slate-700:is(.dark *) {
+.dark\:bg-sky-500:is(.dark *) {
   --tw-bg-opacity: 1;
-  background-color: rgb(51 65 85 / var(--tw-bg-opacity, 1));
+  background-color: rgb(14 165 233 / var(--tw-bg-opacity, 1));
 }
 
 .dark\:bg-slate-800:is(.dark *) {
@@ -4318,12 +4483,13 @@ video {
   background-color: rgb(30 41 59 / 0.8);
 }
 
-.dark\:bg-violet-900\/40:is(.dark *) {
-  background-color: rgb(76 29 149 / 0.4);
+.dark\:bg-slate-900:is(.dark *) {
+  --tw-bg-opacity: 1;
+  background-color: rgb(15 23 42 / var(--tw-bg-opacity, 1));
 }
 
-.dark\:bg-yellow-900\/40:is(.dark *) {
-  background-color: rgb(113 63 18 / 0.4);
+.dark\:bg-violet-900\/40:is(.dark *) {
+  background-color: rgb(76 29 149 / 0.4);
 }
 
 .dark\:bg-none:is(.dark *) {
@@ -4350,16 +4516,6 @@ video {
   color: rgb(165 180 252 / var(--tw-text-opacity, 1));
 }
 
-.dark\:text-orange-300:is(.dark *) {
-  --tw-text-opacity: 1;
-  color: rgb(253 186 116 / var(--tw-text-opacity, 1));
-}
-
-.dark\:text-sky-300:is(.dark *) {
-  --tw-text-opacity: 1;
-  color: rgb(125 211 252 / var(--tw-text-opacity, 1));
-}
-
 .dark\:text-slate-100:is(.dark *) {
   --tw-text-opacity: 1;
   color: rgb(241 245 249 / var(--tw-text-opacity, 1));
@@ -4380,25 +4536,20 @@ video {
   color: rgb(148 163 184 / var(--tw-text-opacity, 1));
 }
 
+.dark\:text-slate-500:is(.dark *) {
+  --tw-text-opacity: 1;
+  color: rgb(100 116 139 / var(--tw-text-opacity, 1));
+}
+
 .dark\:text-violet-300:is(.dark *) {
   --tw-text-opacity: 1;
   color: rgb(196 181 253 / var(--tw-text-opacity, 1));
-}
-
-.dark\:text-yellow-300:is(.dark *) {
-  --tw-text-opacity: 1;
-  color: rgb(253 224 71 / var(--tw-text-opacity, 1));
 }
 
 .dark\:shadow-none:is(.dark *) {
   --tw-shadow: 0 0 #0000;
   --tw-shadow-colored: 0 0 #0000;
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
-}
-
-.dark\:hover\:bg-slate-600:hover:is(.dark *) {
-  --tw-bg-opacity: 1;
-  background-color: rgb(71 85 105 / var(--tw-bg-opacity, 1));
 }
 
 .dark\:hover\:bg-slate-700\/70:hover:is(.dark *) {
@@ -4442,4 +4593,17 @@ video {
 
 .\[\&\>td\]\:align-top>td {
   vertical-align: top;
+}
+
+.\[\&\>th\:first-child\]\:rounded-tl-xl>th:first-child {
+  border-top-left-radius: 0.75rem;
+}
+
+.\[\&\>th\:last-child\]\:rounded-tr-xl>th:last-child {
+  border-top-right-radius: 0.75rem;
+}
+
+.\[\&\>th\]\:bg-slate-100>th {
+  --tw-bg-opacity: 1;
+  background-color: rgb(241 245 249 / var(--tw-bg-opacity, 1));
 }

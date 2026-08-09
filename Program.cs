@@ -35,6 +35,26 @@ IResult Fail(Exception ex)
     return Results.Problem("伺服器處理失敗，請稍後再試或聯絡系統管理員。");
 }
 
+// 使用者輸入錯誤 → 400 + 看得懂的訊息。
+// ⚠ 不要讓這類錯誤掉進 Fail(ex):那會變成 500「伺服器處理失敗，請稍後再試」——
+//    但「專案名稱空白」「結束週早於開始週」不是伺服器壞了,是使用者少填/填錯,
+//    回一句不能行動的話,使用者只會一直重試同樣的輸入。
+// 前端各表單目前都有對應的即時驗證,這裡是第二道防線(前端漏擋、或直接打 API 時)。
+IResult Bad(string message) => Results.Problem(message, statusCode: 400);
+
+// 週次上下限以 ScheduleWeeks 為準,但驗證只擋明顯不合理的值(1~53);
+// 「該年度到底有幾週」交給 SP 內的外鍵/檢查去判斷,避免這裡與 DB 各有一份週數定義。
+const int MaxWeekNo = 53;
+static bool BlankStr(string? s) => string.IsNullOrWhiteSpace(s);
+IResult? ValidateWeekRange(int start, int end)
+{
+    if (start < 1 || start > MaxWeekNo || end < 1 || end > MaxWeekNo)
+        return Bad($"週次需介於 1–{MaxWeekNo}（目前為 W{start}–W{end}）。");
+    if (start > end)
+        return Bad($"開始週不可晚於結束週（目前為 W{start}–W{end}）。");
+    return null;
+}
+
 // 0) 取得桌機目前 Windows 登入者的工號(參考 EQDashboard AuthController.WhoAmI)。
 //    未帶 Windows 認證票證的請求會收到 401 + WWW-Authenticate: Negotiate,網域內瀏覽器會自動補上;
 //    非網域環境前端 catch 掉即可(empId 視為 null,寫入動作照常、AuditLog 的工號欄留空)。
@@ -267,6 +287,12 @@ app.MapGet("/api/bootstrap", async (int? year) =>
 // 2) 打卡 (每週任務執行回報) — usp_UpsertWeeklyLog
 app.MapPost("/api/weekly-log", async (WeeklyLogReq req) =>
 {
+    if (BlankStr(req.TaskCode)) return Bad("缺少任務代碼。");
+    if (BlankStr(req.Actor)) return Bad("缺少回報人。");
+    if (req.Week < 1 || req.Week > MaxWeekNo) return Bad($"週次需介於 1–{MaxWeekNo}。");
+    // 狀態只有這三種(對應甘特條的綠/藍/灰);其他值寫進去會讓前端查不到對應的顏色與標籤
+    if (req.Status is not ("executed" or "monitor" or "not_executed"))
+        return Bad("回報狀態不正確（僅接受 有執行／Monitor／未執行）。");
     try
     {
         using var conn = new SqlConnection(ConnStr());
@@ -391,6 +417,12 @@ app.MapPost("/api/project/star", async (ProjectStarReq req) =>
 // 3.4) 主管調整打卡分數 — usp_UpdateLogScore(僅主管,SP 內檢查;分數限 0.3/0.5/0.8/0.9/1)
 app.MapPost("/api/weekly-log/score", async (ScoreReq req) =>
 {
+    if (BlankStr(req.TaskCode)) return Bad("缺少任務代碼。");
+    if (req.Week < 1 || req.Week > MaxWeekNo) return Bad($"週次需介於 1–{MaxWeekNo}。");
+    // 分數是固定的五個等第(0.3 再三交代 / 0.5 說一動做一動 / 0.8 完成老闆交代 / 0.9 超越老闆期許 / 1 主動承擔),
+    // 不是自由數值——放行任意數字會讓「本週得分/滿分」的統計失去意義
+    if (req.Score is not (0.3m or 0.5m or 0.8m or 0.9m or 1m))
+        return Bad("分數僅接受 0.3／0.5／0.8／0.9／1。");
     try
     {
         using var conn = new SqlConnection(ConnStr());
@@ -412,6 +444,9 @@ app.MapPost("/api/weekly-log/score", async (ScoreReq req) =>
 // 4) 主管修改任務排程 (名稱/起訖週) — usp_UpdateTaskSchedule
 app.MapPost("/api/task-schedule", async (TaskScheduleReq req) =>
 {
+    if (BlankStr(req.TaskCode)) return Bad("缺少任務代碼。");
+    if (BlankStr(req.Name)) return Bad("計畫名稱不可空白。");
+    if (ValidateWeekRange(req.Start, req.End) is { } weekErr) return weekErr;
     try
     {
         using var conn = new SqlConnection(ConnStr());
@@ -434,6 +469,10 @@ app.MapPost("/api/task-schedule", async (TaskScheduleReq req) =>
 // 5) 主管新增專案 — usp_InsertProject
 app.MapPost("/api/project", async (ProjectCreateReq req) =>
 {
+    if (BlankStr(req.Name)) return Bad("專案名稱不可空白。");
+    if (BlankStr(req.Category)) return Bad("分類不可空白。");
+    if (BlankStr(req.Owner)) return Bad("缺少負責人。");
+    if (BlankStr(req.Type)) return Bad("缺少專案類型。");
     try
     {
         using var conn = new SqlConnection(ConnStr());
@@ -459,6 +498,9 @@ app.MapPost("/api/project", async (ProjectCreateReq req) =>
 // 6) 主管修改專案 (名稱/分類/類型) — usp_UpdateProject
 app.MapPost("/api/project/update", async (ProjectUpdateReq req) =>
 {
+    if (BlankStr(req.Name)) return Bad("專案名稱不可空白。");
+    if (BlankStr(req.Category)) return Bad("分類不可空白。");
+    if (BlankStr(req.Owner)) return Bad("缺少負責人。");
     try
     {
         using var conn = new SqlConnection(ConnStr());
@@ -554,6 +596,8 @@ app.MapPost("/api/project/reorder", async (ProjectReorderReq req) =>
 // 9) 主管新增任務/計畫區間 — usp_InsertTask
 app.MapPost("/api/task", async (TaskCreateReq req) =>
 {
+    if (BlankStr(req.TaskName)) return Bad("計畫名稱不可空白。");
+    if (ValidateWeekRange(req.Start, req.End) is { } weekErr) return weekErr;
     try
     {
         using var conn = new SqlConnection(ConnStr());
@@ -595,7 +639,13 @@ app.MapPost("/api/task/delete", async (TaskDeleteReq req) =>
 
 // 11) 稽核紀錄查詢(主管「異動紀錄」面板) — 讀 AuditLog 最近 N 筆,
 //     並於讀取時把技術代碼(如 t101-1@2026W9、軟刪除)翻譯成給高階主管看的白話摘要(summary)。
-app.MapGet("/api/audit-log", async (int? top) =>
+// 篩選條件皆為選填,未帶就不加限制(維持原本「最近 n 筆」的行為,舊呼叫端不受影響)。
+// ⚠ 篩選一定要做在**伺服器端**:本端點只回最近 n 筆,若把日期/成員篩選放前端,
+//    使用者查「上個月某人改了什麼」時,最近 300 筆可能全是本週的資料 → 篩出來永遠是空的。
+// (參數名加 Filter 後綴避開下方讀取迴圈的同名區域變數;用 FromQuery 保住 ?action= / ?entityType= 的網址寫法)
+app.MapGet("/api/audit-log", async (int? top, string? from, string? to, string? actor,
+    [Microsoft.AspNetCore.Mvc.FromQuery(Name = "action")] string? actionFilter,
+    [Microsoft.AspNetCore.Mvc.FromQuery(Name = "entityType")] string? entityTypeFilter) =>
 {
     int n = Math.Clamp(top ?? 200, 1, 1000);
     try
@@ -783,19 +833,71 @@ app.MapGet("/api/audit-log", async (int? top) =>
                             "DELETE" => $"移除成員「{entityId}」（其歷史回報保留）",
                             _ => ""
                         };
+                    // 系統設定:原本沒有這個 case,summary 就掉到最後的 fallback = NewValue,
+                    // 面板上只會顯示一個孤零零的「false」/「true」——同一份清單裡專案類都是完整句子,
+                    // 唯獨影響全體權限的設定看不懂改了什麼。
+                    case "AppSettings":
+                    {
+                        var on = (newV ?? "").Equals("true", StringComparison.OrdinalIgnoreCase);
+                        return entityId switch
+                        {
+                            "AllowRetroCheckin" => on
+                                ? "開啟歷史補登：成員可回報／修改非當週的進度"
+                                : "關閉歷史補登：成員僅能回報當週進度",
+                            "AccessControlEnabled" => on
+                                ? "開啟頁面瀏覽權限卡控：僅符合允許規則的工號可瀏覽"
+                                : "關閉頁面瀏覽權限卡控：所有人皆可瀏覽",
+                            // 日後新增的設定至少講得出「哪個設定被改成什麼」,不會又掉回裸值
+                            _ => $"變更系統設定「{entityId}」：{(on ? "開啟" : newV ?? "")}"
+                        };
+                    }
                 }
             }
             catch { /* 解析失敗 → 走 fallback */ }
             return newV ?? detail ?? "";
         }
 
+        // 供前端「成員」下拉使用:直接取自 AuditLog,才包含已移除/已改名的操作者(用 Users 名冊會漏掉)
+        var actors = new List<string>();
+        using (var cmd = new SqlCommand("SELECT DISTINCT ActorName FROM dbo.AuditLog ORDER BY ActorName", conn))
+        using (var ra = await cmd.ExecuteReaderAsync())
+            while (await ra.ReadAsync())
+                if (!ra.IsDBNull(0)) actors.Add(ra.GetString(0));
+
+        // 動態組 WHERE:一律走參數化,不做字串內插。
+        // ⚠ 日期用「>= 起日 00:00」「< 迄日+1 天」的半開區間,不要寫 CONVERT(date, CreatedAt) BETWEEN ...:
+        //    ①那會讓 CreatedAt 上的索引失效 ②迄日當天 00:00 之後的資料會整天被漏掉。
+        var conds = new List<string>();
+        var filters = new List<SqlParameter>();
+        if (DateTime.TryParse(from, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dFrom))
+        { conds.Add("CreatedAt >= @from"); filters.Add(new SqlParameter("@from", dFrom.Date)); }
+        if (DateTime.TryParse(to, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dTo))
+        { conds.Add("CreatedAt < @to"); filters.Add(new SqlParameter("@to", dTo.Date.AddDays(1))); }
+        if (!string.IsNullOrWhiteSpace(actor))
+        { conds.Add("ActorName = @actor"); filters.Add(new SqlParameter("@actor", actor)); }
+        if (!string.IsNullOrWhiteSpace(actionFilter))
+        { conds.Add("Action = @action"); filters.Add(new SqlParameter("@action", actionFilter)); }
+        if (!string.IsNullOrWhiteSpace(entityTypeFilter))
+        { conds.Add("EntityType = @etype"); filters.Add(new SqlParameter("@etype", entityTypeFilter)); }
+        var whereSql = conds.Count > 0 ? " WHERE " + string.Join(" AND ", conds) : "";
+
+        // 符合條件的總筆數(不受 TOP 限制):讓前端能提示「符合 N 筆，顯示最近 n 筆」,
+        // 否則使用者不知道自己看到的是被截斷的結果。
+        long matched;
+        using (var cmd = new SqlCommand("SELECT COUNT_BIG(*) FROM dbo.AuditLog" + whereSql, conn))
+        {
+            foreach (var p in filters) cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value));
+            matched = Convert.ToInt64(await cmd.ExecuteScalarAsync());
+        }
+
         var logs = new List<object>();
         using (var cmd = new SqlCommand(@"
             SELECT TOP (@n) AuditId, ActorName, ActorRole, ActorEmpId, Action, EntityType, EntityId, OldValue, NewValue, Detail, CreatedAt, FieldName
-            FROM dbo.AuditLog
+            FROM dbo.AuditLog" + whereSql + @"
             ORDER BY AuditId DESC", conn))
         {
             cmd.Parameters.AddWithValue("@n", n);
+            foreach (var p in filters) cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value));
             using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
             {
@@ -821,7 +923,7 @@ app.MapGet("/api/audit-log", async (int? top) =>
                 });
             }
         }
-        return Results.Ok(new { logs });
+        return Results.Ok(new { logs, actors, matched, truncated = matched > logs.Count });
     }
     catch (Exception ex) { return Fail(ex); }
 });
@@ -1066,6 +1168,7 @@ app.MapPost("/api/results-excel", async (ResultsExcelReq req) =>
 // 13) 主管新增成員 — usp_InsertUser(同名成員曾被移除則重新啟用)
 app.MapPost("/api/user", async (UserCreateReq req) =>
 {
+    if (BlankStr(req.UserName)) return Bad("成員名稱不可空白。");
     try
     {
         using var conn = new SqlConnection(ConnStr());
@@ -1084,6 +1187,7 @@ app.MapPost("/api/user", async (UserCreateReq req) =>
 // 14) 主管修改成員名稱 — usp_UpdateUser(專案/回報以 UserId 關聯,歷史資料自動跟隨)
 app.MapPost("/api/user/update", async (UserUpdateReq req) =>
 {
+    if (BlankStr(req.UserName) || BlankStr(req.NewName)) return Bad("成員名稱不可空白。");
     try
     {
         using var conn = new SqlConnection(ConnStr());

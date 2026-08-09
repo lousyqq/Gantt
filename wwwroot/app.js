@@ -1,3 +1,4 @@
+function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
 const {
   useState,
   useMemo,
@@ -114,29 +115,46 @@ const PROJECT_TYPES = {
 };
 
 // 狀態色加深(範本 B 高對比):白字在色塊上達 WCAG AA,年長使用者更易辨識
+// dot＝甘特條上的週回報小點(坐在淺色計畫區間上,需要 700 級才壓得住);
+// fill＝團隊看板成員列的分段進度條——700 級整條又暗又悶,改用「淺色 600／深色 500」:
+//   淺色坐在白色空槽上,600 級清爽又守得住對比(green 3.28／sky 4.07／slate 4.76);
+//   深色坐在近黑空槽上,500 級才明亮舒服(green 7.96／sky 6.52／slate-500 3.75)。
+//   ⚠ 不可只寫 600:`.dark .bg-green-600` 是給「實心動作按鈕」加深用的(→#166534),
+//     不加 dark: 變體會被壓成墨綠;`bg-slate-400` 深色同理被壓成 #475569(對比 2.41),故未執行兩邊都用 500。
 const STATUS_META = {
   executed: {
     label: '有執行',
     icon: '✅',
     bar: 'bg-green-700 border-green-800 text-white',
     tag: 'bg-green-100 text-green-800',
-    dot: 'bg-green-700'
+    dot: 'bg-green-700',
+    fill: 'bg-green-600 dark:bg-green-500'
   },
   monitor: {
     label: 'Monitor',
     icon: '👁️',
     bar: 'bg-sky-700 border-sky-800 text-white',
     tag: 'bg-sky-100 text-sky-800',
-    dot: 'bg-sky-700'
+    dot: 'bg-sky-700',
+    fill: 'bg-sky-600 dark:bg-sky-500'
   },
   not_executed: {
     label: '未執行',
     icon: '⏸️',
     bar: 'bg-slate-500 border-slate-600 text-white',
     tag: 'bg-slate-200 text-slate-700',
-    dot: 'bg-slate-500'
+    dot: 'bg-slate-500',
+    fill: 'bg-slate-500'
   }
 };
+// 分段條的軌道(空槽):加外框才看得出「這是一個空容器＝0%」而不是元件沒畫出來。
+// 「未回報」刻意**不畫任何填充**——條填多少＝回報多少,是最直覺的讀法;
+// 「未執行」則是實心 slate-500(有回報、只是本週沒做),實心 vs 空槽對比 3.21,不會再被誤讀成「沒交」。
+// (曾用黃黑警示斜紋表示未回報,但週中「還沒回報」本來就是常態,整片警示反而讓真正的警訊失效)
+// 空槽:淺色用**白**(原本 slate-300 中灰,配 700 級填色整條又暗又悶);深色壓到近黑 slate-900
+// (用 slate-700 時「未執行實心 slate-500」對空槽只有 2.18,分不出有填沒填;壓暗後 3.80)。
+// 軌道與列底同色沒關係——外框(淺 3.86／深 3.07)負責界定「這是一個空容器」。
+const BAR_TRACK = 'bg-white dark:bg-slate-900 border border-slate-500';
 
 // --- 2. 資料來源:改由後端 API 讀寫 Gantt 資料庫 (取代原本寫死的 INITIAL_PROJECTS) ---
 // 自動偵測部署根路徑:本地為 ''(→ /api/...)、IIS 子應用程式(如 /Gantt/)則為 '/Gantt'(→ /Gantt/api/...)
@@ -154,14 +172,25 @@ async function readApiError(res) {
     return text;
   }
 }
-async function apiGet(path) {
-  const res = await fetch(API_BASE + path, {
-    headers: {
-      'Accept': 'application/json'
-    }
-  });
-  if (!res.ok) throw new Error((await readApiError(res)) || 'HTTP ' + res.status);
-  return res.json();
+// opts.timeoutMs:逾時後主動中止並丟出。
+// 只有「畫面被單一請求擋住」的地方需要它(目前是 access-check 的權限閘門)——
+// fetch 對「連上了但伺服器不回應」(例:IIS 正在回收)不會 reject,會一直掛著,catch 永遠等不到,
+// 沒有逾時的話畫面就**永久停在載入中且無任何提示**。
+async function apiGet(path, opts = {}) {
+  const ctrl = opts.timeoutMs ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), opts.timeoutMs) : null;
+  try {
+    const res = await fetch(API_BASE + path, {
+      headers: {
+        'Accept': 'application/json'
+      },
+      signal: ctrl ? ctrl.signal : undefined
+    });
+    if (!res.ok) throw new Error((await readApiError(res)) || 'HTTP ' + res.status);
+    return await res.json();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 // Windows 工號(如 00058897):載入時由 /api/whoami 偵測(桌機網域帳號 UMC\00058897 剝前綴),
 // 所有寫入 API 自動附帶,由預存程序寫入 AuditLog.ActorEmpId 留下操作紀錄;非網域環境為 null(照常可用)
@@ -221,6 +250,52 @@ const smoothScrollLeftTo = (el, left) => {
   }, 250);
 };
 
+// --- 版面自適應(投影機/低解析度筆電) ---
+// 投影會議實測:1366×768 下「凍結欄 490 + 團隊看板 672」就吃掉 85% 畫面寬,中間甘特圖幾乎不剩。
+// 故凍結欄(專案名稱)與看板寬度改為隨視窗等比縮放:1920 時算出來剛好＝原本的 420 / 672(現有畫面不變),
+// 窄螢幕則同步縮小,讓「專案資訊:甘特圖:看板」永遠維持約 1 : 1.5 : 1.4 的比例。
+const useViewportWidth = () => {
+  const [vw, setVw] = useState(() => typeof window === 'undefined' ? 1920 : window.innerWidth);
+  React.useEffect(() => {
+    let timer = null; // 拖曳改視窗大小會連續觸發,150ms 去抖避免整張甘特反覆重算
+    const onResize = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => setVw(window.innerWidth), 150);
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', onResize);
+    };
+  }, []);
+  return vw;
+};
+// 成員下拉的登入預設值:成員=只看自己、主管=全部成員。三個檢視共用同一個 ownerFilter,
+// 登入／登出／關閉團隊看板都回到這個值,避免各處各寫一份而漂移。
+const defaultOwnerFilter = (role, user) => role === 'member' && user ? user : 'all';
+const STICKY_LEAD_W = 70; // 凍結欄前兩格:No(28)+分類(42)
+const nameColWidth = vw => Math.round(Math.min(420, Math.max(200, vw * 0.22))); // 專案名稱欄(1920→420=原值)
+// 團隊看板(1920→672=原 max-w-2xl);下限 400=成員列放得下「條＋得分＋兩顆有文字的按鈕」的最小寬度
+const reportPanelWidth = vw => Math.round(Math.min(672, Math.max(400, vw * 0.35)));
+
+// 兩條工具列「全部控制項攤開」所需的自然寬度(實測值,主管+週檢視=最寬的情況)。
+// 主內容區可用寬(availW)低於它就必須收起「找資料」那組,否則 flex-nowrap + overflow-x-auto
+// 會吐出橫向捲軸——實測 概況列 1188、控制列 1338,故 1280 溢出 58、1024 溢出 164/314。
+// ⚠ 原本收控制項**只看看板是否開啟**,完全不看視窗本身多寬 → 1366 以下的筆電/投影機一律中招,
+//   而這正是本專案最在意的環境(看板沒開時反而沒有任何保護)。
+// ⚠ 兩條分開設門檻,不要合成一個:概況列只要 1188,若跟著控制列的 1345 一起收,
+//   1280 會白白失去還放得下的全隊狀態晶片。
+// ⚠ 值可略高於實測值留餘裕(中文字寬會隨字體載入狀態浮動),但**絕不可高到 1366 也被收**:
+//   1366 是投影機基準解析度,它放得下完整工具列,收掉只會讓投影情境比現在更差。
+const STATS_BAR_FULL_W = 1200; // 第一條:概況數字＋全隊狀態晶片＋圖例＋鍵盤提示
+const TOOLBAR_FULL_W = 1345; // 第二條:搜尋框＋a~e 晶片＋成員/年度/檢視/密度/補登/展開收合
+// 年度總覽的週欄保底寬度:名稱欄要加寬到多少,先由這個值倒推。
+// 20px＝兩位數週次在 9px 字級下仍清楚可讀(低於 16px 才需要改成間隔標示),
+// 也確保「整年 53 週一畫面」這個核心前提不被名稱欄吃掉。
+// ⚠ 別調高:22px 時 1366(投影)算出來只剩 200px 給名稱欄、低於下限 240 → 投影環境完全得不到改善;
+//   20px 才讓 1366 也能把名稱欄從 240 撐到 300,而週欄只從 21.1 掉到 20.1。
+const MIN_OVERVIEW_WEEK_W = 20;
+
 // 彈窗「未儲存內容」旗標:表單型視窗(打卡/非專案/下週預計/產出/專案/區間)輸入時設 true、
 // 視窗卸載時自動清除;ESC 關窗前檢查,避免打到一半的內容被默默丟棄
 let MODAL_DIRTY = false;
@@ -232,6 +307,244 @@ const useModalDirtyReset = () => {
   React.useEffect(() => () => {
     MODAL_DIRTY = false;
   }, []);
+};
+
+// 單行輸入按 Enter 直接送出。**只給 <input>,textarea 不可套用**(那裡 Enter 是換行)。
+// `isComposing` 判斷不可省:中文注音/拼音選字時按 Enter 是「確認選字」,誤送出會把打到一半的字送出去。
+// 原本只有成員管理與瀏覽權限支援 Enter,新增專案/區間/產出/打卡都沒有 → 同樣是單行表單卻兩種行為,
+// 使用者在一處養成習慣、換一處就以為當掉。
+//
+// ⚠⚠ 一律用 `isComposingEvent(e)`,**絕對不要直接寫 `e.isComposing`**:
+//   React 18 的 SyntheticKeyboardEvent 介面(KeyboardEventInterface)只複製 key/code/location/repeat/
+//   修飾鍵/charCode/keyCode/which,**沒有 isComposing** → 在 React 的 onKeyDown 裡取到的永遠是 undefined,
+//   整個防護等於沒寫。實測:對輸入框派發 isComposing=true 的 keydown(原生事件確認帶得到),表單照樣送出。
+//   只有 `document.addEventListener` 那種**原生**監聽器(全域快捷鍵)拿到的才是真的原生事件,可直接讀。
+const isComposingEvent = e => !!(e && (e.nativeEvent ? e.nativeEvent.isComposing : e.isComposing));
+const onEnterSubmit = fn => e => {
+  if (e.key !== 'Enter' || isComposingEvent(e)) return;
+  e.preventDefault();
+  fn();
+};
+
+// 必填欄位標記:沿用「本週回報中心」既有的紅色必填語彙,讓使用者填之前就知道,而不是按了送出才被擋
+const ReqMark = () => /*#__PURE__*/React.createElement("span", {
+  className: "text-red-600 font-black ml-0.5",
+  title: "\u5FC5\u586B\u6B04\u4F4D"
+}, "*");
+
+// 彈窗/側邊面板右上角的關閉鈕(全站 16 處原本各自複製同一段 SVG)。
+// 抽成元件的原因不只是去重:圖示鈕沒有任何文字,少了 aria-label 讀螢幕器只會念「按鈕」,
+// 使用者不知道那是關閉還是刪除;集中在一處才不會下次新增彈窗又漏掉。
+// SVG 本身掛 aria-hidden——它是純裝飾,語意由 aria-label 提供,否則會被重複朗讀。
+const CloseButton = ({
+  onClick,
+  className = 'text-white/70 hover:text-white p-1',
+  label = '關閉'
+}) => /*#__PURE__*/React.createElement("button", {
+  onClick: onClick,
+  "aria-label": label,
+  title: label,
+  className: className
+}, /*#__PURE__*/React.createElement("svg", {
+  className: "w-6 h-6",
+  fill: "none",
+  viewBox: "0 0 24 24",
+  stroke: "currentColor",
+  "aria-hidden": "true"
+}, /*#__PURE__*/React.createElement("path", {
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  strokeWidth: 2,
+  d: "M6 18L18 6M6 6l12 12"
+})));
+
+// 讓非 <button> 的互動元素(表格的 th/tr、絕對定位的甘特條、看板卡片)也能用鍵盤操作。
+// 用法:<div {...clickable(() => open(), '開啟 XXX')}>。
+// 為什麼不直接改寫成 <button>:th/tr 換掉會破壞 table 結構(sticky 表頭、欄寬、斑馬紋全靠它),
+// 甘特條則是 absolute 定位疊在週格上,換成 button 會被 preflight 的按鈕預設樣式干擾。
+// 空白鍵要 preventDefault,否則頁面會捲動(瀏覽器預設行為),使用者以為按鈕沒反應。
+const clickable = (onActivate, label, opts = {}) => {
+  if (!onActivate) return {};
+  const props = {
+    tabIndex: 0,
+    onClick: onActivate,
+    onKeyDown: e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      onActivate(e);
+    }
+  };
+  // opts.role === null:保留元素的原生語意。<th> 一旦被改成 role="button" 就不再是 columnheader,
+  // 讀螢幕器不會把它當欄位標題唸,aria-sort 也會失效——那類元素只要能聚焦＋能按 Enter 就夠了。
+  if (opts.role !== null) {
+    props.role = opts.role || 'button';
+    props['aria-label'] = label;
+  }
+  if (opts.expanded !== undefined) props['aria-expanded'] = opts.expanded;
+  // roving tabindex:同一組元素只留一個 Tab 停留點,組內改用方向鍵移動(WAI-ARIA 的標準做法)。
+  // 甘特條有 107 個,全部 tabIndex=0 的話鍵盤使用者要按 107 次 Tab 才穿得過甘特區。
+  // opts.roving = { active, group }:active=false 就退出 Tab 順序(仍可被程式 focus)。
+  if (opts.roving) {
+    props.tabIndex = opts.roving.active ? 0 : -1;
+    props['data-roving-group'] = opts.roving.group;
+    props['data-roving-id'] = String(opts.roving.id);
+    const move = (el, dir) => {
+      const all = [...document.querySelectorAll(`[data-roving-group="${opts.roving.group}"]`)];
+      const i = all.indexOf(el);
+      if (i < 0) return;
+      const next = all[Math.min(all.length - 1, Math.max(0, i + dir))];
+      if (!next || next === el) return;
+      next.focus();
+      // ⚠ 一定要在這裡把 tab stop 也移過去,不能只靠元素的 onFocus:
+      //   焦點事件在「文件本身沒有焦點」時不會派送(背景分頁、嵌入式檢視),
+      //   那時 tab stop 會留在原地 → 使用者 Tab 出去再回來會被丟回第一條。
+      if (opts.roving.onRove) opts.roving.onRove(next.getAttribute('data-roving-id'));
+    };
+    const baseKeyDown = props.onKeyDown;
+    props.onKeyDown = e => {
+      // ⚠ 只收 ↑↓:←→ 是全域「平移甘特 4 週」的快捷鍵,佔用會拿掉一個沒有替代路徑的操作。
+      //   ↑↓ 在此沒有其他用途,拿來做組內移動不會撞到任何既有行為。
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        move(e.currentTarget, e.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+      if (baseKeyDown) baseKeyDown(e);
+    };
+  }
+  return props;
+};
+
+// header 的系統週數:直接可輸入的週次框。
+// 原本只有 ‹ › 兩顆鈕＋純文字「W32」,從 W32 跳到 W08 要按 24 次;←→ 快捷鍵一次也只走 4 週,
+// 而且沒有任何提示(使用者不會知道)。做成輸入框後「跳到指定週」變成一步。
+// ⚠ 不做成「點一下才變輸入框」:多一次點擊、也少了「這裡可以打字」的可見提示,得不償失。
+// ⚠ 一律 onCommit 後才切週(Enter / 失焦),不在 onChange 就切——邊打字邊切週會在打「1」時先跳到 W01,
+//    整張甘特白重算一次(53 週 × 107 條)。
+// ⚠ 值超出範圍時夾回邊界而不是拒收:成員的上限是 todayWeek(不能看未來週),打 99 會落回本週。
+const WeekNumberInput = ({
+  week,
+  min = 1,
+  max,
+  onCommit,
+  label
+}) => {
+  const [draft, setDraft] = useState(String(week));
+  // 外部切週(‹ ›、H、點週次列)時同步顯示值;使用者正在輸入時不覆蓋
+  const focusedRef = useRef(false);
+  React.useEffect(() => {
+    if (!focusedRef.current) setDraft(String(week));
+  }, [week]);
+  const commit = () => {
+    const n = parseInt(draft, 10);
+    if (isNaN(n)) {
+      setDraft(String(week));
+      return;
+    }
+    const clamped = Math.min(max, Math.max(min, n));
+    setDraft(String(clamped));
+    if (clamped !== week) onCommit(clamped);
+  };
+  return /*#__PURE__*/React.createElement("span", {
+    className: "font-bold text-sm tracking-wider inline-flex items-center justify-center",
+    style: {
+      color: GOLD,
+      minWidth: 100
+    }
+  }, "W", /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    inputMode: "numeric",
+    min: min,
+    max: max,
+    value: draft,
+    "aria-label": label,
+    title: label,
+    onFocus: e => {
+      focusedRef.current = true;
+      e.target.select();
+    },
+    onBlur: () => {
+      focusedRef.current = false;
+      commit();
+    },
+    onChange: e => setDraft(e.target.value),
+    onKeyDown: e => {
+      if (isComposingEvent(e)) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commit();
+        e.currentTarget.blur();
+      }
+      if (e.key === 'Escape') {
+        setDraft(String(week));
+        e.currentTarget.blur();
+      }
+    },
+    className: "week-input w-9 bg-transparent border-0 border-b border-dashed border-white/40 hover:border-white/80 focus:border-solid text-center font-bold text-sm tracking-wider p-0 outline-none",
+    style: {
+      color: GOLD
+    }
+  }));
+};
+
+// 彈窗/側邊面板的焦點管理:把回傳值展開到最外層容器 <div {...useModalFocus()} className="fixed inset-0 …">
+// 解決三件事(實測:打卡彈窗開啟後焦點仍留在背景按鈕上,背景還有 306 個可聚焦元素,Tab 會跑到甘特條去):
+//   ①開啟時把焦點移進彈窗——已有 autoFocus 的輸入欄優先,不搶走;沒有就聚焦容器本身(tabIndex=-1),
+//     刻意不自動聚焦第一顆按鈕,免得使用者一按 Enter 就誤觸「關閉」或「刪除」
+//   ②Tab / Shift+Tab 在彈窗內循環,不會跑到背景
+//   ③關閉時把焦點還原到原本的觸發元素(該元素可能已隨刪除消失,故 try/catch)
+const FOCUSABLE_SEL = 'button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])';
+const useModalFocus = () => {
+  const ref = useRef(null);
+  React.useEffect(() => {
+    const prev = document.activeElement;
+    const el = ref.current;
+    // 等 autoFocus 生效後再判斷要不要接手
+    const t = setTimeout(() => {
+      if (el && !el.contains(document.activeElement)) el.focus({
+        preventScroll: true
+      });
+    }, 0);
+    return () => {
+      clearTimeout(t);
+      try {
+        if (prev && document.contains(prev)) prev.focus({
+          preventScroll: true
+        });
+      } catch (e) {}
+    };
+  }, []);
+  const onKeyDown = e => {
+    if (e.key !== 'Tab') return;
+    const el = ref.current;
+    if (!el) return;
+    const items = [...el.querySelectorAll(FOCUSABLE_SEL)].filter(n => n.offsetParent !== null);
+    if (!items.length) {
+      e.preventDefault();
+      return;
+    } // 無可聚焦元素:焦點留在容器,不放行到背景
+    const first = items[0],
+      last = items[items.length - 1];
+    const inside = items.includes(document.activeElement);
+    if (!inside) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+      return;
+    } // 焦點在容器本身
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+  return {
+    ref,
+    onKeyDown,
+    tabIndex: -1
+  };
 };
 
 // 週 -> 月份標籤
@@ -354,19 +667,28 @@ function ResultsView({
   };
 
   // 表頭渲染輔助函式（強制 whitespace-nowrap 不換行）
+  // 鍵盤:th 用 clickable(role:null) 保留原生 columnheader 語意——欄位名由 th 內文提供,
+  //       排序狀態由 aria-sort 播報;改成 role="button" 反而會失去「這是欄位標題」的語意。
+  // ⚠ 表頭底色必須掛在 th 自己身上,不可用 tr 的 [&>th]:bg-xxx 任意變體(2026-08-09 修):
+  //   ①任意變體產生的是獨立選擇器 .[&>th]:bg-slate-100>th,`.dark .bg-slate-100` 匹配不到 →
+  //     深色下表頭停在淺色 #F1F5F9,配 text-slate-700 的深色值 #CBD5E1 對比只有 1.36(實測)。
+  //   ②它的權重(0,1,1)還壓過 th 自己的 bg-blue-100(0,1,0) → 淺色下「已排序」的藍底從來沒顯示過。
+  //   sticky thead + border-collapse 下背景本來就要下在 th,只是要下成「th 的類別」而非父層變體。
   const renderSortHeader = (label, key, widthClass, extraClass = "") => {
     const isSorted = sortConfig.key === key;
     const dirIcon = !isSorted ? '↕' : sortConfig.direction === 'asc' ? '▲' : '▼';
-    return /*#__PURE__*/React.createElement("th", {
-      onClick: () => handleSortHeader(key),
-      className: `px-3 py-2 cursor-pointer select-none transition hover:bg-slate-200 whitespace-nowrap ${isSorted ? 'bg-blue-100/80 text-blue-900 border-b-2 border-blue-600' : 'text-slate-700'} ${widthClass} ${extraClass}`,
+    return /*#__PURE__*/React.createElement("th", _extends({}, clickable(() => handleSortHeader(key), null, {
+      role: null
+    }), {
+      "aria-sort": !isSorted ? 'none' : sortConfig.direction === 'asc' ? 'ascending' : 'descending',
+      className: `px-3 py-2 cursor-pointer select-none transition hover:bg-slate-200 whitespace-nowrap ${isSorted ? 'bg-blue-100 text-blue-900 border-b-2 border-blue-600' : 'bg-slate-100 text-slate-700'} ${widthClass} ${extraClass}`,
       title: `點擊依「${label}」${!isSorted ? '排序' : sortConfig.direction === 'asc' ? '改為降冪排序' : '改為升冪排序'}`
-    }, /*#__PURE__*/React.createElement("div", {
+    }), /*#__PURE__*/React.createElement("div", {
       className: "flex items-center justify-between gap-1"
     }, /*#__PURE__*/React.createElement("span", {
       className: "whitespace-nowrap"
     }, label), /*#__PURE__*/React.createElement("span", {
-      className: `text-[11px] px-1 rounded flex-shrink-0 ${isSorted ? 'bg-blue-600 text-white font-black' : 'text-slate-500 font-normal'}`
+      className: `text-[11px] px-1 rounded flex-shrink-0 ${isSorted ? 'bg-blue-600 text-white font-black' : 'text-slate-600 font-normal'}`
     }, dirIcon)));
   };
   return /*#__PURE__*/React.createElement("div", {
@@ -448,13 +770,15 @@ function ResultsView({
     }),
     className: "px-3 py-1 rounded-lg bg-white hover:bg-blue-100 text-blue-700 border border-blue-300 font-bold transition shadow-sm"
   }, "\u6E05\u9664\u6392\u5E8F")), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden"
+    className: "bg-white rounded-xl border border-slate-300 shadow-sm"
   }, /*#__PURE__*/React.createElement("table", {
     className: "w-full text-left border-collapse table-fixed"
-  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
-    className: "bg-slate-100 text-xs font-bold border-b border-slate-300 h-9"
+  }, /*#__PURE__*/React.createElement("thead", {
+    className: "sticky top-0 z-20"
+  }, /*#__PURE__*/React.createElement("tr", {
+    className: "bg-slate-100 text-xs font-bold border-b border-slate-300 h-9 [&>th:first-child]:rounded-tl-xl [&>th:last-child]:rounded-tr-xl"
   }, /*#__PURE__*/React.createElement("th", {
-    className: "px-2 w-10 text-center text-slate-500 whitespace-nowrap"
+    className: "px-2 w-10 text-center bg-slate-100 text-slate-600 whitespace-nowrap"
   }, "No"), renderSortHeader("分類", "category", "w-20"), renderSortHeader("類型", "type", "w-14 text-center"), renderSortHeader("專案名稱", "name", "w-[420px]"), renderSortHeader("負責人", "owner", "w-24"), renderSortHeader("預計交付具體產出成果", "deliverable", "w-auto"), renderSortHeader("MP Saving", "mpSaving", "w-36"), renderSortHeader("NID", "nid", "w-32"))), /*#__PURE__*/React.createElement("tbody", {
     className: "divide-y divide-slate-200 text-[13px]"
   }, displayedProjects.map((proj, idx) => {
@@ -480,6 +804,8 @@ function ResultsView({
     }, role === 'manager' ? /*#__PURE__*/React.createElement("button", {
       onClick: e => toggleStar && toggleStar(proj.id, e),
       className: `flex-shrink-0 mr-1.5 text-base transition transform hover:scale-125 ${starredIds.has(proj.id) ? 'text-amber-500' : 'text-slate-400 hover:text-amber-400'}`,
+      "aria-pressed": starredIds.has(proj.id),
+      "aria-label": `${proj.name}：${starredIds.has(proj.id) ? '取消重點關注標記' : '標記為重點關注項目'}`,
       title: starredIds.has(proj.id) ? '取消重點關注標記' : '標記為重點關注項目'
     }, starredIds.has(proj.id) ? '★' : '☆') : starredIds.has(proj.id) ? /*#__PURE__*/React.createElement("span", {
       className: "flex-shrink-0 mr-1.5 text-base text-amber-500",
@@ -529,19 +855,33 @@ function App() {
   const [empId, setEmpId] = useState(null); // Windows 工號(顯示用;實際寫入由 apiPost 自動附帶)
   // 瀏覽權限卡控:null=檢查中;{enabled,allowed,reason,person}=結果。開關關閉時後端直接回 allowed=true。
   const [accessCheck, setAccessCheck] = useState(null);
+  // 權限檢查逾時:畫面被 `if (!accessCheck) return <LoadingScreen/>` 擋住,沒有逾時就會**永久轉圈且無任何提示**
+  // (fetch 對「連得上但伺服器不回應」不會 reject,例如 IIS 正在回收應用程式集區)。
+  // ⚠ 逾時**不比照下面的 catch 直接放行**:catch 是「明確被拒絕/連不上」,而逾時是「不知道伺服器怎麼了」——
+  //    未知狀態下自動放行等於把權限閘門變成裝飾。改為顯示錯誤畫面＋重試,維持 fail-closed。
+  const [accessError, setAccessError] = useState(null);
+  const [accessRetry, setAccessRetry] = useState(0);
 
   // 載入時偵測一次 Windows 工號(非網域環境取不到 → null),接著向後端驗證瀏覽權限
   React.useEffect(() => {
     let cancelled = false;
+    setAccessError(null);
     detectEmpId().then(async id => {
       if (cancelled) return;
       setEmpId(id);
       try {
-        const r = await apiGet(`/api/access-check?empId=${encodeURIComponent(id || '')}`);
+        const r = await apiGet(`/api/access-check?empId=${encodeURIComponent(id || '')}`, {
+          timeoutMs: 15000
+        });
         if (!cancelled) setAccessCheck(r);
-      } catch {
+      } catch (e) {
+        if (cancelled) return;
+        if (e && e.name === 'AbortError') {
+          setAccessError('伺服器沒有在時間內回應權限檢查（可能正在重啟）。');
+          return;
+        }
         // 後端不可達時不在此擋(bootstrap 會另行顯示連線錯誤);卡控啟用時的失敗判斷在伺服器端(fail-closed)
-        if (!cancelled) setAccessCheck({
+        setAccessCheck({
           enabled: false,
           allowed: true
         });
@@ -550,7 +890,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [accessRetry]);
 
   // 年度切換:可用年度與週→月對照皆來自 DB 的 ScheduleWeeks(開新年度只需 EXEC usp_EnsureScheduleYear)
   const [scheduleYear, setScheduleYear] = useState(DEFAULT_SCHEDULE_YEAR);
@@ -580,8 +920,12 @@ function App() {
   const [collapsedOwners, setCollapsedOwners] = useState(new Set());
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState(new Set()); // 空 = 全部
+  // 「未回報」晶片的開關:只顯示本週有排定但尚未回報的專案(主管催報用)
+  const [pendingOnly, setPendingOnly] = useState(false);
+  // 成員篩選:三個檢視統一用「成員下拉」('all' 或成員名),不再有週檢視專用的「只看我的專案」勾選框
+  // ——同一件事兩種操作方式(勾選 vs 下拉)會讓使用者切檢視時以為篩選跑掉了。
+  // 登入預設:成員=自己、主管=全部成員(見 handleLogin / DEFAULT_OWNER_FILTER)
   const [ownerFilter, setOwnerFilter] = useState('all');
-  const [onlyMine, setOnlyMine] = useState(false);
   // 重點關注標記：從 bootstrap 資料初始化（DB 持久化），不再使用 localStorage
   const [starredIds, setStarredIds] = useState(() => new Set());
   const toggleStar = useCallback(async (projId, e) => {
@@ -616,7 +960,11 @@ function App() {
         ...p,
         isStarred: !newStarred
       } : p));
-      alert('標記失敗：' + (err.message || '無法連線資料庫'));
+      // 全站錯誤一律走 toast(原本這裡是唯一一個 window.alert:會阻斷操作、樣式與深色模式脫節)。
+      // ⚠ showToast 刻意**不放進 deps**:它宣告在本 useCallback 之後(見下方 useState 區),
+      //   寫進 deps 陣列會在 render 當下就踩到 TDZ;而它只用到 setToast/toastTimer 這種穩定參考,
+      //   閉包抓到舊的那份行為完全一致,不會有 stale 問題。
+      showToast('❌ 標記失敗：' + (err.message || '無法連線資料庫'));
     }
   }, [currentUser, role, starredIds]);
   const [tooltip, setTooltip] = useState(null); // {x, y, proj, task, weekLog, history}
@@ -633,9 +981,25 @@ function App() {
   const [weeklyCommentMeta, setWeeklyCommentMeta] = useState({});
   const [allowRetroCheckin, setAllowRetroCheckin] = useState(false); // 主管全域開關：允許成員回報/調正歷史進度
 
+  // --- 同步狀態(給「連線中斷」指示用) ---
+  // 原本 60 秒輪詢是 `refreshData().catch(() => {})`,後端重啟/斷網時畫面就停在舊資料、**完全沒有提示**
+  // (實測連續 31 次 ERR_CONNECTION_REFUSED,畫面毫無異狀)。使用者會看著過期資料做判斷,
+  // 直到按下儲存才發現失敗——而那時他已經是用舊資料覆蓋新值(last-write-wins)。
+  // 計數與時間戳直接埋在 refreshData 裡,所有呼叫點(輪詢、存檔後刷新、關窗補刷)自動涵蓋。
+  const [syncFailures, setSyncFailures] = useState(0); // 連續失敗次數(成功即歸零)
+  const [lastSyncAt, setLastSyncAt] = useState(null); // 最後一次成功同步的時間
+
   // 重新抓取資料但不顯示整頁 Loading (供編輯後靜默刷新)
   const refreshData = useCallback(async () => {
-    const data = await apiGet(`/api/bootstrap?year=${scheduleYear}`);
+    let data;
+    try {
+      data = await apiGet(`/api/bootstrap?year=${scheduleYear}`);
+    } catch (e) {
+      setSyncFailures(n => n + 1);
+      throw e; // ⚠ 一定要往外拋:loadBootstrap 靠這個 throw 才顯示 ErrorScreen + 重試
+    }
+    setSyncFailures(0);
+    setLastSyncAt(new Date());
     // 若選定年度在 DB 沒有週資料(如今年尚未 EnsureScheduleYear),退回最近的可用年度重載
     if ((!data.weeks || data.weeks.length === 0) && (data.years || []).length > 0 && !data.years.includes(scheduleYear)) {
       setScheduleYear(data.years[data.years.length - 1]);
@@ -709,6 +1073,31 @@ function App() {
   const [showDeadlinePanel, setShowDeadlinePanel] = useState(false); // 即將到期清單面板(頂部 ⏰ 晶片點開)
 
   const weekW = isCompact ? 22 : 32;
+  // 版面自適應:凍結欄與右側團隊看板寬度隨視窗縮放,投影機/筆電才留得下中間甘特區(1920 時＝原本的 420/490/672)
+  const viewportW = useViewportWidth();
+  // 看板寬度:再夾一道「不得超過視窗 45%」,避免小視窗下甘特被壓成一條
+  const reportPanelW = Math.round(Math.min(reportPanelWidth(viewportW), viewportW * 0.45));
+  const availW = viewportW - (showWeeklyReport ? reportPanelW : 0); // 主內容區可用寬(看板開啟時已內縮)
+  // 工具列是否要收起「找資料」那組。收的內容沿用既有那組:
+  // 概況列=全隊狀態晶片＋鍵盤提示;控制列=搜尋框＋a~e 晶片(有殘留篩選條件時仍保留已選中的)。
+  // ⚠ 兩個條件是 OR 而不是只留寬度那個——看板開啟時要收**另有情境上的理由**,與空間無關:
+  //   全隊狀態晶片在看板裡已被每人的分段條拆得更細(重複資訊)、講評當下也不會臨時改篩選條件。
+  //   只寫 `availW < …` 的話,2560 這種寬螢幕開看板時 availW=1888 仍大於門檻,它們會全部跑回來。
+  // ⚠ 「⏰ 即將到期」不列入:它在看板情境被收是因為「會開另一個面板跳出講評情境」,
+  //   視窗窄跟那個理由無關,而它是行動項,所以維持只看 showWeeklyReport。
+  const tightStatsBar = showWeeklyReport || availW < STATS_BAR_FULL_W;
+  const tightToolbar = showWeeklyReport || availW < TOOLBAR_FULL_W;
+  // 年度總覽的名稱欄:原本寫死 240,1920 下明明還有空間卻不用 → 22% 的名稱被截(週檢視只有 1%)。
+  // 改成「把剩餘空間讓給名稱欄,但先保證每個週欄至少 MIN_OVERVIEW_WEEK_W」,
+  // 整年仍在同一畫面(表格 width:100%,週欄只是變窄,不會產生水平捲軸);
+  // 上限沿用週檢視的 nameColWidth(切換兩個檢視時名稱欄不跳動),下限維持原本的 240 → 任何情況都不比現況差。
+  const overviewNameW = Math.round(Math.max(240, Math.min(nameColWidth(viewportW), availW - weeksTotal * MIN_OVERVIEW_WEEK_W)));
+  const nameW = isOverview ? overviewNameW : nameColWidth(viewportW);
+  const frozenW = isOverview ? nameW : STICKY_LEAD_W + nameW; // 甘特左側凍結區總寬(捲動置中的基準)
+  // 年度總覽的週欄寬度是「剩餘空間 ÷ 週數」(非固定 weekW);太窄時 53 個數字會擠成一片,
+  // 故 <16px 只標 5 的倍數與當週(格子本身仍可點,hover/title 不變)
+  const overviewWeekW = isOverview ? (availW - frozenW) / weeksTotal : 0;
+  const sparseWeekLabel = isOverview && overviewWeekW < 16;
   const todayWeek = getTodayWeek(scheduleYear, weeksTotal); // 本週(相對於選定年度)
   const isViewingPast = currentWeek !== todayWeek; // 是否在檢視非本週
 
@@ -723,20 +1112,18 @@ function App() {
       s.delete(proj.owner);
       return s;
     });
-    // 聚焦執行者:左側甘特只留這位成員的專案,主管講評時不被其他人的列干擾(關閉看板即還原全部成員)
-    setOnlyMine(false);
+    // 聚焦執行者:左側甘特只留這位成員的專案,主管講評時不被其他人的列干擾(關閉看板即還原登入預設)
     setOwnerFilter(proj.owner);
     setPendingScrollProj(proj.id);
   }, [highlightedTaskId]);
 
-  // 關閉團隊看板:清除高亮與成員聚焦,甘特還原為「全部成員 ＋ 全部展開」(與登入預設一致)
+  // 關閉團隊看板:清除高亮與成員聚焦,甘特還原為「登入預設成員 ＋ 全部展開」
   const closeWeeklyReport = useCallback(() => {
     setHighlightedTaskId(null);
     setShowWeeklyReport(false);
-    setOwnerFilter('all');
-    setOnlyMine(role === 'member');
+    setOwnerFilter(defaultOwnerFilter(role, currentUser));
     setCollapsedOwners(new Set());
-  }, [role]);
+  }, [role, currentUser]);
 
   // 每次登入角色時：預設開啟各成員的週檢視、展開清單頁面；成員預設顯示個人專案，主管預設為全部成員
   // 登入身分寫入 localStorage:重新整理/重開分頁不再被登出(登出時清除;內網固定使用者,風險可接受)
@@ -759,10 +1146,10 @@ function App() {
     setIsResults(false);
     setCurrentWeek(getTodayWeek(scheduleYear, weeksTotal));
     setCollapsedOwners(new Set());
-    setOnlyMine(selectedRole === 'member');
-    setOwnerFilter('all');
+    setOwnerFilter(defaultOwnerFilter(selectedRole, user)); // 成員=自己、主管=全部成員
     setSearchText('');
     setTypeFilter(new Set());
+    setPendingOnly(false);
     setShowPendingPanel(false);
     setShowRetroPanel(false);
     setShowWeekEditPanel(false);
@@ -784,10 +1171,10 @@ function App() {
     setIsOverview(false);
     setIsResults(false);
     setCollapsedOwners(new Set());
-    setOnlyMine(false);
     setOwnerFilter('all');
     setSearchText('');
     setTypeFilter(new Set());
+    setPendingOnly(false);
     setShowPendingPanel(false);
     setShowRetroPanel(false);
     setShowWeekEditPanel(false);
@@ -815,13 +1202,15 @@ function App() {
     });
   };
   const [scrollTargetWeek, setScrollTargetWeek] = useState(null);
+
+  // 把某一週置中於「看得到的甘特區」= 容器寬扣掉左側凍結欄(看板開啟時容器已內縮,右緣即看板左緣)。
+  // 目標超出捲動範圍時瀏覽器自動夾住 → 年底幾週改為靠右顯示(無法置中,但一定看得到)。
   const scrollToWeek = useCallback(wk => {
     const el = ganttRef.current;
     if (!el) return;
-    const LEFT_W = 490;
-    const target = LEFT_W + (wk - 1) * weekW - (el.clientWidth - LEFT_W) / 2;
-    smoothScrollLeftTo(el, target);
-  }, [weekW]);
+    const viewW = Math.max(weekW, el.clientWidth - frozenW); // 可視甘特區寬度
+    smoothScrollLeftTo(el, (wk - 1) * weekW + weekW / 2 - viewW / 2);
+  }, [weekW, frozenW]);
   const goToCurrentWeek = () => {
     const tw = getTodayWeek(scheduleYear, weeksTotal); // 動態取得今天的實際週(W27、下週為 W28…)
     setCurrentWeek(tw); // 將選取週強制切回本週
@@ -850,7 +1239,7 @@ function App() {
     setScrollTargetWeek(null);
   }, [scrollTargetWeek, scrollToWeek]);
 
-  // 團隊看板點回報格後:捲到該專案列(垂直)＋把當前週放到甘特區左側(水平,避開右側看板面板)
+  // 團隊看板點回報格後:捲到該專案列(垂直)＋把當前週置中於「看得到的甘特區」(水平)
   React.useEffect(() => {
     if (pendingScrollProj == null) return;
     const el = ganttRef.current;
@@ -861,10 +1250,24 @@ function App() {
           rr = row.getBoundingClientRect();
         el.scrollTop = Math.max(0, el.scrollTop + (rr.top - cr.top) - Math.min(el.clientHeight / 2, 220));
       }
-      smoothScrollLeftTo(el, Math.max(0, (currentWeek - 1) * weekW - 40));
+      scrollToWeek(currentWeek); // 置中(年底週次捲不動時自動靠右,仍在看板左側可視區內)
     }
     setPendingScrollProj(null);
-  }, [pendingScrollProj, currentWeek, weekW]);
+  }, [pendingScrollProj, currentWeek, scrollToWeek]);
+
+  // 可視甘特寬改變(開/關看板、視窗大小或接上投影機導致解析度變更)→ 重新把當前週置中;
+  // 否則捲動位置會停在舊寬度算出來的地方(接投影機後年底的週次會整個躲進看板底下)
+  const ganttViewKeyRef = useRef(null);
+  React.useEffect(() => {
+    const key = `${showWeeklyReport}|${viewportW}`;
+    if (ganttViewKeyRef.current === null) {
+      ganttViewKeyRef.current = key;
+      return;
+    } // 首次掛載不干擾初始位置
+    if (ganttViewKeyRef.current === key) return;
+    ganttViewKeyRef.current = key;
+    if (!isOverview && !isResults) setScrollTargetWeek(currentWeek); // 交給 scrollTargetWeek effect,確保新寬度已套用
+  }, [showWeeklyReport, viewportW, isOverview, isResults, currentWeek]);
 
   // 本地時間戳(yyyy-MM-dd HH:mm),與 bootstrap 回傳的 updatedAt 格式一致(樂觀更新用)
   const nowStamp = () => {
@@ -1141,24 +1544,50 @@ function App() {
     } catch (e) {}
   }, [dataLoading, dataError, currentUser, users]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 多人共用時每 60 秒靜默刷新,讓其他人的變更自動出現(拖曳中暫停以免干擾;失敗靜默忽略,下輪再試)
+  // 是否有彈窗/面板開啟中——輪詢暫停與鍵盤快捷鍵共用同一份判斷,兩邊才不會各自漂移。
+  // ⚠ 團隊總結看板(showWeeklyReport)刻意不列入:它是唯讀的側邊疊加面板,不是輸入型視窗。
+  //   快捷鍵要讓主管邊看看板邊用 ←→/H 平移甘特圖;輪詢更是反過來——講評時本來就希望看到成員陸續回報進來。
+  const isAnyModalOpen = !!(confirmInfo || commentTarget || selectedTaskInfo || deliverableProj || editingProject || addingInterval || showExtraNoteModal || showWeeklyPlanModal || showPendingPanel || showRetroPanel || showWeekEditPanel || showAuditPanel || showMemberPanel || showAccessPanel || showUsagePanel || showAdminMenu || showDeadlinePanel);
+
+  // 多人共用時每 60 秒靜默刷新,讓其他人的變更自動出現(失敗靜默忽略,下輪再試)。
+  // 暫停條件有兩個:
+  //   ①拖曳排序中——刷新會重排 projects,拖到一半的位置會跳掉。
+  //   ②任何彈窗/面板開啟中——refreshData 會整包換掉 projects/taskLogs,而使用者正在彈窗裡看的就是那份資料。
+  //     打到一半的字不會被抹掉(表單值是開窗當下用 useState 初始化的,之後不再同步 props),
+  //     但畫面上的對照資料會在眼前跳動(如「前幾週回報」、排程、評分),
+  //     而且使用者是看著舊資料做決定、送出時覆蓋新值 → 正是 last-write-wins 的實際發生路徑。
+  const pausedAtRef = useRef(null);
   React.useEffect(() => {
-    if (!currentUser || dragState) return;
+    if (!currentUser) return;
+    if (dragState || isAnyModalOpen) {
+      if (pausedAtRef.current === null) pausedAtRef.current = Date.now(); // 記錄暫停起點
+      return;
+    }
+    // 暫停期間若已經跨過一個輪詢週期,關窗後補刷一次;否則使用者得再等滿 60 秒才看得到別人的變更。
+    // ⚠ 只在「真的錯過」時才補:存檔類操作本身已經 await refreshData(),關窗馬上再打一次 bootstrap 是多餘的
+    //    (bootstrap 是整包載入的重端點,每次存檔都雙倍請求並不划算)。
+    const missedTick = pausedAtRef.current !== null && Date.now() - pausedAtRef.current >= 60000;
+    pausedAtRef.current = null;
+    if (missedTick) refreshData().catch(() => {});
     const timer = setInterval(() => {
       refreshData().catch(() => {});
     }, 60000);
     return () => clearInterval(timer);
-  }, [currentUser, dragState, refreshData]);
+  }, [currentUser, dragState, isAnyModalOpen, refreshData]);
 
   // --- 全域鍵盤導航（方向鍵平移甘特圖、Home/H 回本週、ESC 關閉最上層彈窗） ---
   React.useEffect(() => {
     if (!currentUser) return;
     const handler = e => {
-      // 中文組字中略過
+      // 中文組字中略過。
+      // 此處是 document.addEventListener 的**原生**事件,可以直接讀 e.isComposing;
+      // React 的 onKeyDown 不行(合成事件沒這個屬性),那邊一律用 isComposingEvent(e)。
       if (e.isComposing) return;
       // 焦點在表單元素時略過（搜尋框、輸入框等）
+      // ⚠ ESC 是例外:它在輸入框裡的語意就是「取消」。彈窗加了焦點鎖之後 Tab 會走進輸入框,
+      //   若比照其他快捷鍵一起略過,使用者在輸入框按 ESC 會關不掉視窗(實測踩到)。
       const tag = document.activeElement?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key !== 'Escape' && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT')) return;
 
       // ESC：關閉最上層 Modal/Panel（優先序由內到外）;
       // 表單型視窗有未儲存內容(MODAL_DIRTY)時,先跳確認避免默默丟失輸入
@@ -1276,8 +1705,7 @@ function App() {
         return;
       }
 
-      // 以下導航快捷鍵：任何 Modal/Panel 開啟時不觸發
-      const isAnyModalOpen = !!(confirmInfo || commentTarget || selectedTaskInfo || deliverableProj || editingProject || addingInterval || showExtraNoteModal || showWeeklyPlanModal || showWeeklyReport || showPendingPanel || showRetroPanel || showWeekEditPanel || showAuditPanel || showMemberPanel || showAccessPanel || showUsagePanel || showAdminMenu || showDeadlinePanel);
+      // 以下導航快捷鍵：任何 Modal/Panel 開啟時不觸發（判斷共用上方的 isAnyModalOpen，說明見該處）
       if (isAnyModalOpen) return;
 
       // Home 或 H：回到本週
@@ -1302,11 +1730,12 @@ function App() {
     };
     window.addEventListener('keydown', handler, true); // capture phase
     return () => window.removeEventListener('keydown', handler, true);
-  }, [currentUser, weekW, isOverview, isResults, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showUsagePanel, showAdminMenu, showDeadlinePanel, goToCurrentWeek, closeWeeklyReport]);
+  }, [currentUser, weekW, isOverview, isResults, isAnyModalOpen, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showUsagePanel, showAdminMenu, showDeadlinePanel, goToCurrentWeek, closeWeeklyReport]);
   const existingCategories = useMemo(() => [...new Set(projects.map(p => p.category).filter(Boolean))].sort(), [projects]);
 
   // 搜尋/類型篩選會隱藏同成員內的部分專案列,此時拖曳落點會與畫面不一致,故暫停拖曳排序
-  const isFilteringRows = searchText.trim() !== '' || typeFilter.size > 0;
+  // pendingOnly 也算:它同樣會隱藏同一位成員底下的部分專案列,拖曳落點會與畫面對不上
+  const isFilteringRows = searchText.trim() !== '' || typeFilter.size > 0 || pendingOnly;
   const handleSaveProject = async form => {
     try {
       if (form.mode === 'add') {
@@ -1519,16 +1948,18 @@ function App() {
   const filteredProjects = useMemo(() => {
     const kw = searchText.trim().toLowerCase();
     return projects.filter(p => {
-      if (!isResults && onlyMine && role === 'member' && p.owner !== currentUser) return false;
-      if (!onlyMine && ownerFilter !== 'all' && p.owner !== ownerFilter) return false;
+      if (ownerFilter !== 'all' && p.owner !== ownerFilter) return false; // 三個檢視共用的成員下拉
       if (typeFilter.size > 0 && !typeFilter.has(p.type)) return false;
+      // 「未回報」晶片的篩選:只留下本週有排定、但還沒回報的專案。
+      // 主管每週的核心動作就是「誰還沒交」——原本看到「未回報 18」之後,只能自己在 69 列裡找紅框。
+      if (pendingOnly && !p.tasks.some(t => t.start <= currentWeek && t.end >= currentWeek && !taskLogs[t.id]?.[currentWeek])) return false;
       if (kw) {
         const hay = `${p.name} ${p.category} ${p.owner} ${p.tasks.map(t => t.name).join(' ')}`.toLowerCase();
         if (!hay.includes(kw)) return false;
       }
       return true;
     });
-  }, [projects, searchText, typeFilter, ownerFilter, onlyMine, role, currentUser, isResults]);
+  }, [projects, searchText, typeFilter, ownerFilter, pendingOnly, currentWeek, taskLogs]);
 
   // 主管未啟用搜尋/類型篩選時，沒有專案的成員(如剛加入的新同仁)也要顯示群組列,才能為其新增專案
   const groupedProjects = useMemo(() => users.map(user => ({
@@ -1561,23 +1992,49 @@ function App() {
     return list.sort((a, b) => a.remain - b.remain);
   }, [projects, isTaskDeadlineSoon, todayWeek]);
 
+  // --- 甘特條的 roving tabindex ---
+  // 107 個甘特條原本各自 tabIndex=0,鍵盤使用者要按 107 次 Tab 才穿得過甘特區。
+  // 改成整區只留一個 Tab 停留點(目前聚焦過的那條,沒有就是第一條),進去之後用 ↑↓ 移動。
+  // 順序直接照渲染順序算(收合的成員群組不入列),與畫面上看到的一致。
+  const ganttBarTaskIds = useMemo(() => {
+    const ids = [];
+    groupedProjects.forEach(g => {
+      if (collapsedOwners.has(g.owner)) return;
+      g.projects.forEach(p => p.tasks.forEach(t => ids.push(t.id)));
+    });
+    return ids;
+  }, [groupedProjects, collapsedOwners]);
+  // ⚠ 存成字串:onRove 是從 DOM 的 data-roving-id 讀回來的(字串),onFocus 給的是原始 id(數字),
+  //    兩條路徑都會寫進這個 state,故一律以字串比較,避免 32 !== '32' 造成 tab stop 找不到目標。
+  const [rovingTaskId, setRovingTaskId] = useState(null);
+  // 篩選/收合把原本那條藏起來時要退回第一條,否則整區會變成「沒有任何 Tab 停留點」＝鍵盤進不去
+  const activeRovingTaskId = rovingTaskId != null && ganttBarTaskIds.some(id => String(id) === String(rovingTaskId)) ? rovingTaskId : ganttBarTaskIds[0];
+
   // --- 本週統計 ---
+  // ⚠ 跟著**成員下拉(ownerFilter)**走,不是永遠全隊:標題就寫在被篩選過的表格正上方,
+  //   選了「玉婷」卻顯示全隊 3/21、而表格是 16/69,兩組數字對不起來(實測 all→玉婷→裕隆 晶片三次都不變)。
+  //   標題會同步顯示範圍(全隊 / 成員名),使用者不必用猜的。
+  // ⚠ 但**不吃搜尋與類型篩選**:那兩個是臨時的「找資料」動作,概況是「這週該做的事完成多少」的固定基準——
+  //   跟著關鍵字一起跳動的話,邊打字邊變的數字沒有任何意義。
   const weekStats = useMemo(() => {
     let active = 0,
       reported = 0,
       executed = 0,
       monitor = 0,
       notExec = 0;
-    projects.forEach(p => p.tasks.forEach(t => {
-      if (t.start <= currentWeek && t.end >= currentWeek) {
-        active++;
-        const log = taskLogs[t.id]?.[currentWeek];
-        if (log) {
-          reported++;
-          if (log.status === 'not_executed') notExec++;else if (log.status === 'monitor') monitor++;else executed++;
+    projects.forEach(p => {
+      if (ownerFilter !== 'all' && p.owner !== ownerFilter) return;
+      p.tasks.forEach(t => {
+        if (t.start <= currentWeek && t.end >= currentWeek) {
+          active++;
+          const log = taskLogs[t.id]?.[currentWeek];
+          if (log) {
+            reported++;
+            if (log.status === 'not_executed') notExec++;else if (log.status === 'monitor') monitor++;else executed++;
+          }
         }
-      }
-    }));
+      });
+    });
     return {
       active,
       reported,
@@ -1586,7 +2043,7 @@ function App() {
       notExec,
       pending: active - reported
     };
-  }, [projects, taskLogs, currentWeek]);
+  }, [projects, taskLogs, currentWeek, ownerFilter]);
   const myPendingTasks = useMemo(() => {
     if (role !== 'member') return [];
     const list = [];
@@ -1667,6 +2124,15 @@ function App() {
   const hideTooltip = () => setTooltip(null);
 
   // 瀏覽權限卡控:檢查完成前顯示載入畫面;卡控啟用且未通過 → 整頁無權限畫面(不顯示登入與任何資料)
+  // 逾時:給錯誤畫面＋重試,不要無限轉圈(原本使用者唯一的出路是自己想到按 Ctrl+F5)
+  if (accessError) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "min-h-screen bg-slate-100 app-bg flex flex-col"
+    }, /*#__PURE__*/React.createElement(ErrorScreen, {
+      message: accessError,
+      onRetry: () => setAccessRetry(n => n + 1)
+    }));
+  }
   if (!accessCheck) return /*#__PURE__*/React.createElement("div", {
     className: "min-h-screen bg-slate-100 app-bg flex flex-col"
   }, /*#__PURE__*/React.createElement(LoadingScreen, null));
@@ -1677,632 +2143,29 @@ function App() {
       person: accessCheck.person
     });
   }
-  return /*#__PURE__*/React.createElement("div", {
-    className: "min-h-screen bg-slate-100 app-bg font-sans flex flex-col relative overflow-hidden"
-  }, /*#__PURE__*/React.createElement("header", {
-    className: "text-white px-4 py-2 flex justify-between items-center z-50 shadow-md",
-    style: {
-      backgroundColor: NAVY
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center space-x-4"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center space-x-2"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-white/10 p-1.5 rounded-lg border border-white/20"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-5 h-5",
-    style: {
-      color: GOLD
-    },
-    fill: "none",
-    stroke: "currentColor",
-    viewBox: "0 0 24 24"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"
-  }))), /*#__PURE__*/React.createElement("span", {
-    className: "text-base font-bold tracking-wide"
-  }, "MSD \u5C08\u6848\u8FFD\u8E64\u7E3D\u8868")), currentUser && /*#__PURE__*/React.createElement("div", {
-    className: "px-3 py-1 rounded-full border border-white/10 flex items-center shadow-inner",
-    style: {
-      backgroundColor: '#001338'
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-white/85 mr-2 text-xs font-medium"
-  }, "\u7CFB\u7D71\u9031\u6578"), role === 'manager' ? /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center space-x-1.5"
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      const w = Math.max(1, currentWeek - 1);
-      setCurrentWeek(w);
-      setScrollTargetWeek(w);
-    },
-    className: "w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
-    title: "\u4E0A\u4E00\u9031"
-  }, "\u2039"), /*#__PURE__*/React.createElement("span", {
-    className: "font-bold text-sm tracking-wider text-center",
-    style: {
-      color: GOLD,
-      minWidth: 100
-    }
-  }, "W", String(currentWeek).padStart(2, '0'), /*#__PURE__*/React.createElement("span", {
-    className: "text-white/75 font-normal text-[10px] ml-1"
-  }, weekToMonth(currentWeek, months))), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      const w = Math.min(weeksTotal, currentWeek + 1);
-      setCurrentWeek(w);
-      setScrollTargetWeek(w);
-    },
-    className: "w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
-    title: "\u4E0B\u4E00\u9031"
-  }, "\u203A")) : /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center space-x-1.5"
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      const w = Math.max(1, currentWeek - 1);
-      setCurrentWeek(w);
-      setScrollTargetWeek(w);
-    },
-    className: "w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
-    title: "\u6AA2\u8996\u524D\u4E00\u9031(\u552F\u8B80)"
-  }, "\u2039"), /*#__PURE__*/React.createElement("span", {
-    className: "font-bold text-sm tracking-wider text-center",
-    style: {
-      color: GOLD,
-      minWidth: 100
-    }
-  }, "W", String(currentWeek).padStart(2, '0'), /*#__PURE__*/React.createElement("span", {
-    className: "text-white/75 font-normal text-[10px] ml-1"
-  }, weekToMonth(currentWeek, months))), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      const w = Math.min(todayWeek, currentWeek + 1);
-      setCurrentWeek(w);
-      setScrollTargetWeek(w);
-    },
-    disabled: currentWeek >= todayWeek,
-    className: `w-5 h-5 flex items-center justify-center rounded-full text-xs font-bold transition ${currentWeek >= todayWeek ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-white/10 hover:bg-white/30'}`,
-    title: "\u6AA2\u8996\u5F8C\u4E00\u9031"
-  }, "\u203A")), role === 'member' && isViewingPast && /*#__PURE__*/React.createElement("button", {
-    onClick: goToCurrentWeek,
-    className: "ml-2 flex items-center bg-yellow-500/90 hover:bg-yellow-400 text-slate-900 text-[10px] font-bold px-2 py-0.5 rounded-full transition"
-  }, "\uD83D\uDD12 \u552F\u8B80\u6AA2\u8996\u4E2D \xB7 \u8FD4\u56DE\u672C\u9031 W", String(todayWeek).padStart(2, '0')))), currentUser && /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center space-x-2"
-  }, role === 'member' && allowRetroCheckin && currentWeek !== todayWeek &&
-  /*#__PURE__*/
-  // 主管開放補登時:成員檢視非當週可直接修改該週回報(任務打卡/非專案/下週預計;主管回覆不可異動)
-  React.createElement("button", {
-    onClick: () => setShowRetroPanel(true),
-    className: "bg-amber-700/80 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-md transition flex items-center gap-1 border border-amber-400/80",
-    title: `主管已開放補登：可修改 W${String(currentWeek).padStart(2, '0')} 的任務打卡、非專案事項與下週預計工作`
-  }, "\uD83D\uDD58 \u4FEE\u6539 W", String(currentWeek).padStart(2, '0'), " \u56DE\u5831"), role === 'member' &&
-  /*#__PURE__*/
-  // 本週回報的三件事(任務打卡/下週預計/非專案事項)合併為單一入口;紅點=未回報任務+未填下週預計(非專案為選填不計)
-  React.createElement("button", {
-    onClick: () => setShowPendingPanel(true),
-    className: "relative bg-amber-500 hover:bg-amber-600 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold shadow-md transition flex items-center gap-1.5 border border-amber-400"
-  }, /*#__PURE__*/React.createElement("span", null, "\uD83D\uDCCB \u672C\u9031\u56DE\u5831\u4E2D\u5FC3"), totalPendingCount > 0 && /*#__PURE__*/React.createElement("span", {
-    className: "bg-red-600 text-white text-[11px] px-1.5 py-0.5 rounded-full font-black shadow leading-none"
-  }, totalPendingCount)), role === 'manager' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowWeekEditPanel(true),
-    className: "bg-amber-700/80 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-md transition flex items-center gap-1 border border-amber-400/80",
-    title: `編輯 W${String(currentWeek).padStart(2, '0')} 各成員回報：代成員補登/修正任務打卡、非專案事項、下週預計工作，並可編輯主管回覆`
-  }, "\uD83D\uDEE0 \u7DE8\u8F2F W", String(currentWeek).padStart(2, '0'), " \u56DE\u5831")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowWeeklyReport(true),
-    className: "bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-blue-400/50"
-  }, "\uD83D\uDCCA W", String(currentWeek).padStart(2, '0'), " \u5718\u968A\u7E3D\u7D50"), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center space-x-3 border-l border-white/20 pl-3 ml-1"
-  }, role === 'manager' && /*#__PURE__*/React.createElement("div", {
-    className: "relative"
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowAdminMenu(v => !v),
-    className: `px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20 text-white ${showAdminMenu ? 'bg-white/25' : 'bg-white/10 hover:bg-white/20'}`,
-    title: "\u7BA1\u7406\u529F\u80FD\uFF1A\u6210\u54E1\u7BA1\u7406\u3001\u700F\u89BD\u6B0A\u9650\u3001\u4F7F\u7528\u7D71\u8A08\u3001\u7570\u52D5\u7D00\u9304"
-  }, "\u2699\uFE0F \u7BA1\u7406 ", showAdminMenu ? '▴' : '▾'), showAdminMenu && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-0 z-[60]",
-    onClick: () => setShowAdminMenu(false)
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "absolute right-0 top-full mt-1.5 z-[70] w-44 bg-white rounded-xl shadow-2xl border border-slate-300 py-1.5 overflow-hidden"
-  }, [{
-    icon: '👥',
-    label: '成員管理',
-    desc: '新增/移除/改名',
-    open: () => setShowMemberPanel(true)
-  }, {
-    icon: '🔐',
-    label: '瀏覽權限',
-    desc: '部門/工號卡控',
-    open: () => setShowAccessPanel(true)
-  }, {
-    icon: '📈',
-    label: '使用統計',
-    desc: '登入次數/使用率',
-    open: () => setShowUsagePanel(true)
-  }, {
-    icon: '📜',
-    label: '異動紀錄',
-    desc: '操作稽核',
-    open: () => setShowAuditPanel(true)
-  }].map(item => /*#__PURE__*/React.createElement("button", {
-    key: item.label,
-    onClick: () => {
-      setShowAdminMenu(false);
-      item.open();
-    },
-    className: "w-full text-left px-3.5 py-2 hover:bg-slate-100 transition flex items-center gap-2.5"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-base"
-  }, item.icon), /*#__PURE__*/React.createElement("span", {
-    className: "min-w-0"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "block text-xs font-bold text-slate-800"
-  }, item.label), /*#__PURE__*/React.createElement("span", {
-    className: "block text-[10px] text-slate-500"
-  }, item.desc))))))), /*#__PURE__*/React.createElement("div", {
-    className: "text-right leading-tight"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "font-bold text-sm"
-  }, currentUser), /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] text-white/80"
-  }, role === 'manager' ? '主管' : '成員', empId ? ` · 工號 ${empId}` : '')), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setIsDark(v => !v),
-    className: "p-1.5 hover:bg-white/20 rounded-lg transition text-white/80 hover:text-white bg-white/5 text-sm leading-none w-8 h-8 flex items-center justify-center",
-    title: isDark ? '切換為淺色模式' : '切換為深色模式'
-  }, isDark ? '☀️' : '🌙'), /*#__PURE__*/React.createElement("button", {
-    onClick: handleLogout,
-    className: "p-1.5 hover:bg-red-500/80 rounded-lg transition text-white/70 hover:text-white bg-white/5",
-    title: "\u767B\u51FA"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-4 h-4",
-    fill: "none",
-    stroke: "currentColor",
-    viewBox: "0 0 24 24"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-  })))))), dataLoading ? /*#__PURE__*/React.createElement(LoadingScreen, null) : dataError ? /*#__PURE__*/React.createElement(ErrorScreen, {
-    message: dataError,
-    onRetry: loadBootstrap
-  }) : !currentUser ? /*#__PURE__*/React.createElement(LoginScreen, {
-    onLogin: handleLogin,
-    users: users,
-    year: scheduleYear,
-    empId: empId
-  }) : /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 flex flex-col overflow-hidden bg-white relative"
-  }, isResults ? /*#__PURE__*/React.createElement("div", {
-    className: "px-4 py-2 border-b border-slate-300 bg-gradient-to-r from-amber-50/80 via-white to-white dark:bg-none dark:bg-slate-800 flex items-center justify-between text-xs overflow-x-auto"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-3"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "font-black text-amber-800 dark:text-amber-300 text-sm"
-  }, "\uD83C\uDFAF ", scheduleYear, " \u5E74\u5EA6\u6210\u679C\u8207 MP \u6548\u76CA\u6E05\u55AE"), /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-500"
-  }, "\u6AA2\u8996\u6240\u6709\u5C08\u6848\u5B8C\u5DE5\u9810\u8A08\u4EA4\u4ED8\u4E4B\u5177\u9AD4\u7522\u51FA\u8207\u7D2F\u8A08\u7BC0\u7701\u4E4B MP \u4EBA\u529B")), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-4"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-amber-100/80 border border-amber-300 text-amber-900 px-3 py-1 rounded-full font-bold"
-  }, "\u5DF2\u586B\u5BEB\u7522\u51FA\u9805\u76EE\uFF1A", projects.filter(p => p.deliverable).length, " / ", projects.length, " \u6848"), /*#__PURE__*/React.createElement("div", {
-    className: "bg-emerald-100/80 border border-emerald-300 text-emerald-900 px-3 py-1 rounded-full font-bold"
-  }, "\uD83D\uDCA1 MP Saving\uFF1A", projects.filter(p => p.mpSaving).length, " \u6848"))) : /*#__PURE__*/React.createElement("div", {
-    className: "px-4 py-2 border-b border-slate-300 bg-gradient-to-r from-slate-50 to-white flex items-center gap-3 text-xs overflow-x-auto"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center flex-shrink-0"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "font-black text-slate-900 text-sm"
-  }, "W", String(currentWeek).padStart(2, '0')), /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-600 ml-1 text-[10px]"
-  }, weekToMonth(currentWeek, months), " \u6982\u6CC1")), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center flex-shrink-0 min-w-[150px]"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 h-2 bg-slate-300 rounded-full overflow-hidden"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: `h-full rounded-full transition-all duration-500 ${weekStats.active > 0 && weekStats.reported === weekStats.active ? 'bg-green-600' : 'bg-indigo-600'}`,
-    style: {
-      width: `${weekStats.active > 0 ? weekStats.reported / weekStats.active * 100 : 0}%`
-    }
-  })), /*#__PURE__*/React.createElement("span", {
-    className: "ml-2 font-bold text-slate-800 whitespace-nowrap"
-  }, weekStats.reported, "/", weekStats.active, " \u5DF2\u56DE\u5831")), /*#__PURE__*/React.createElement("div", {
-    className: "h-6 border-l border-slate-300 flex-shrink-0"
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-1.5 flex-shrink-0"
-  }, /*#__PURE__*/React.createElement(StatChip, {
-    label: "\u6709\u57F7\u884C",
-    value: weekStats.executed,
-    className: "bg-green-100 text-green-800 border-green-400"
-  }), /*#__PURE__*/React.createElement(StatChip, {
-    label: "Monitor",
-    value: weekStats.monitor,
-    className: "bg-sky-100 text-sky-800 border-sky-400"
-  }), /*#__PURE__*/React.createElement(StatChip, {
-    label: "\u672A\u57F7\u884C",
-    value: weekStats.notExec,
-    className: "bg-slate-200 text-slate-700 border-slate-400"
-  }), /*#__PURE__*/React.createElement(StatChip, {
-    label: "\u672A\u56DE\u5831",
-    value: weekStats.pending,
-    className: weekStats.pending > 0 ? 'bg-yellow-100 text-yellow-800 border-yellow-500' : 'bg-slate-100 text-slate-500 border-slate-300'
-  }), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowDeadlinePanel(true),
-    title: "\u9EDE\u64CA\u6AA2\u8996\u5373\u5C07\u5230\u671F\u6E05\u55AE",
-    className: `flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border transition ${deadlineTasks.length > 0 ? 'bg-orange-100 text-orange-800 hover:bg-orange-200 border-orange-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 border-slate-300'}`
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "font-medium text-[11px]"
-  }, "\u23F0 \u5373\u5C07\u5230\u671F"), /*#__PURE__*/React.createElement("span", {
-    className: "text-[13px] leading-none"
-  }, deadlineTasks.length), /*#__PURE__*/React.createElement("span", {
-    className: "text-[11px]"
-  }, "\u203A"))), /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 min-w-[8px]"
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "flex-shrink-0 flex items-center gap-2 text-[11px] text-slate-600 border border-slate-300 rounded-lg bg-white ctl-raised px-2 py-0.5"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "flex items-center",
-    title: "\u9EC3\u8272\u659C\u7D0B\u689D\uFF1D\u8A08\u756B\u5340\u9593(\u6392\u5B9A\u7684\u8D77\u8A16\u9031)"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "w-3 h-2.5 mr-1 rounded-sm border",
-    style: {
-      backgroundImage: 'repeating-linear-gradient(45deg,#FFF6D6,#FFF6D6 3px,#FDEDB8 3px,#FDEDB8 6px)',
-      borderColor: '#B45309'
-    }
-  }), "\u8A08\u756B"), /*#__PURE__*/React.createElement("span", {
-    className: "flex items-center",
-    title: "\u7DA0\u8272\uFF1D\u8A72\u9031\u56DE\u5831\u300C\u6709\u57F7\u884C\u300D"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "w-2.5 h-2.5 bg-green-700 mr-1 rounded-sm"
-  }), "\u6709\u57F7\u884C"), /*#__PURE__*/React.createElement("span", {
-    className: "flex items-center",
-    title: "\u85CD\u8272\uFF1D\u8A72\u9031\u56DE\u5831\u300CMonitor(\u4F8B\u884C\u76E3\u63A7)\u300D"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "w-2.5 h-2.5 bg-sky-700 mr-1 rounded-sm"
-  }), "Monitor"), /*#__PURE__*/React.createElement("span", {
-    className: "flex items-center",
-    title: "\u7070\u8272\uFF1D\u8A72\u9031\u56DE\u5831\u300C\u672A\u57F7\u884C\u300D"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "w-2.5 h-2.5 bg-slate-500 mr-1 rounded-sm"
-  }), "\u672A\u57F7\u884C"), /*#__PURE__*/React.createElement("span", {
-    className: "flex items-center",
-    title: "\u7D05\u6846\uFF0B\u2757\uFF1D\u672C\u9031\u6392\u5B9A\u4F46\u5C1A\u672A\u56DE\u5831\u7684\u4EFB\u52D9"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "w-3 h-2.5 mr-1 rounded-sm border-2 border-red-400 bg-white"
-  }), "\u2757\u5F85\u56DE\u5831"), /*#__PURE__*/React.createElement("span", {
-    className: "flex items-center text-slate-500 border-l border-slate-300 pl-2",
-    title: "\u9375\u76E4\u5FEB\u6377\u9375\uFF1AH\uFF1D\u56DE\u5230\u672C\u9031\u4E26\u7F6E\u4E2D\uFF1B\u2190 \u2192\uFF1D\u5DE6\u53F3\u5E73\u79FB 4 \u9031\uFF1BShift\uFF0B\u2190 \u2192\uFF1D\u5FAE\u79FB 1 \u9031\uFF1BESC\uFF1D\u95DC\u9589\u6700\u4E0A\u5C64\u8996\u7A97"
-  }, "\u2328 H \u56DE\u672C\u9031\u30FB\u2190\u2192 \u5E73\u79FB"))), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white px-4 py-1.5 border-b border-slate-300 flex flex-nowrap items-center gap-1.5 text-[11px] z-30 overflow-x-auto [&>*]:flex-shrink-0"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "relative"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-slate-500",
-    fill: "none",
-    stroke: "currentColor",
-    viewBox: "0 0 24 24"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"
-  })), /*#__PURE__*/React.createElement("input", {
-    value: searchText,
-    onChange: e => setSearchText(e.target.value),
-    placeholder: "\u641C\u5C0B\u5C08\u6848 / \u4EFB\u52D9\u2026",
-    className: "pl-7 pr-6 py-1 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition w-44 focus:w-52"
-  }), searchText && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setSearchText(''),
-    className: "absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-600 font-bold px-1"
-  }, "\xD7")), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center space-x-1"
-  }, Object.entries(PROJECT_TYPES).map(([key, meta]) => {
-    const on = typeFilter.has(key);
-    return /*#__PURE__*/React.createElement("button", {
-      key: key,
-      onClick: () => toggleTypeFilter(key),
-      className: `px-1.5 py-0.5 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white ctl-raised text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`,
-      title: meta.label
-    }, key, "\xB7", meta.label);
-  }), typeFilter.size > 0 && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setTypeFilter(new Set()),
-    className: "text-blue-600 hover:underline px-1"
-  }, "\u6E05\u9664")), /*#__PURE__*/React.createElement("div", {
-    className: "h-5 border-l border-slate-300"
-  }), role === 'member' && !isResults ? /*#__PURE__*/React.createElement("label", {
-    className: "flex items-center space-x-1.5 cursor-pointer select-none bg-slate-100 border border-slate-300 rounded-lg px-2 py-1"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "checkbox",
-    checked: onlyMine,
-    onChange: e => setOnlyMine(e.target.checked),
-    className: "w-3.5 h-3.5 rounded text-blue-600"
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "font-medium text-slate-700"
-  }, "\u53EA\u770B\u6211\u7684\u5C08\u6848")) : /*#__PURE__*/React.createElement("select", {
-    value: ownerFilter,
-    onChange: e => setOwnerFilter(e.target.value),
-    className: "border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white ctl-raised font-medium text-slate-700"
-  }, /*#__PURE__*/React.createElement("option", {
-    value: "all"
-  }, "\u5168\u90E8\u6210\u54E1"), users.map(u => /*#__PURE__*/React.createElement("option", {
-    key: u,
-    value: u
-  }, u))), /*#__PURE__*/React.createElement("div", {
-    className: "flex-1"
-  }), /*#__PURE__*/React.createElement("select", {
-    value: scheduleYear,
-    onChange: e => {
-      const y = parseInt(e.target.value);
-      setScheduleYear(y);
-      setCurrentWeek(getTodayWeek(y));
-    },
-    title: "\u5207\u63DB\u6392\u7A0B\u5E74\u5EA6(\u5E74\u5EA6\u8CC7\u6599\u7531 DB \u7684 ScheduleWeeks \u6C7A\u5B9A)",
-    className: "border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white ctl-raised font-bold text-slate-700"
-  }, (years.length ? years : [scheduleYear]).map(y => /*#__PURE__*/React.createElement("option", {
-    key: y,
-    value: y
-  }, y, " \u5E74\u5EA6"))), /*#__PURE__*/React.createElement("div", {
-    className: "flex rounded-lg overflow-hidden border",
-    style: {
-      borderColor: BRAND_BTN
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      if (isResults && role === 'member') {
-        setOnlyMine(true);
-        setOwnerFilter('all');
-      }
-      setIsOverview(false);
-      setIsResults(false);
-      savePref('overview', false);
-    },
-    className: `px-2 py-1 font-bold transition ${!isOverview && !isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`,
-    style: !isOverview && !isResults ? {
-      backgroundColor: BRAND_BTN
-    } : {}
-  }, "\u9031\u6AA2\u8996"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      if (isResults && role === 'member') {
-        setOnlyMine(true);
-        setOwnerFilter('all');
-      }
-      setIsOverview(true);
-      setIsResults(false);
-      savePref('overview', true);
-    },
-    className: `px-2 py-1 font-bold transition ${isOverview && !isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`,
-    style: isOverview && !isResults ? {
-      backgroundColor: BRAND_BTN
-    } : {},
-    title: "\u6574\u5E74 52 \u9031\u81EA\u52D5\u7E2E\u653E\u81F3\u4E00\u500B\u756B\u9762\u5BEC(\u7121\u6C34\u5E73\u6372\u8EF8),\u6ED1\u9F20\u505C\u7559\u7518\u7279\u689D\u53EF\u770B\u7D30\u7BC0"
-  }, "\u5E74\u5EA6\u7E3D\u89BD"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      if (role === 'member') {
-        setOnlyMine(false);
-        setOwnerFilter(currentUser);
-      }
-      setIsOverview(false);
-      setIsResults(true);
-    },
-    className: `px-2 py-1 font-bold transition ${isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`,
-    style: isResults ? {
-      backgroundColor: BRAND_BTN
-    } : {},
-    title: "\u6AA2\u8996\u5168\u5E74\u5EA6\u6240\u6709\u5C08\u6848\u7684\u5177\u9AD4\u7522\u51FA\u9805\u76EE\u8207 MP Saving \u7D71\u8A08(\u9AD8\u968E\u4E3B\u7BA1\u700F\u89BD\u8996\u89D2,\u552F\u8B80)"
-  }, "\u6210\u679C\u6E05\u55AE")), !isOverview && !isResults && /*#__PURE__*/React.createElement("button", {
-    onClick: goToCurrentWeek,
-    title: `回到本週 W${String(todayWeek).padStart(2, '0')} 並置中（快捷鍵 H）`,
-    className: "flex items-center text-white px-2 py-1 rounded-lg font-bold shadow-sm transition hover:opacity-90",
-    style: {
-      backgroundColor: BRAND_BTN
-    }
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-3.5 h-3.5 mr-1",
-    fill: "none",
-    stroke: "currentColor",
-    viewBox: "0 0 24 24"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M13 10V3L4 14h7v7l9-11h-7z"
-  })), "\u56DE\u5230\u672C\u9031"), /*#__PURE__*/React.createElement("div", {
-    className: "h-5 w-px bg-slate-300/80 mx-1 flex-shrink-0"
-  }), !isOverview && !isResults && /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      const v = !isCompact;
-      setIsCompact(v);
-      savePref('compact', v);
-    },
-    className: "text-slate-600 bg-slate-100 ctl-raised hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-300 font-medium transition"
-  }, isCompact ? '寬鬆模式' : '緊湊模式'), role === 'manager' &&
-  /*#__PURE__*/
-  // 長文字縮短:完整說明放 title;開啟時下方另有整條琥珀色警示列,資訊不會漏
-  React.createElement("button", {
-    onClick: toggleRetroCheckin,
-    className: `px-2 py-1 rounded-lg font-bold border shadow-sm transition flex items-center gap-1 ${allowRetroCheckin ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600' : 'bg-slate-100 ctl-raised hover:bg-slate-200 text-slate-700 border-slate-300'}`,
-    title: allowRetroCheckin ? '目前開放全體成員回報/調正今年度的所有歷史週次紀錄，點擊關閉' : '目前成員僅能回報當週，點擊開放歷史補登'
-  }, /*#__PURE__*/React.createElement("span", null, allowRetroCheckin ? '🔓 補登 ON' : '🔒 僅限當週')), !isResults && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    className: "h-5 w-px bg-slate-300/80 mx-1 flex-shrink-0"
-  }), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setCollapsedOwners(new Set()),
-    title: "\u5C55\u958B\u5168\u90E8\u6210\u54E1\u7FA4\u7D44",
-    className: "text-blue-600 hover:text-blue-800 font-medium"
-  }, "\u5C55\u958B"), /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-400"
-  }, "|"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setCollapsedOwners(new Set(users)),
-    title: "\u6536\u5408\u5168\u90E8\u6210\u54E1\u7FA4\u7D44",
-    className: "text-blue-600 hover:text-blue-800 font-medium"
-  }, "\u6536\u5408"))), allowRetroCheckin && /*#__PURE__*/React.createElement("div", {
-    className: "bg-amber-50 border-b border-amber-300 px-4 py-2 flex items-center justify-between text-xs text-amber-900 font-bold z-30"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-2"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "text-sm"
-  }, "\u26A0\uFE0F"), /*#__PURE__*/React.createElement("span", null, "\u7CFB\u7D71\u5DF2\u958B\u555F\u300C\u5168\u9AD4\u6210\u54E1\u6B77\u53F2\u9032\u5EA6\u88DC\u767B\u8207\u8ABF\u6B63\u300D\u8C41\u514D\u671F\uFF1A\u76EE\u524D\u53EF\u5C0D W", String(todayWeek).padStart(2, '0'), " \u4EE5\u524D\u4E4B\u6240\u6709\u6B77\u53F2\u9031\u6B21\u9032\u884C\u4EFB\u52D9\u8207\u975E\u5C08\u6848\u56DE\u5831\u3002")), role === 'manager' && /*#__PURE__*/React.createElement("button", {
-    onClick: toggleRetroCheckin,
-    className: "px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold shadow-sm transition"
-  }, "\u95DC\u9589\u8C41\u514D\u671F")), /*#__PURE__*/React.createElement("div", {
-    ref: ganttRef,
-    className: "flex-1 overflow-auto bg-slate-100 app-bg relative"
-  }, isResults ? /*#__PURE__*/React.createElement(ResultsView, {
-    projects: filteredProjects,
-    role: role,
-    currentUser: currentUser,
-    year: scheduleYear,
-    starredIds: starredIds,
-    toggleStar: toggleStar
-  }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    "aria-hidden": "true",
-    className: "sticky left-0 z-20 pointer-events-none",
-    style: {
-      width: isOverview ? 240 : 490,
-      height: 100000,
-      marginBottom: -100000,
-      background: 'var(--frozen-bg)'
-    }
-  }), /*#__PURE__*/React.createElement("table", {
-    className: "border-collapse bg-white",
-    style: {
-      tableLayout: 'fixed',
-      width: isOverview ? '100%' : 490 + weeksTotal * weekW
-    }
-  }, /*#__PURE__*/React.createElement("colgroup", null, !isOverview && /*#__PURE__*/React.createElement("col", {
-    style: {
-      width: 28
-    }
-  }), !isOverview && /*#__PURE__*/React.createElement("col", {
-    style: {
-      width: 42
-    }
-  }), /*#__PURE__*/React.createElement("col", {
-    style: {
-      width: isOverview ? 240 : 420
-    }
-  }), Array.from({
-    length: weeksTotal
-  }).map((_, i) => /*#__PURE__*/React.createElement("col", {
-    key: i,
-    style: isOverview ? undefined : {
-      width: weekW
-    }
-  }))), /*#__PURE__*/React.createElement("thead", {
-    className: "sticky top-0 z-40 text-xs shadow-sm bg-slate-100"
-  }, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
-    colSpan: isOverview ? 1 : 3,
-    className: "border-r border-b border-slate-300 bg-slate-200 sticky left-0 z-50 px-2 py-1 text-left",
-    style: {
-      width: isOverview ? 240 : 490
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex justify-between items-center text-[10px]"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "font-bold text-slate-700"
-  }, "\u5C08\u6848\u57FA\u672C\u8CC7\u8A0A"), /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-600 font-normal"
-  }, "\u986F\u793A ", filteredProjects.length, " / ", projects.length, " \u9805"))), months.map((m, i) => /*#__PURE__*/React.createElement("th", {
-    key: i,
-    colSpan: m.weeks,
-    className: "border-r border-b border-slate-300 text-white p-0.5 text-center font-medium text-[11px] tracking-wider relative overflow-hidden",
-    style: {
-      backgroundColor: i % 2 === 0 ? NAVY : '#0A3178'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "absolute inset-0 bg-gradient-to-b from-white/10 to-transparent"
-  }), m.name.slice(0, 4), "/", m.name.slice(4)))), !isOverview && /*#__PURE__*/React.createElement("tr", {
-    className: "bg-slate-100 text-slate-600 text-[11px]"
-  }, /*#__PURE__*/React.createElement("th", {
-    className: "border-r border-b border-slate-300 p-1 sticky left-0 z-50 text-center font-medium",
-    style: {
-      width: 28,
-      minWidth: 28,
-      maxWidth: 28,
-      backgroundColor: 'var(--gantt-sticky)'
-    }
-  }, "No"), /*#__PURE__*/React.createElement("th", {
-    className: "border-r border-b border-slate-300 p-1 sticky z-50 text-center font-medium",
-    style: {
-      width: 42,
-      minWidth: 42,
-      maxWidth: 42,
-      left: 28,
-      backgroundColor: 'var(--gantt-sticky)'
-    }
-  }, "\u5206\u985E"), /*#__PURE__*/React.createElement("th", {
-    className: "border-r border-b border-slate-300 p-1 sticky z-50 shadow-[3px_0_6px_rgba(0,0,0,0.08)] text-left pl-3 font-medium",
-    style: {
-      width: 420,
-      minWidth: 420,
-      maxWidth: 420,
-      left: 70,
-      backgroundColor: 'var(--gantt-sticky)'
-    }
-  }, "\u5C08\u6848\u540D\u7A31 (Project Name)"), Array.from({
-    length: weeksTotal
-  }).map((_, i) => {
-    const weekNum = i + 1;
-    const isCurrent = weekNum === currentWeek;
-    return /*#__PURE__*/React.createElement("th", {
-      key: i,
-      onClick: () => {
-        if (role === 'manager' || weekNum <= todayWeek) setCurrentWeek(weekNum);
-      },
-      title: role === 'manager' ? `點擊將系統週切換至 W${weekNum}` : weekNum <= todayWeek ? `點擊檢視 W${weekNum}(唯讀)` : undefined,
-      className: `border-r border-b border-slate-300 p-0 text-center relative ${role === 'manager' || weekNum <= todayWeek ? 'cursor-pointer hover:bg-blue-100' : ''} ${isCurrent ? 'text-white font-bold' : weekNum > todayWeek ? 'bg-slate-100 text-slate-500 font-normal' : 'bg-slate-100 text-slate-700 font-normal'}`,
+  return (
+    /*#__PURE__*/
+    // 主畫面用 h-screen(不是 min-h-screen):團隊看板改成分割欄位後會參與版面流,沒有明確高度時整棵樹會被
+    // 它的內容撐到數千 px,flex-1 分不出高度、面板內部的 overflow-y-auto 就捲不動(原本它是 fixed 才沒事)。
+    // 登入/載入/錯誤畫面維持 min-h-screen——那些畫面沒有內部捲動區,矮視窗時要能整頁撐開。
+    React.createElement("div", {
+      className: `bg-slate-100 app-bg font-sans flex flex-col relative overflow-hidden ${currentUser && !dataLoading && !dataError ? 'h-screen' : 'min-h-screen'}`
+    }, /*#__PURE__*/React.createElement("header", {
+      className: "text-white px-4 py-2 flex justify-between items-center z-50 shadow-md",
       style: {
-        width: weekW,
-        ...(isCurrent ? {
-          backgroundColor: NAVY
-        } : {})
-      }
-    }, isCurrent && /*#__PURE__*/React.createElement("div", {
-      className: "absolute -bottom-px left-0 right-0 h-0.5",
-      style: {
-        backgroundColor: GOLD
-      }
-    }), /*#__PURE__*/React.createElement("div", {
-      className: "py-1 z-10 relative"
-    }, isCompact ? weekNum : `W${String(weekNum).padStart(2, '0')}`));
-  }))), /*#__PURE__*/React.createElement("tbody", {
-    className: "text-xs"
-  }, groupedProjects.length === 0 ? /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-    colSpan: weeksTotal + 3,
-    className: "p-10 text-center text-slate-500"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "text-3xl mb-2"
-  }, "\uD83D\uDD0D"), "\u627E\u4E0D\u5230\u7B26\u5408\u689D\u4EF6\u7684\u5C08\u6848\u3002\u8ABF\u6574\u641C\u5C0B\u95DC\u9375\u5B57\u6216\u6E05\u9664\u7BE9\u9078\u5F8C\u518D\u8A66\u4E00\u6B21\u3002")) : groupedProjects.map(group => {
-    const isCollapsed = collapsedOwners.has(group.owner);
-    let gActive = 0,
-      gReported = 0;
-    group.projects.forEach(p => p.tasks.forEach(t => {
-      if (t.start <= currentWeek && t.end >= currentWeek) {
-        gActive++;
-        if (taskLogs[t.id]?.[currentWeek]) gReported++;
-      }
-    }));
-    return /*#__PURE__*/React.createElement(React.Fragment, {
-      key: group.owner
-    }, /*#__PURE__*/React.createElement("tr", {
-      onClick: () => toggleOwnerCollapse(group.owner),
-      className: "group/header bg-[var(--gantt-group)] hover:bg-[var(--gantt-group-hover)] cursor-pointer border-b border-blue-100 transition-colors"
-    }, /*#__PURE__*/React.createElement("td", {
-      colSpan: isOverview ? 1 : 3,
-      className: "sticky left-0 z-40 border-r border-blue-200 p-0 shadow-[3px_0_6px_rgba(0,0,0,0.06)]",
-      style: {
-        width: isOverview ? 240 : 490,
-        minWidth: isOverview ? 240 : 490,
-        maxWidth: isOverview ? 240 : 490,
-        backgroundColor: 'var(--gantt-group)'
+        backgroundColor: NAVY
       }
     }, /*#__PURE__*/React.createElement("div", {
-      className: "flex items-center text-blue-900 font-bold text-[13px] px-2 py-1.5 border-l-4",
-      style: {
-        borderColor: NAVY
-      }
+      className: "flex items-center space-x-4"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center space-x-2"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bg-white/10 p-1.5 rounded-lg border border-white/20"
     }, /*#__PURE__*/React.createElement("svg", {
-      className: `w-4 h-4 mr-1 text-blue-500 transition-transform ${isCollapsed ? '-rotate-90' : ''}`,
+      className: "w-5 h-5",
+      style: {
+        color: GOLD
+      },
       fill: "none",
       stroke: "currentColor",
       viewBox: "0 0 24 24"
@@ -2310,184 +2173,847 @@ function App() {
       strokeLinecap: "round",
       strokeLinejoin: "round",
       strokeWidth: 2,
-      d: "M19 9l-7 7-7-7"
-    })), /*#__PURE__*/React.createElement("div", {
-      className: "w-6 h-6 rounded-full text-white flex items-center justify-center text-xs mr-2 flex-shrink-0",
+      d: "M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"
+    }))), /*#__PURE__*/React.createElement("span", {
+      className: "text-base font-bold tracking-wide"
+    }, "MSD \u5C08\u6848\u8FFD\u8E64\u7E3D\u8868")), currentUser && !isResults && /*#__PURE__*/React.createElement("div", {
+      className: "px-3 py-1 rounded-full border border-white/10 flex items-center shadow-inner",
+      style: {
+        backgroundColor: '#001338'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "text-white/85 mr-2 text-xs font-medium"
+    }, "\u7CFB\u7D71\u9031\u6578"), role === 'manager' ? /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center space-x-1.5"
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        const w = Math.max(1, currentWeek - 1);
+        setCurrentWeek(w);
+        setScrollTargetWeek(w);
+      },
+      className: "w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
+      "aria-label": "\u4E0A\u4E00\u9031",
+      title: "\u4E0A\u4E00\u9031"
+    }, "\u2039"), /*#__PURE__*/React.createElement("span", {
+      className: "inline-flex items-baseline",
+      style: {
+        minWidth: 100
+      }
+    }, /*#__PURE__*/React.createElement(WeekNumberInput, {
+      week: currentWeek,
+      max: weeksTotal,
+      label: `跳至指定週次（1–${weeksTotal}）`,
+      onCommit: w => {
+        setCurrentWeek(w);
+        setScrollTargetWeek(w);
+      }
+    }), /*#__PURE__*/React.createElement("span", {
+      className: "text-white/75 font-normal text-[10px] ml-1"
+    }, weekToMonth(currentWeek, months))), /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        const w = Math.min(weeksTotal, currentWeek + 1);
+        setCurrentWeek(w);
+        setScrollTargetWeek(w);
+      },
+      className: "w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
+      "aria-label": "\u4E0B\u4E00\u9031",
+      title: "\u4E0B\u4E00\u9031"
+    }, "\u203A")) : /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center space-x-1.5"
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        const w = Math.max(1, currentWeek - 1);
+        setCurrentWeek(w);
+        setScrollTargetWeek(w);
+      },
+      className: "w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
+      "aria-label": "\u6AA2\u8996\u524D\u4E00\u9031(\u552F\u8B80)",
+      title: "\u6AA2\u8996\u524D\u4E00\u9031(\u552F\u8B80)"
+    }, "\u2039"), /*#__PURE__*/React.createElement("span", {
+      className: "inline-flex items-baseline",
+      style: {
+        minWidth: 100
+      }
+    }, /*#__PURE__*/React.createElement(WeekNumberInput, {
+      week: currentWeek,
+      max: todayWeek,
+      label: `跳至指定週次（1–${todayWeek}，僅能檢視本週以前）`,
+      onCommit: w => {
+        setCurrentWeek(w);
+        setScrollTargetWeek(w);
+      }
+    }), /*#__PURE__*/React.createElement("span", {
+      className: "text-white/75 font-normal text-[10px] ml-1"
+    }, weekToMonth(currentWeek, months))), /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        const w = Math.min(todayWeek, currentWeek + 1);
+        setCurrentWeek(w);
+        setScrollTargetWeek(w);
+      },
+      disabled: currentWeek >= todayWeek,
+      className: `w-5 h-5 flex items-center justify-center rounded-full text-xs font-bold transition ${currentWeek >= todayWeek ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-white/10 hover:bg-white/30'}`,
+      "aria-label": "\u6AA2\u8996\u5F8C\u4E00\u9031",
+      title: "\u6AA2\u8996\u5F8C\u4E00\u9031"
+    }, "\u203A")), role === 'member' && isViewingPast && /*#__PURE__*/React.createElement("button", {
+      onClick: goToCurrentWeek,
+      className: "ml-2 flex items-center bg-yellow-500/90 hover:bg-yellow-400 text-slate-900 text-[10px] font-bold px-2 py-0.5 rounded-full transition"
+    }, "\uD83D\uDD12 \u552F\u8B80\u6AA2\u8996\u4E2D \xB7 \u8FD4\u56DE\u672C\u9031 W", String(todayWeek).padStart(2, '0'))), currentUser && syncFailures >= 2 && /*#__PURE__*/React.createElement("div", {
+      role: "status",
+      "aria-live": "polite",
+      className: "flex items-center gap-2 px-3 py-1 rounded-full bg-amber-300 text-amber-950 text-[11px] font-bold border border-amber-600 shadow"
+    }, /*#__PURE__*/React.createElement("span", {
+      "aria-hidden": "true"
+    }, "\u26A0"), /*#__PURE__*/React.createElement("span", null, "\u9023\u7DDA\u4E2D\u65B7\uFF0C\u756B\u9762\u70BA", lastSyncAt ? ` ${String(lastSyncAt.getHours()).padStart(2, '0')}:${String(lastSyncAt.getMinutes()).padStart(2, '0')} ` : '稍早 ', "\u7684\u5FEB\u7167"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        refreshData().catch(() => {});
+      },
+      className: "px-1.5 py-0.5 rounded bg-amber-800 text-white hover:bg-amber-900 transition",
+      "aria-label": "\u7ACB\u5373\u91CD\u65B0\u9023\u7DDA\u4E26\u66F4\u65B0\u8CC7\u6599",
+      title: "\u7ACB\u5373\u91CD\u65B0\u9023\u7DDA"
+    }, "\u91CD\u65B0\u9023\u7DDA"))), currentUser && /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center space-x-2"
+    }, !isResults && !showWeeklyReport && role === 'member' && allowRetroCheckin && currentWeek !== todayWeek &&
+    /*#__PURE__*/
+    // 主管開放補登時:成員檢視非當週可直接修改該週回報(任務打卡/非專案/下週預計;主管回覆不可異動)
+    React.createElement("button", {
+      onClick: () => setShowRetroPanel(true),
+      className: "bg-amber-700/80 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-md transition flex items-center gap-1 border border-amber-400/80",
+      title: `主管已開放補登：可修改 W${String(currentWeek).padStart(2, '0')} 的任務打卡、非專案事項與下週預計工作`
+    }, "\uD83D\uDD58 \u4FEE\u6539 W", String(currentWeek).padStart(2, '0'), " \u56DE\u5831"), !isResults && !showWeeklyReport && role === 'member' &&
+    /*#__PURE__*/
+    // 本週回報的三件事(任務打卡/下週預計/非專案事項)合併為單一入口;紅點=未回報任務+未填下週預計(非專案為選填不計)
+    React.createElement("button", {
+      onClick: () => setShowPendingPanel(true),
+      className: "relative bg-amber-500 hover:bg-amber-600 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold shadow-md transition flex items-center gap-1.5 border border-amber-400"
+    }, /*#__PURE__*/React.createElement("span", null, "\uD83D\uDCCB \u672C\u9031\u56DE\u5831\u4E2D\u5FC3"), totalPendingCount > 0 && /*#__PURE__*/React.createElement("span", {
+      className: "bg-red-600 text-white text-[11px] px-1.5 py-0.5 rounded-full font-black shadow leading-none"
+    }, totalPendingCount)), !isResults && !showWeeklyReport && role === 'manager' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+      onClick: () => setShowWeekEditPanel(true),
+      className: "bg-amber-700/80 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-md transition flex items-center gap-1 border border-amber-400/80",
+      title: `編輯 W${String(currentWeek).padStart(2, '0')} 各成員回報：代成員補登/修正任務打卡、非專案事項、下週預計工作，並可編輯主管回覆`
+    }, "\uD83D\uDEE0 \u7DE8\u8F2F W", String(currentWeek).padStart(2, '0'), " \u56DE\u5831")), !isResults && /*#__PURE__*/React.createElement("button", {
+      onClick: () => setShowWeeklyReport(true),
+      className: "bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-blue-400/50"
+    }, "\uD83D\uDCCA W", String(currentWeek).padStart(2, '0'), " \u5718\u968A\u7E3D\u7D50"), /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center space-x-3 border-l border-white/20 pl-3 ml-1"
+    }, role === 'manager' && /*#__PURE__*/React.createElement("div", {
+      className: "relative"
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => setShowAdminMenu(v => !v),
+      className: `px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20 text-white ${showAdminMenu ? 'bg-white/25' : 'bg-white/10 hover:bg-white/20'}`,
+      title: "\u7BA1\u7406\u529F\u80FD\uFF1A\u6210\u54E1\u7BA1\u7406\u3001\u700F\u89BD\u6B0A\u9650\u3001\u4F7F\u7528\u7D71\u8A08\u3001\u7570\u52D5\u7D00\u9304"
+    }, "\u2699\uFE0F \u7BA1\u7406 ", showAdminMenu ? '▴' : '▾'), showAdminMenu && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "fixed inset-0 z-[60]",
+      onClick: () => setShowAdminMenu(false)
+    }), /*#__PURE__*/React.createElement("div", {
+      className: "absolute right-0 top-full mt-1.5 z-[70] w-44 bg-white rounded-xl shadow-2xl border border-slate-300 py-1.5 overflow-hidden"
+    }, [{
+      icon: '👥',
+      label: '成員管理',
+      desc: '新增/移除/改名',
+      open: () => setShowMemberPanel(true)
+    }, {
+      icon: '🔐',
+      label: '瀏覽權限',
+      desc: '部門/工號卡控',
+      open: () => setShowAccessPanel(true)
+    }, {
+      icon: '📈',
+      label: '使用統計',
+      desc: '登入次數/使用率',
+      open: () => setShowUsagePanel(true)
+    }, {
+      icon: '📜',
+      label: '異動紀錄',
+      desc: '操作稽核',
+      open: () => setShowAuditPanel(true)
+    }].map(item => /*#__PURE__*/React.createElement("button", {
+      key: item.label,
+      onClick: () => {
+        setShowAdminMenu(false);
+        item.open();
+      },
+      className: "w-full text-left px-3.5 py-2 hover:bg-slate-100 transition flex items-center gap-2.5"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "text-base"
+    }, item.icon), /*#__PURE__*/React.createElement("span", {
+      className: "min-w-0"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "block text-xs font-bold text-slate-800"
+    }, item.label), /*#__PURE__*/React.createElement("span", {
+      className: "block text-[10px] text-slate-500"
+    }, item.desc))))))), /*#__PURE__*/React.createElement("div", {
+      className: "text-right leading-tight"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "font-bold text-sm"
+    }, currentUser), /*#__PURE__*/React.createElement("div", {
+      className: "text-[10px] text-white/80"
+    }, role === 'manager' ? '主管' : '成員', empId ? ` · 工號 ${empId}` : '')), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setIsDark(v => !v),
+      className: "p-1.5 hover:bg-white/20 rounded-lg transition text-white/80 hover:text-white bg-white/5 text-sm leading-none w-8 h-8 flex items-center justify-center",
+      "aria-label": isDark ? '切換為淺色模式' : '切換為深色模式',
+      title: isDark ? '切換為淺色模式' : '切換為深色模式'
+    }, isDark ? '☀️' : '🌙'), /*#__PURE__*/React.createElement("button", {
+      onClick: handleLogout,
+      className: "p-1.5 hover:bg-red-500/80 rounded-lg transition text-white/70 hover:text-white bg-white/5",
+      "aria-label": "\u767B\u51FA",
+      title: "\u767B\u51FA"
+    }, /*#__PURE__*/React.createElement("svg", {
+      className: "w-4 h-4",
+      fill: "none",
+      stroke: "currentColor",
+      viewBox: "0 0 24 24"
+    }, /*#__PURE__*/React.createElement("path", {
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      strokeWidth: 2,
+      d: "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+    })))))), dataLoading ? /*#__PURE__*/React.createElement(LoadingScreen, null) : dataError ? /*#__PURE__*/React.createElement(ErrorScreen, {
+      message: dataError,
+      onRetry: loadBootstrap
+    }) : !currentUser ? /*#__PURE__*/React.createElement(LoginScreen, {
+      onLogin: handleLogin,
+      users: users,
+      year: scheduleYear,
+      empId: empId
+    }) :
+    /*#__PURE__*/
+    // 主內容區在看板開啟時整塊內縮(讓出的寬度給看板),工具列與甘特都只跨左半邊:
+    // ①「週檢視/年度總覽/密度」那排會待在甘特正上方,不會飄到看板頭上
+    // ②甘特可視寬與捲動範圍都排除看板區 → 當週能真的置中、年底區間捲得出來
+    // ③看板本身是 fixed 從視窗最頂端蓋下來(連 header 一起蓋),視覺上是一整條完整欄位
+    // ⚠ 內縮後工具列會變窄,務必同時收起「找資料」類控制項,否則 overflow-x-auto 會吐橫向捲軸
+    React.createElement("div", {
+      className: "flex-1 min-h-0 flex overflow-hidden bg-white relative",
+      style: {
+        marginRight: showWeeklyReport ? reportPanelW : 0
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex-1 min-w-0 flex flex-col overflow-hidden"
+    }, isResults ? /*#__PURE__*/React.createElement("div", {
+      className: "px-4 py-2 border-b border-slate-300 bg-gradient-to-r from-amber-50/80 via-white to-white dark:bg-none dark:bg-slate-800 flex items-center justify-between text-xs overflow-x-auto"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-3"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "font-black text-amber-800 dark:text-amber-300 text-sm"
+    }, "\uD83C\uDFAF ", scheduleYear, " \u5E74\u5EA6\u6210\u679C\u8207 MP \u6548\u76CA\u6E05\u55AE"), /*#__PURE__*/React.createElement("span", {
+      className: "text-slate-500"
+    }, "\u6AA2\u8996\u6240\u6709\u5C08\u6848\u5B8C\u5DE5\u9810\u8A08\u4EA4\u4ED8\u4E4B\u5177\u9AD4\u7522\u51FA\u8207\u7D2F\u8A08\u7BC0\u7701\u4E4B MP \u4EBA\u529B")), /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-4"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bg-amber-100/80 border border-amber-300 text-amber-900 px-3 py-1 rounded-full font-bold"
+    }, "\u5DF2\u586B\u5BEB\u7522\u51FA\u9805\u76EE\uFF1A", projects.filter(p => p.deliverable).length, " / ", projects.length, " \u6848"), /*#__PURE__*/React.createElement("div", {
+      className: "bg-emerald-100/80 border border-emerald-300 text-emerald-900 px-3 py-1 rounded-full font-bold"
+    }, "\uD83D\uDCA1 MP Saving\uFF1A", projects.filter(p => p.mpSaving).length, " \u6848"))) : /*#__PURE__*/React.createElement("div", {
+      className: "px-4 py-2 border-b border-slate-300 bg-gradient-to-r from-slate-50 to-white flex items-center gap-3 text-xs overflow-x-auto"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center flex-shrink-0"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "font-black text-slate-900 text-sm"
+    }, "W", String(currentWeek).padStart(2, '0')), /*#__PURE__*/React.createElement("span", {
+      className: "text-slate-600 ml-1 text-[10px]"
+    }, weekToMonth(currentWeek, months)), /*#__PURE__*/React.createElement("span", {
+      className: "ml-1 text-[10px] font-bold text-slate-700"
+    }, ownerFilter === 'all' ? '全隊' : ownerFilter, "\u6982\u6CC1")), /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center flex-shrink-0 min-w-[150px]"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex-1 h-2 bg-slate-300 rounded-full overflow-hidden"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: `h-full rounded-full transition-all duration-500 ${weekStats.active > 0 && weekStats.reported === weekStats.active ? 'bg-green-600' : 'bg-indigo-600'}`,
+      style: {
+        width: `${weekStats.active > 0 ? weekStats.reported / weekStats.active * 100 : 0}%`
+      }
+    })), /*#__PURE__*/React.createElement("span", {
+      className: "ml-2 font-bold text-slate-800 whitespace-nowrap"
+    }, weekStats.reported, "/", weekStats.active, " \u5DF2\u56DE\u5831")), (!showWeeklyReport || pendingOnly) && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "h-6 border-l border-slate-300 flex-shrink-0"
+    }), /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-1.5 flex-shrink-0"
+    }, !tightStatsBar && /*#__PURE__*/React.createElement(StatChip, {
+      label: "\u6709\u57F7\u884C",
+      value: weekStats.executed,
+      className: "bg-green-100 text-green-800 border-green-400"
+    }), !tightStatsBar && /*#__PURE__*/React.createElement(StatChip, {
+      label: "Monitor",
+      value: weekStats.monitor,
+      className: "bg-sky-100 text-sky-800 border-sky-400"
+    }), !tightStatsBar && /*#__PURE__*/React.createElement(StatChip, {
+      label: "\u672A\u57F7\u884C",
+      value: weekStats.notExec,
+      className: "bg-slate-200 text-slate-700 border-slate-400"
+    }), /*#__PURE__*/React.createElement(StatChip, {
+      label: "\u672A\u56DE\u5831",
+      value: weekStats.pending,
+      className: weekStats.pending > 0 ? 'bg-yellow-100 text-yellow-800 border-yellow-500' : 'bg-slate-100 text-slate-500 border-slate-300',
+      onToggle: () => setPendingOnly(v => !v),
+      active: pendingOnly,
+      title: pendingOnly ? '取消篩選，顯示全部專案' : '只顯示本週尚未回報的專案'
+    }), !showWeeklyReport && /*#__PURE__*/React.createElement("button", {
+      onClick: () => setShowDeadlinePanel(true),
+      title: "\u9EDE\u64CA\u6AA2\u8996\u5373\u5C07\u5230\u671F\u6E05\u55AE",
+      className: `flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border transition ${deadlineTasks.length > 0 ? 'bg-orange-100 text-orange-800 hover:bg-orange-200 border-orange-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 border-slate-300'}`
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "font-medium text-[11px]"
+    }, "\u23F0 \u5373\u5C07\u5230\u671F"), /*#__PURE__*/React.createElement("span", {
+      className: "text-[13px] leading-none"
+    }, deadlineTasks.length), /*#__PURE__*/React.createElement("span", {
+      className: "text-[11px]"
+    }, "\u203A")))), /*#__PURE__*/React.createElement("div", {
+      className: "flex-1 min-w-[8px]"
+    }), /*#__PURE__*/React.createElement("div", {
+      className: "flex-shrink-0 flex items-center gap-2 text-[11px] text-slate-600 border border-slate-300 rounded-lg bg-white ctl-raised px-2 py-0.5"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "flex items-center",
+      title: "\u9EC3\u8272\u659C\u7D0B\u689D\uFF1D\u8A08\u756B\u5340\u9593(\u6392\u5B9A\u7684\u8D77\u8A16\u9031)"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "w-3 h-2.5 mr-1 rounded-sm border",
+      style: {
+        backgroundImage: 'repeating-linear-gradient(45deg,#FFF6D6,#FFF6D6 3px,#FDEDB8 3px,#FDEDB8 6px)',
+        borderColor: '#B45309'
+      }
+    }), "\u8A08\u756B"), /*#__PURE__*/React.createElement("span", {
+      className: "flex items-center",
+      title: "\u7DA0\u8272\uFF1D\u8A72\u9031\u56DE\u5831\u300C\u6709\u57F7\u884C\u300D"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "w-2.5 h-2.5 bg-green-700 mr-1 rounded-sm"
+    }), "\u6709\u57F7\u884C"), /*#__PURE__*/React.createElement("span", {
+      className: "flex items-center",
+      title: "\u85CD\u8272\uFF1D\u8A72\u9031\u56DE\u5831\u300CMonitor(\u4F8B\u884C\u76E3\u63A7)\u300D"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "w-2.5 h-2.5 bg-sky-700 mr-1 rounded-sm"
+    }), "Monitor"), /*#__PURE__*/React.createElement("span", {
+      className: "flex items-center",
+      title: "\u7070\u8272\uFF1D\u8A72\u9031\u56DE\u5831\u300C\u672A\u57F7\u884C\u300D"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "w-2.5 h-2.5 bg-slate-500 mr-1 rounded-sm"
+    }), "\u672A\u57F7\u884C"), /*#__PURE__*/React.createElement("span", {
+      className: "flex items-center",
+      title: "\u7D05\u6846\uFF0B\u2757\uFF1D\u672C\u9031\u6392\u5B9A\u4F46\u5C1A\u672A\u56DE\u5831\u7684\u4EFB\u52D9"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "w-3 h-2.5 mr-1 rounded-sm border-2 border-red-400 bg-white"
+    }), "\u2757\u5F85\u56DE\u5831"), !tightStatsBar && /*#__PURE__*/React.createElement("span", {
+      className: "flex items-center text-slate-600 border-l border-slate-300 pl-2",
+      title: "\u9375\u76E4\u5FEB\u6377\u9375\uFF1AH\uFF1D\u56DE\u5230\u672C\u9031\u4E26\u7F6E\u4E2D\uFF1B\u2190 \u2192\uFF1D\u5DE6\u53F3\u5E73\u79FB 4 \u9031\uFF1BShift\uFF0B\u2190 \u2192\uFF1D\u5FAE\u79FB 1 \u9031\uFF1BTab \u9032\u5165\u7518\u7279\u689D\u5F8C \u2191 \u2193\uFF1D\u4E0A\u4E0B\u5207\u63DB\u7518\u7279\u689D\u3001Enter\uFF1D\u958B\u555F\u8A72\u5340\u9593\uFF1BESC\uFF1D\u95DC\u9589\u6700\u4E0A\u5C64\u8996\u7A97"
+    }, "\u2328 H \u56DE\u672C\u9031\u30FB\u2190\u2192 \u5E73\u79FB\u30FB\u2191\u2193 \u63DB\u689D"))), /*#__PURE__*/React.createElement("div", {
+      className: "bg-white px-4 py-1.5 border-b border-slate-300 flex flex-nowrap items-center gap-1.5 text-[11px] z-30 overflow-x-auto [&>*]:flex-shrink-0"
+    }, (!tightToolbar || searchText) && /*#__PURE__*/React.createElement("div", {
+      className: "relative"
+    }, /*#__PURE__*/React.createElement("svg", {
+      className: "w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-slate-500",
+      fill: "none",
+      stroke: "currentColor",
+      viewBox: "0 0 24 24"
+    }, /*#__PURE__*/React.createElement("path", {
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      strokeWidth: 2,
+      d: "M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"
+    })), /*#__PURE__*/React.createElement("input", {
+      value: searchText,
+      onChange: e => setSearchText(e.target.value),
+      placeholder: "\u641C\u5C0B\u5C08\u6848 / \u4EFB\u52D9\u2026",
+      className: `pl-7 pr-6 py-1 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition ${tightToolbar ? 'w-32' : 'w-44'}`
+    }), searchText && /*#__PURE__*/React.createElement("button", {
+      onClick: () => setSearchText(''),
+      className: "absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-600 font-bold px-1"
+    }, "\xD7")), (!tightToolbar || typeFilter.size > 0) && /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center space-x-1"
+    }, Object.entries(PROJECT_TYPES).map(([key, meta]) => {
+      const on = typeFilter.has(key);
+      if (tightToolbar && !on) return null; // 空間不足時只留「已選中」的晶片(方便一鍵取消)
+      return /*#__PURE__*/React.createElement("button", {
+        key: key,
+        onClick: () => toggleTypeFilter(key),
+        className: `px-1.5 py-0.5 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white ctl-raised text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`,
+        title: meta.label
+      }, key, "\xB7", meta.label);
+    }), typeFilter.size > 0 && /*#__PURE__*/React.createElement("button", {
+      onClick: () => setTypeFilter(new Set()),
+      className: "text-blue-600 hover:underline px-1"
+    }, "\u6E05\u9664")), (!tightToolbar || searchText || typeFilter.size > 0) && /*#__PURE__*/React.createElement("div", {
+      className: "h-5 border-l border-slate-300"
+    }), /*#__PURE__*/React.createElement("select", {
+      value: ownerFilter,
+      onChange: e => setOwnerFilter(e.target.value),
+      title: "\u7BE9\u9078\u8981\u986F\u793A\u54EA\u4F4D\u6210\u54E1\u7684\u5C08\u6848",
+      className: "border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white ctl-raised font-medium text-slate-700"
+    }, /*#__PURE__*/React.createElement("option", {
+      value: "all"
+    }, "\u5168\u90E8\u6210\u54E1"), users.map(u => /*#__PURE__*/React.createElement("option", {
+      key: u,
+      value: u
+    }, u))), /*#__PURE__*/React.createElement("div", {
+      className: "flex-1"
+    }), /*#__PURE__*/React.createElement("select", {
+      value: scheduleYear,
+      onChange: e => {
+        const y = parseInt(e.target.value);
+        setScheduleYear(y);
+        setCurrentWeek(getTodayWeek(y));
+      },
+      title: "\u5207\u63DB\u6392\u7A0B\u5E74\u5EA6(\u5E74\u5EA6\u8CC7\u6599\u7531 DB \u7684 ScheduleWeeks \u6C7A\u5B9A)",
+      className: "border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white ctl-raised font-bold text-slate-700"
+    }, (years.length ? years : [scheduleYear]).map(y => /*#__PURE__*/React.createElement("option", {
+      key: y,
+      value: y
+    }, y, " \u5E74\u5EA6"))), /*#__PURE__*/React.createElement("div", {
+      className: "flex rounded-lg overflow-hidden border",
+      style: {
+        borderColor: BRAND_BTN
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        setIsOverview(false);
+        setIsResults(false);
+        savePref('overview', false);
+      },
+      className: `px-2 py-1 font-bold transition ${!isOverview && !isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`,
+      style: !isOverview && !isResults ? {
+        backgroundColor: BRAND_BTN
+      } : {}
+    }, "\u9031\u6AA2\u8996"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        setIsOverview(true);
+        setIsResults(false);
+        savePref('overview', true);
+      },
+      className: `px-2 py-1 font-bold transition ${isOverview && !isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`,
+      style: isOverview && !isResults ? {
+        backgroundColor: BRAND_BTN
+      } : {},
+      title: `整年 ${weeksTotal} 週自動縮放至一個畫面寬(無水平捲軸),滑鼠停留甘特條可看細節`
+    }, "\u5E74\u5EA6\u7E3D\u89BD"), !showWeeklyReport && /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        if (showWeeklyReport) {
+          setShowWeeklyReport(false);
+          setHighlightedTaskId(null);
+          setCollapsedOwners(new Set());
+          setOwnerFilter(defaultOwnerFilter(role, currentUser)); // 清掉看板高亮造成的單一成員聚焦
+        }
+        // 「本週未回報」在全年度產出總表沒有意義,切過去一併清掉;
+        // 不清的話清單會莫名只剩幾列,而該檢視根本沒有那顆晶片可以取消(與 ownerFilter 的還原同理)
+        setPendingOnly(false);
+        setIsOverview(false);
+        setIsResults(true);
+      },
+      className: `px-2 py-1 font-bold transition ${isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`,
+      style: isResults ? {
+        backgroundColor: BRAND_BTN
+      } : {},
+      title: "\u6AA2\u8996\u5168\u5E74\u5EA6\u6240\u6709\u5C08\u6848\u7684\u5177\u9AD4\u7522\u51FA\u9805\u76EE\u8207 MP Saving \u7D71\u8A08(\u9AD8\u968E\u4E3B\u7BA1\u700F\u89BD\u8996\u89D2,\u552F\u8B80)"
+    }, "\u6210\u679C\u6E05\u55AE")), !isResults && /*#__PURE__*/React.createElement("button", {
+      onClick: goToCurrentWeek,
+      title: `回到本週 W${String(todayWeek).padStart(2, '0')} 並置中（快捷鍵 H）`,
+      className: "flex items-center text-white px-2 py-1 rounded-lg font-bold shadow-sm transition hover:opacity-90",
       style: {
         backgroundColor: BRAND_BTN
       }
-    }, group.owner[0]), group.owner, /*#__PURE__*/React.createElement("span", {
-      className: "ml-2 px-1.5 py-0.5 bg-white ctl-raised text-blue-600 rounded text-[10px] font-medium border border-blue-100"
-    }, group.projects.length, " \u9805"), gActive > 0 && /*#__PURE__*/React.createElement("div", {
-      className: "ml-2 flex items-center gap-1.5"
-    }, !isOverview && /*#__PURE__*/React.createElement("div", {
-      className: "w-16 h-1.5 bg-white rounded-full overflow-hidden border border-blue-100"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: `h-full rounded-full ${gReported === gActive ? 'bg-green-600' : 'bg-yellow-400'}`,
-      style: {
-        width: `${gReported / gActive * 100}%`
-      }
-    })), /*#__PURE__*/React.createElement("span", {
-      className: `px-1.5 py-0.5 rounded text-[10px] font-bold border ${gReported === gActive ? 'bg-green-100 text-green-800 border-green-200' : 'bg-yellow-100 text-yellow-800 border-yellow-300'}`
-    }, "\u672C\u9031\u56DE\u5831 ", gReported, "/", gActive)), role === 'manager' && !isOverview && /*#__PURE__*/React.createElement("button", {
-      onClick: e => {
-        e.stopPropagation();
-        setEditingProject({
-          mode: 'add',
-          owner: group.owner
-        });
+    }, /*#__PURE__*/React.createElement("svg", {
+      className: "w-3.5 h-3.5 mr-1",
+      fill: "none",
+      stroke: "currentColor",
+      viewBox: "0 0 24 24"
+    }, /*#__PURE__*/React.createElement("path", {
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      strokeWidth: 2,
+      d: "M13 10V3L4 14h7v7l9-11h-7z"
+    })), "\u56DE\u5230\u672C\u9031"), /*#__PURE__*/React.createElement("div", {
+      className: "h-5 w-px bg-slate-300/80 mx-1 flex-shrink-0"
+    }), !isOverview && !isResults && /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        const v = !isCompact;
+        setIsCompact(v);
+        savePref('compact', v);
       },
-      className: "ml-auto flex-shrink-0 flex items-center gap-1 bg-white ctl-raised text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-300 rounded px-2 py-0.5 text-[10px] font-bold transition shadow-sm",
-      title: `為 ${group.owner} 新增專案`
-    }, "\uFF0B \u65B0\u589E\u5C08\u6848"))), /*#__PURE__*/React.createElement("td", {
-      colSpan: weeksTotal,
-      className: "p-0 border-r border-slate-300"
+      className: "text-slate-600 bg-slate-100 ctl-raised hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-300 font-medium transition"
+    }, isCompact ? '寬鬆模式' : '緊湊模式'), role === 'manager' && !isResults && !showWeeklyReport &&
+    /*#__PURE__*/
+    // 長文字縮短:完整說明放 title;開啟時下方另有整條琥珀色警示列,資訊不會漏
+    React.createElement("button", {
+      onClick: toggleRetroCheckin,
+      className: `px-2 py-1 rounded-lg font-bold border shadow-sm transition flex items-center gap-1 ${allowRetroCheckin ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600' : 'bg-slate-100 ctl-raised hover:bg-slate-200 text-slate-700 border-slate-300'}`,
+      title: allowRetroCheckin ? '目前開放全體成員回報/調正今年度的所有歷史週次紀錄，點擊關閉' : '目前成員僅能回報當週，點擊開放歷史補登'
+    }, /*#__PURE__*/React.createElement("span", null, allowRetroCheckin ? '🔓 補登 ON' : '🔒 僅限當週')), !isResults && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "h-5 w-px bg-slate-300/80 mx-1 flex-shrink-0"
+    }), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setCollapsedOwners(new Set()),
+      title: "\u5C55\u958B\u5168\u90E8\u6210\u54E1\u7FA4\u7D44",
+      className: "text-blue-600 hover:text-blue-800 font-medium"
+    }, "\u5C55\u958B"), /*#__PURE__*/React.createElement("span", {
+      className: "text-slate-500",
+      "aria-hidden": "true"
+    }, "|"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setCollapsedOwners(new Set(users)),
+      title: "\u6536\u5408\u5168\u90E8\u6210\u54E1\u7FA4\u7D44",
+      className: "text-blue-600 hover:text-blue-800 font-medium"
+    }, "\u6536\u5408"))), allowRetroCheckin && /*#__PURE__*/React.createElement("div", {
+      className: "bg-amber-50 border-b border-amber-300 px-4 py-2 flex items-center justify-between text-xs text-amber-900 font-bold z-30"
     }, /*#__PURE__*/React.createElement("div", {
-      className: "w-full h-full flex opacity-30"
-    }, Array.from({
+      className: "flex items-center gap-2"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "text-sm"
+    }, "\u26A0\uFE0F"), /*#__PURE__*/React.createElement("span", null, "\u7CFB\u7D71\u5DF2\u958B\u555F\u300C\u5168\u9AD4\u6210\u54E1\u6B77\u53F2\u9032\u5EA6\u88DC\u767B\u8207\u8ABF\u6B63\u300D\u8C41\u514D\u671F\uFF1A\u76EE\u524D\u53EF\u5C0D W", String(todayWeek).padStart(2, '0'), " \u4EE5\u524D\u4E4B\u6240\u6709\u6B77\u53F2\u9031\u6B21\u9032\u884C\u4EFB\u52D9\u8207\u975E\u5C08\u6848\u56DE\u5831\u3002")), role === 'manager' && /*#__PURE__*/React.createElement("button", {
+      onClick: toggleRetroCheckin,
+      className: "px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold shadow-sm transition"
+    }, "\u95DC\u9589\u8C41\u514D\u671F")), /*#__PURE__*/React.createElement("div", {
+      ref: ganttRef,
+      className: "flex-1 min-h-0 overflow-auto bg-slate-100 app-bg relative"
+    }, isResults ? /*#__PURE__*/React.createElement(ResultsView, {
+      projects: filteredProjects,
+      role: role,
+      currentUser: currentUser,
+      year: scheduleYear,
+      starredIds: starredIds,
+      toggleStar: toggleStar
+    }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      "aria-hidden": "true",
+      className: "sticky left-0 z-20 pointer-events-none",
+      style: {
+        width: frozenW,
+        height: 100000,
+        marginBottom: -100000,
+        background: 'var(--frozen-bg)'
+      }
+    }), /*#__PURE__*/React.createElement("table", {
+      className: "border-collapse bg-white",
+      style: {
+        tableLayout: 'fixed',
+        width: isOverview ? '100%' : frozenW + weeksTotal * weekW
+      }
+    }, /*#__PURE__*/React.createElement("colgroup", null, !isOverview && /*#__PURE__*/React.createElement("col", {
+      style: {
+        width: 28
+      }
+    }), !isOverview && /*#__PURE__*/React.createElement("col", {
+      style: {
+        width: 42
+      }
+    }), /*#__PURE__*/React.createElement("col", {
+      style: {
+        width: nameW
+      }
+    }), Array.from({
       length: weeksTotal
-    }).map((_, i) => /*#__PURE__*/React.createElement("div", {
+    }).map((_, i) => /*#__PURE__*/React.createElement("col", {
       key: i,
-      className: `flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-100' : ''}`
-    }))))), !isCollapsed && group.projects.map((proj, idx) => /*#__PURE__*/React.createElement("tr", {
-      key: proj.id,
-      "data-proj-row": proj.id,
-      onDragOver: role === 'manager' && dragState && dragState.owner === group.owner ? e => {
-        e.preventDefault();
-        if (dragOverId !== proj.id) setDragOverId(proj.id);
-      } : undefined,
-      onDrop: role === 'manager' && dragState ? e => {
-        e.preventDefault();
-        handleReorderProjects(group.owner, dragState.id, proj.id);
-        setDragState(null);
-        setDragOverId(null);
-      } : undefined,
-      className: `group/row border-b border-slate-300 transition-colors ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`
-    }, !isOverview && /*#__PURE__*/React.createElement("td", {
-      className: `text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
+      style: isOverview ? undefined : {
+        width: weekW
+      }
+    }))), /*#__PURE__*/React.createElement("thead", {
+      className: "sticky top-0 z-40 text-xs shadow-sm bg-slate-100"
+    }, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+      colSpan: isOverview ? 1 : 3,
+      className: "border-r border-b border-slate-300 bg-slate-200 sticky left-0 z-50 px-2 py-1 text-left",
+      style: {
+        width: frozenW
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex justify-between items-center text-[10px]"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "font-bold text-slate-700"
+    }, "\u5C08\u6848\u57FA\u672C\u8CC7\u8A0A"), /*#__PURE__*/React.createElement("span", {
+      className: "text-slate-700 font-normal"
+    }, "\u986F\u793A ", filteredProjects.length, " / ", projects.length, " \u9805"))), months.map((m, i) => /*#__PURE__*/React.createElement("th", {
+      key: i,
+      colSpan: m.weeks,
+      className: "border-r border-b border-slate-300 text-white p-0.5 text-center font-medium text-[11px] tracking-wider relative overflow-hidden",
+      style: {
+        backgroundColor: i % 2 === 0 ? NAVY : '#0A3178'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "absolute inset-0 bg-gradient-to-b from-white/10 to-transparent"
+    }), m.name.slice(0, 4), "/", m.name.slice(4)))), /*#__PURE__*/React.createElement("tr", {
+      className: "bg-slate-100 text-slate-600 text-[11px]"
+    }, !isOverview && /*#__PURE__*/React.createElement("th", {
+      className: "border-r border-b border-slate-300 p-1 sticky left-0 z-50 text-center font-medium",
       style: {
         width: 28,
         minWidth: 28,
         maxWidth: 28,
-        boxShadow: '2px 0 0 0 var(--frozen-bg)'
+        backgroundColor: 'var(--gantt-sticky)'
       }
-    }, idx + 1), !isOverview && /*#__PURE__*/React.createElement("td", {
-      className: `text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
+    }, "No"), !isOverview && /*#__PURE__*/React.createElement("th", {
+      className: "border-r border-b border-slate-300 p-1 sticky z-50 text-center font-medium",
       style: {
         width: 42,
         minWidth: 42,
         maxWidth: 42,
         left: 28,
-        boxShadow: '2px 0 0 0 var(--frozen-bg)'
+        backgroundColor: 'var(--gantt-sticky)'
       }
-    }, proj.category), /*#__PURE__*/React.createElement("td", {
-      className: "sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 p-0",
+    }, "\u5206\u985E"), /*#__PURE__*/React.createElement("th", {
+      className: "border-r border-b border-slate-300 p-1 sticky z-50 shadow-[3px_0_6px_rgba(0,0,0,0.08)] text-left pl-3 font-medium",
       style: {
-        width: isOverview ? 240 : 420,
-        minWidth: isOverview ? 240 : 420,
-        maxWidth: isOverview ? 240 : 420,
-        left: isOverview ? 0 : 70,
-        boxShadow: '2px 0 0 0 var(--frozen-bg), 4px 0 8px rgba(0,0,0,0.08)'
+        width: nameW,
+        minWidth: nameW,
+        maxWidth: nameW,
+        left: isOverview ? 0 : STICKY_LEAD_W,
+        backgroundColor: 'var(--gantt-sticky)'
       }
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "w-full h-full flex items-center px-2 overflow-hidden"
-    }, role === 'manager' && !isOverview && (isFilteringRows ? /*#__PURE__*/React.createElement("span", {
-      className: "flex-shrink-0 mr-1 text-slate-200 select-none text-[13px] leading-none cursor-not-allowed",
-      title: "\u641C\u5C0B/\u985E\u578B\u7BE9\u9078\u4E2D\u7121\u6CD5\u62D6\u66F3\u6392\u5E8F\uFF0C\u8ACB\u5148\u6E05\u9664\u7BE9\u9078"
-    }, "\u283F") : /*#__PURE__*/React.createElement("span", {
-      draggable: true,
-      onDragStart: () => setDragState({
-        id: proj.id,
-        owner: group.owner
-      }),
-      onDragEnd: () => {
-        setDragState(null);
-        setDragOverId(null);
-      },
-      className: "flex-shrink-0 mr-1 cursor-grab active:cursor-grabbing text-slate-500 hover:text-slate-600 select-none text-[13px] leading-none",
-      title: "\u62D6\u66F3\u4EE5\u8ABF\u6574\u6392\u5E8F"
-    }, "\u283F")), /*#__PURE__*/React.createElement("div", {
-      className: `flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`
-    }, proj.type.toUpperCase()), /*#__PURE__*/React.createElement("span", {
-      className: `flex-1 min-w-0 truncate font-semibold text-slate-900 ${isOverview ? 'text-[12.5px]' : isCompact ? 'text-[13px]' : 'text-[15px]'}`,
-      title: proj.nid ? `${proj.name}\nNID：${proj.nid}` : proj.name
-    }, proj.name), /*#__PURE__*/React.createElement("button", {
-      onClick: e => {
-        e.stopPropagation();
-        setDeliverableProj(proj);
-      },
-      className: `flex-shrink-0 ml-1 text-[12px] leading-none transition hover:scale-125 ${proj.deliverable ? 'opacity-90' : 'opacity-25 hover:opacity-70'}`,
-      title: proj.deliverable || proj.mpSaving ? `具體產出項目：${proj.deliverable || '（未填寫）'}${proj.mpSaving ? `\n💡 MP Saving：${proj.mpSaving}` : ''}` : '具體產出項目（尚未填寫，點擊檢視/填寫）'
-    }, "\uD83C\uDFAF"), (() => {
-      const soon = proj.tasks.filter(isTaskDeadlineSoon);
-      if (soon.length === 0) return null;
-      const remain = Math.min(...soon.map(t => t.end - todayWeek + 1));
-      return /*#__PURE__*/React.createElement("span", {
-        className: "flex-shrink-0 ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-orange-100 text-orange-700 border border-orange-300 whitespace-nowrap",
-        title: `${soon.length} 個計畫區間即將到期(最近的剩 ${remain} 週)`
-      }, "\u23F0 \u5269", remain, "\u9031");
-    })(), role === 'manager' && !isOverview && /*#__PURE__*/React.createElement("div", {
-      className: "flex-shrink-0 hidden group-hover/row:flex items-center gap-0.5 ml-1"
-    }, /*#__PURE__*/React.createElement("button", {
-      onClick: () => setAddingInterval(proj),
-      className: "w-5 h-5 flex items-center justify-center rounded text-green-600 hover:bg-green-100 font-bold",
-      title: "\u65B0\u589E\u8A08\u756B\u5340\u9593"
-    }, "\uFF0B"), /*#__PURE__*/React.createElement("button", {
-      onClick: () => setEditingProject({
-        mode: 'edit',
-        owner: group.owner,
-        project: proj
-      }),
-      className: "w-5 h-5 flex items-center justify-center rounded text-blue-600 hover:bg-blue-100",
-      title: "\u7DE8\u8F2F\u5C08\u6848"
-    }, "\u270E"), /*#__PURE__*/React.createElement("button", {
-      onClick: () => handleDeleteProject(proj),
-      className: "w-5 h-5 flex items-center justify-center rounded text-red-500 hover:bg-red-100",
-      title: "\u522A\u9664\u5C08\u6848"
-    }, "\uD83D\uDDD1")))), /*#__PURE__*/React.createElement("td", {
-      colSpan: weeksTotal,
-      className: "p-0 relative",
-      style: {
-        height: isOverview ? 24 : isCompact ? 30 : 40
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "absolute inset-0 flex pointer-events-none z-0"
-    }, Array.from({
+    }, "\u5C08\u6848\u540D\u7A31 (Project Name)"), Array.from({
       length: weeksTotal
-    }).map((_, i) => /*#__PURE__*/React.createElement("div", {
-      key: i,
-      className: `flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-50/70' : ''}`
-    }))), /*#__PURE__*/React.createElement("div", {
-      className: "absolute top-0 bottom-0 z-10 pointer-events-none",
-      style: {
-        left: `${(currentWeek - 0.5) * (100 / weeksTotal)}%`,
-        borderLeft: '2px solid rgba(220,38,38,0.55)'
-      }
-    }), proj.tasks.map(task => {
-      const isActiveThisWeek = task.start <= currentWeek && task.end >= currentWeek;
-      const weekLog = taskLogs[task.id]?.[currentWeek];
-      const isPending = role === 'member' && proj.owner === currentUser && isActiveThisWeek && !weekLog;
-      const deadlineSoon = isTaskDeadlineSoon(task); // 剩 ≤2 週或已過 70% 時程 → 橘框 + ⏰(未回報紅框優先)
-
-      const isHighlighted = task.id === highlightedTaskId; // 團隊看板點回報格時的暫時提示
-      const barClass = 'text-[#0f172a]'; // 計畫條底永遠是淺奶油色,文字固定深色(不受深色模式覆寫),投影高對比
-      const barStyle = isHighlighted ? {
-        backgroundImage: 'repeating-linear-gradient(45deg, #DBEAFE, #DBEAFE 6px, #BFDBFE 6px, #BFDBFE 12px)',
-        // 淺藍高亮(僅提示用)
-        borderColor: '#2563EB'
-      } : {
-        backgroundImage: 'repeating-linear-gradient(45deg, #FFF6D6, #FFF6D6 6px, #FDEDB8 6px, #FDEDB8 12px)',
-        borderColor: 'rgba(180,83,9,0.75)' // 加深(範本 B):淡黃條在白底上需要更明確的輪廓
-      };
-      const textClass = weekLog ? 'font-bold' : 'font-medium opacity-90';
-      const spanWeeks = task.end - task.start + 1;
-      const leftPercent = (task.start - 1) * (100 / weeksTotal);
-      const widthPercent = (task.end - task.start + 1) * (100 / weeksTotal);
-      const logs = taskLogs[task.id] || {};
-      return /*#__PURE__*/React.createElement(React.Fragment, {
-        key: task.id
-      }, /*#__PURE__*/React.createElement("div", {
+    }).map((_, i) => {
+      const weekNum = i + 1;
+      const isCurrent = weekNum === currentWeek;
+      return /*#__PURE__*/React.createElement("th", {
+        key: i,
         onClick: () => {
+          if (role === 'manager' || weekNum <= todayWeek) setCurrentWeek(weekNum);
+        },
+        title: role === 'manager' ? `點擊將系統週切換至 W${weekNum}` : weekNum <= todayWeek ? `點擊檢視 W${weekNum}(唯讀)` : undefined,
+        className: `border-r border-b border-slate-300 p-0 text-center relative ${isOverview ? 'text-[9px] leading-none' : ''} ${role === 'manager' || weekNum <= todayWeek ? 'cursor-pointer hover:bg-blue-100' : ''} ${isCurrent ? 'text-white font-bold' : weekNum > todayWeek ? 'bg-slate-100 text-slate-600 font-normal' : 'bg-slate-100 text-slate-700 font-normal'}`,
+        style: {
+          ...(isOverview ? {} : {
+            width: weekW
+          }),
+          ...(isCurrent ? {
+            backgroundColor: NAVY
+          } : {})
+        }
+      }, isCurrent && /*#__PURE__*/React.createElement("div", {
+        className: "absolute -bottom-px left-0 right-0 h-0.5",
+        style: {
+          backgroundColor: GOLD
+        }
+      }), /*#__PURE__*/React.createElement("div", {
+        className: `z-10 relative ${isOverview ? 'py-0.5' : 'py-1'}`
+      }, isOverview ? sparseWeekLabel && !isCurrent && weekNum % 5 !== 0 ? ' ' : weekNum : isCompact ? weekNum : `W${String(weekNum).padStart(2, '0')}`));
+    }))), /*#__PURE__*/React.createElement("tbody", {
+      className: "text-xs"
+    }, groupedProjects.length === 0 ? /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+      colSpan: weeksTotal + 3,
+      className: "p-10 text-center text-slate-500"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "text-3xl mb-2"
+    }, pendingOnly && weekStats.pending === 0 ? '🎉' : '🔍'), pendingOnly && weekStats.pending === 0 ? /*#__PURE__*/React.createElement("div", {
+      className: "space-y-2"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "font-bold text-slate-700"
+    }, "W", String(currentWeek).padStart(2, '0'), " ", ownerFilter === 'all' ? '全隊' : ownerFilter, "\u5DF2\u5168\u6578\u56DE\u5831\uFF0C\u6C92\u6709\u5F85\u8FFD\u8E64\u7684\u9805\u76EE\u3002"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setPendingOnly(false),
+      className: "px-3 py-1 rounded-lg bg-white border border-slate-400 font-bold text-slate-700 hover:bg-slate-100 transition"
+    }, "\u986F\u793A\u5168\u90E8\u5C08\u6848")) : '找不到符合條件的專案。調整搜尋關鍵字或清除篩選後再試一次。')) : groupedProjects.map(group => {
+      const isCollapsed = collapsedOwners.has(group.owner);
+      let gActive = 0,
+        gReported = 0;
+      group.projects.forEach(p => p.tasks.forEach(t => {
+        if (t.start <= currentWeek && t.end >= currentWeek) {
+          gActive++;
+          if (taskLogs[t.id]?.[currentWeek]) gReported++;
+        }
+      }));
+      return /*#__PURE__*/React.createElement(React.Fragment, {
+        key: group.owner
+      }, /*#__PURE__*/React.createElement("tr", _extends({}, clickable(() => toggleOwnerCollapse(group.owner), null, {
+        role: null,
+        expanded: !isCollapsed
+      }), {
+        title: `${isCollapsed ? '展開' : '收合'} ${group.owner} 的專案`,
+        className: "group/header bg-[var(--gantt-group)] hover:bg-[var(--gantt-group-hover)] cursor-pointer border-b border-blue-100 transition-colors"
+      }), /*#__PURE__*/React.createElement("td", {
+        colSpan: isOverview ? 1 : 3,
+        className: "sticky left-0 z-40 border-r border-blue-200 p-0 shadow-[3px_0_6px_rgba(0,0,0,0.06)]",
+        style: {
+          width: frozenW,
+          minWidth: frozenW,
+          maxWidth: frozenW,
+          backgroundColor: 'var(--gantt-group)'
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        className: "flex items-center text-blue-900 font-bold text-[13px] px-2 py-1.5 border-l-4",
+        style: {
+          borderColor: NAVY
+        }
+      }, /*#__PURE__*/React.createElement("svg", {
+        className: `w-4 h-4 mr-1 text-blue-500 transition-transform ${isCollapsed ? '-rotate-90' : ''}`,
+        fill: "none",
+        stroke: "currentColor",
+        viewBox: "0 0 24 24"
+      }, /*#__PURE__*/React.createElement("path", {
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        strokeWidth: 2,
+        d: "M19 9l-7 7-7-7"
+      })), /*#__PURE__*/React.createElement("div", {
+        className: "w-6 h-6 rounded-full text-white flex items-center justify-center text-xs mr-2 flex-shrink-0",
+        style: {
+          backgroundColor: BRAND_BTN
+        }
+      }, group.owner[0]), group.owner, /*#__PURE__*/React.createElement("span", {
+        className: "ml-2 px-1.5 py-0.5 bg-white ctl-raised text-blue-600 rounded text-[10px] font-medium border border-blue-100"
+      }, group.projects.length, " \u9805"), gActive > 0 && /*#__PURE__*/React.createElement("div", {
+        className: "ml-2 flex items-center gap-1.5"
+      }, !isOverview && /*#__PURE__*/React.createElement("div", {
+        className: "w-16 h-1.5 bg-white rounded-full overflow-hidden border border-blue-100"
+      }, /*#__PURE__*/React.createElement("div", {
+        className: `h-full rounded-full ${gReported === gActive ? 'bg-green-600' : 'bg-yellow-400'}`,
+        style: {
+          width: `${gReported / gActive * 100}%`
+        }
+      })), /*#__PURE__*/React.createElement("span", {
+        className: `px-1.5 py-0.5 rounded text-[10px] font-bold border ${gReported === gActive ? 'bg-green-100 text-green-800 border-green-200' : 'bg-yellow-100 text-yellow-800 border-yellow-300'}`
+      }, "\u672C\u9031\u56DE\u5831 ", gReported, "/", gActive)), role === 'manager' && !isOverview && /*#__PURE__*/React.createElement("button", {
+        onClick: e => {
+          e.stopPropagation();
+          setEditingProject({
+            mode: 'add',
+            owner: group.owner
+          });
+        },
+        className: "ml-auto flex-shrink-0 flex items-center gap-1 bg-white ctl-raised text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-300 rounded px-2 py-0.5 text-[10px] font-bold transition shadow-sm",
+        title: `為 ${group.owner} 新增專案`
+      }, "\uFF0B \u65B0\u589E\u5C08\u6848"))), /*#__PURE__*/React.createElement("td", {
+        colSpan: weeksTotal,
+        className: "p-0 border-r border-slate-300"
+      }, /*#__PURE__*/React.createElement("div", {
+        className: "w-full h-full flex opacity-30"
+      }, Array.from({
+        length: weeksTotal
+      }).map((_, i) => /*#__PURE__*/React.createElement("div", {
+        key: i,
+        className: `flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-100' : ''}`
+      }))))), !isCollapsed && group.projects.map((proj, idx) => /*#__PURE__*/React.createElement("tr", {
+        key: proj.id,
+        "data-proj-row": proj.id,
+        onDragOver: role === 'manager' && dragState && dragState.owner === group.owner ? e => {
+          e.preventDefault();
+          if (dragOverId !== proj.id) setDragOverId(proj.id);
+        } : undefined,
+        onDrop: role === 'manager' && dragState ? e => {
+          e.preventDefault();
+          handleReorderProjects(group.owner, dragState.id, proj.id);
+          setDragState(null);
+          setDragOverId(null);
+        } : undefined,
+        className: `group/row border-b border-slate-300 transition-colors ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`
+      }, !isOverview && /*#__PURE__*/React.createElement("td", {
+        className: `text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
+        style: {
+          width: 28,
+          minWidth: 28,
+          maxWidth: 28,
+          boxShadow: '2px 0 0 0 var(--frozen-bg)'
+        }
+      }, idx + 1), !isOverview && /*#__PURE__*/React.createElement("td", {
+        className: `text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
+        style: {
+          width: 42,
+          minWidth: 42,
+          maxWidth: 42,
+          left: 28,
+          boxShadow: '2px 0 0 0 var(--frozen-bg)'
+        }
+      }, proj.category), /*#__PURE__*/React.createElement("td", {
+        className: "sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 p-0",
+        style: {
+          width: nameW,
+          minWidth: nameW,
+          maxWidth: nameW,
+          left: isOverview ? 0 : STICKY_LEAD_W,
+          boxShadow: '2px 0 0 0 var(--frozen-bg), 4px 0 8px rgba(0,0,0,0.08)'
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        className: "w-full h-full flex items-center px-2 overflow-hidden"
+      }, role === 'manager' && !isOverview && (isFilteringRows ? /*#__PURE__*/React.createElement("span", {
+        className: "flex-shrink-0 mr-1 text-slate-200 select-none text-[13px] leading-none cursor-not-allowed",
+        title: "\u641C\u5C0B/\u985E\u578B\u7BE9\u9078\u4E2D\u7121\u6CD5\u62D6\u66F3\u6392\u5E8F\uFF0C\u8ACB\u5148\u6E05\u9664\u7BE9\u9078"
+      }, "\u283F") : /*#__PURE__*/React.createElement("span", {
+        draggable: true,
+        onDragStart: () => setDragState({
+          id: proj.id,
+          owner: group.owner
+        }),
+        onDragEnd: () => {
+          setDragState(null);
+          setDragOverId(null);
+        },
+        className: "flex-shrink-0 mr-1 cursor-grab active:cursor-grabbing text-slate-500 hover:text-slate-600 select-none text-[13px] leading-none",
+        title: "\u62D6\u66F3\u4EE5\u8ABF\u6574\u6392\u5E8F"
+      }, "\u283F")), /*#__PURE__*/React.createElement("div", {
+        className: `flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`
+      }, proj.type.toUpperCase()), /*#__PURE__*/React.createElement("span", {
+        className: `flex-1 min-w-0 truncate font-semibold text-slate-900 ${isOverview ? 'text-[12.5px]' : isCompact ? 'text-[13px]' : 'text-[15px]'}`,
+        title: proj.nid ? `${proj.name}\nNID：${proj.nid}` : proj.name
+      }, proj.name), /*#__PURE__*/React.createElement("button", {
+        onClick: e => {
+          e.stopPropagation();
+          setDeliverableProj(proj);
+        },
+        className: `flex-shrink-0 ml-1 text-[12px] leading-none transition hover:scale-125 ${proj.deliverable ? 'opacity-90' : 'opacity-25 hover:opacity-70'}`,
+        title: proj.deliverable || proj.mpSaving ? `具體產出項目：${proj.deliverable || '（未填寫）'}${proj.mpSaving ? `\n💡 MP Saving：${proj.mpSaving}` : ''}` : '具體產出項目（尚未填寫，點擊檢視/填寫）'
+      }, "\uD83C\uDFAF"), (() => {
+        const soon = proj.tasks.filter(isTaskDeadlineSoon);
+        if (soon.length === 0) return null;
+        const remain = Math.min(...soon.map(t => t.end - todayWeek + 1));
+        // orange-800(不是 700):9px 的字在投影 50:1 下 700 只有 4.18,800 為 5.64
+        // ⚠ 這行原本寫成 `return ( {/* … */} <span…> )`——JSX 註解放進 return 的括號裡
+        //   會被當成第二個運算式,Babel 直接 UnexpectedToken 建置失敗。註解要放 return 之外。
+        return /*#__PURE__*/React.createElement("span", {
+          className: "flex-shrink-0 ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-orange-100 text-orange-800 border border-orange-300 whitespace-nowrap",
+          title: `${soon.length} 個計畫區間即將到期(最近的剩 ${remain} 週)`
+        }, "\u23F0 \u5269", remain, "\u9031");
+      })(), role === 'manager' && !isOverview && /*#__PURE__*/React.createElement("div", {
+        className: "flex-shrink-0 hidden group-hover/row:flex items-center gap-0.5 ml-1"
+      }, /*#__PURE__*/React.createElement("button", {
+        onClick: () => setAddingInterval(proj),
+        className: "w-5 h-5 flex items-center justify-center rounded text-green-600 hover:bg-green-100 font-bold",
+        title: "\u65B0\u589E\u8A08\u756B\u5340\u9593"
+      }, "\uFF0B"), /*#__PURE__*/React.createElement("button", {
+        onClick: () => setEditingProject({
+          mode: 'edit',
+          owner: group.owner,
+          project: proj
+        }),
+        className: "w-5 h-5 flex items-center justify-center rounded text-blue-600 hover:bg-blue-100",
+        title: "\u7DE8\u8F2F\u5C08\u6848"
+      }, "\u270E"), /*#__PURE__*/React.createElement("button", {
+        onClick: () => handleDeleteProject(proj),
+        className: "w-5 h-5 flex items-center justify-center rounded text-red-500 hover:bg-red-100",
+        title: "\u522A\u9664\u5C08\u6848"
+      }, "\uD83D\uDDD1")))), /*#__PURE__*/React.createElement("td", {
+        colSpan: weeksTotal,
+        className: "p-0 relative",
+        style: {
+          height: isOverview ? 24 : isCompact ? 30 : 40
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        className: "absolute inset-0 flex pointer-events-none z-0"
+      }, Array.from({
+        length: weeksTotal
+      }).map((_, i) => /*#__PURE__*/React.createElement("div", {
+        key: i,
+        className: `flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-50/70' : ''}`
+      }))), /*#__PURE__*/React.createElement("div", {
+        className: "absolute top-0 bottom-0 z-10 pointer-events-none",
+        style: {
+          left: `${(currentWeek - 0.5) * (100 / weeksTotal)}%`,
+          borderLeft: '2px solid rgba(220,38,38,0.55)'
+        }
+      }), proj.tasks.map(task => {
+        const isActiveThisWeek = task.start <= currentWeek && task.end >= currentWeek;
+        const weekLog = taskLogs[task.id]?.[currentWeek];
+        const isPending = role === 'member' && proj.owner === currentUser && isActiveThisWeek && !weekLog;
+        const deadlineSoon = isTaskDeadlineSoon(task); // 剩 ≤2 週或已過 70% 時程 → 橘框 + ⏰(未回報紅框優先)
+
+        const isHighlighted = task.id === highlightedTaskId; // 團隊看板點回報格時的暫時提示
+        const barClass = 'text-[#0f172a]'; // 計畫條底永遠是淺奶油色,文字固定深色(不受深色模式覆寫),投影高對比
+        const barStyle = isHighlighted ? {
+          backgroundImage: 'repeating-linear-gradient(45deg, #DBEAFE, #DBEAFE 6px, #BFDBFE 6px, #BFDBFE 12px)',
+          // 淺藍高亮(僅提示用)
+          borderColor: '#2563EB'
+        } : {
+          backgroundImage: 'repeating-linear-gradient(45deg, #FFF6D6, #FFF6D6 6px, #FDEDB8 6px, #FDEDB8 12px)',
+          borderColor: 'rgba(180,83,9,0.75)' // 加深(範本 B):淡黃條在白底上需要更明確的輪廓
+        };
+        const textClass = weekLog ? 'font-bold' : 'font-medium opacity-90';
+        const spanWeeks = task.end - task.start + 1;
+        const leftPercent = (task.start - 1) * (100 / weeksTotal);
+        const widthPercent = (task.end - task.start + 1) * (100 / weeksTotal);
+        const logs = taskLogs[task.id] || {};
+        return /*#__PURE__*/React.createElement(React.Fragment, {
+          key: task.id
+        }, /*#__PURE__*/React.createElement("div", _extends({}, clickable(() => {
           setHighlightedTaskId(null);
           setSelectedTaskInfo({
             proj,
@@ -2495,312 +3021,354 @@ function App() {
             isActiveThisWeek,
             weekLog
           });
-        },
-        onMouseEnter: e => showTooltip(e, proj, task),
-        onMouseMove: moveTooltip,
-        onMouseLeave: hideTooltip,
-        className: `absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 border rounded-sm shadow-sm ${barClass} ${isHighlighted ? 'ring-2 ring-blue-500 ring-offset-1 z-20' : isPending ? 'ring-2 ring-red-400 ring-offset-1 z-10' : deadlineSoon ? 'ring-2 ring-orange-400 ring-offset-1 z-10' : 'z-10'}`,
-        style: {
-          left: `${leftPercent}%`,
-          width: `${widthPercent}%`,
-          top: isOverview ? 4 : 4,
-          bottom: isOverview ? 4 : isCompact ? 8 : 10,
-          ...barStyle
-        }
-      }, Object.entries(logs).map(([w, log]) => {
-        const wn = Number(w);
-        if (!log || wn < task.start || wn > task.end) return null;
-        const isCur = wn === currentWeek;
-        return /*#__PURE__*/React.createElement("div", {
-          key: w,
-          className: `absolute bottom-0 pointer-events-none ${STATUS_META[log.status]?.dot || 'bg-blue-500'}`,
+        }, `${proj.owner} ${proj.name}｜${task.name}｜W${String(task.start).padStart(2, '0')}–W${String(task.end).padStart(2, '0')}｜W${String(currentWeek).padStart(2, '0')} ${weekLog ? STATUS_META[weekLog.status]?.label || '已回報' : isActiveThisWeek ? '尚未回報' : '非本週區間'}`, {
+          roving: {
+            active: String(task.id) === String(activeRovingTaskId),
+            group: 'gantt-bar',
+            id: task.id,
+            onRove: setRovingTaskId
+          }
+        }), {
+          onFocus: () => setRovingTaskId(task.id),
+          onMouseEnter: e => showTooltip(e, proj, task),
+          onMouseMove: moveTooltip,
+          onMouseLeave: hideTooltip,
+          className: `absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 border rounded-sm shadow-sm ${barClass} ${isHighlighted ? 'ring-2 ring-blue-500 ring-offset-1 z-20' : isPending ? 'ring-2 ring-red-400 ring-offset-1 z-10' : deadlineSoon ? 'ring-2 ring-orange-400 ring-offset-1 z-10' : 'z-10'}`,
           style: {
-            left: `${(wn - task.start) / spanWeeks * 100}%`,
-            width: `${100 / spanWeeks}%`,
-            height: isCur ? '5px' : '4px',
-            opacity: isCur ? 0.95 : 0.75
-          },
-          title: `W${w}: ${STATUS_META[log.status]?.label}${log.reporterRole === 'manager' ? ' (主管補登)' : ''}`
+            left: `${leftPercent}%`,
+            width: `${widthPercent}%`,
+            top: isOverview ? 4 : 4,
+            bottom: isOverview ? 4 : isCompact ? 8 : 10,
+            ...barStyle
+          }
+        }), Object.entries(logs).map(([w, log]) => {
+          const wn = Number(w);
+          if (!log || wn < task.start || wn > task.end) return null;
+          const isCur = wn === currentWeek;
+          return /*#__PURE__*/React.createElement("div", {
+            key: w,
+            className: `absolute bottom-0 pointer-events-none ${STATUS_META[log.status]?.dot || 'bg-blue-500'}`,
+            style: {
+              left: `${(wn - task.start) / spanWeeks * 100}%`,
+              width: `${100 / spanWeeks}%`,
+              height: isCur ? '5px' : '4px',
+              opacity: isCur ? 0.95 : 0.75
+            },
+            title: `W${w}: ${STATUS_META[log.status]?.label}${log.reporterRole === 'manager' ? ' (主管補登)' : ''}`
+          });
+        }), !isOverview && /*#__PURE__*/React.createElement("span", {
+          className: `relative z-10 truncate px-1.5 whitespace-nowrap ${isCompact ? 'text-[10px]' : 'text-[12px]'} ${textClass}`,
+          style: {
+            textShadow: '0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.75)'
+          }
+        }, isPending && '❗', deadlineSoon && '⏰', task.name)));
+      })))));
+    })))))), showWeeklyReport && /*#__PURE__*/React.createElement(WeeklyReportDashboard, {
+      currentWeek: currentWeek,
+      year: scheduleYear,
+      users: users,
+      projects: projects,
+      taskLogs: taskLogs,
+      extraNotes: extraNotes,
+      weeklyPlans: weeklyPlans,
+      weeklyComments: weeklyComments,
+      extraNoteMeta: extraNoteMeta,
+      weeklyPlanMeta: weeklyPlanMeta,
+      weeklyCommentMeta: weeklyCommentMeta,
+      currentUser: currentUser,
+      role: role,
+      panelWidth: reportPanelW,
+      highlightedTaskId: highlightedTaskId,
+      onHighlightTask: handleHighlightTask,
+      onEditComment: userName => setCommentTarget(userName),
+      onClose: closeWeeklyReport
+    })), tooltip && /*#__PURE__*/React.createElement("div", {
+      className: "fixed z-[200] pointer-events-none",
+      style: {
+        left: Math.min(tooltip.x + 14, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 300),
+        top: Math.min(tooltip.y + 14, (typeof window !== 'undefined' ? window.innerHeight : 800) - 200)
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bg-slate-900/95 text-white rounded-lg shadow-xl px-3.5 py-3 text-xs max-w-xs border border-slate-700"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "font-bold text-[13px] mb-1 text-yellow-200"
+    }, tooltip.proj.name), /*#__PURE__*/React.createElement("div", {
+      className: "text-slate-400 mb-0.5"
+    }, "\uD83D\uDC64 ", tooltip.proj.owner, "\u3000\xB7\u3000", tooltip.proj.category), tooltip.proj.deliverable && /*#__PURE__*/React.createElement("div", {
+      className: "text-amber-200/90 mb-0.5"
+    }, "\uD83C\uDFAF ", tooltip.proj.deliverable), tooltip.proj.mpSaving && /*#__PURE__*/React.createElement("div", {
+      className: "text-emerald-300 font-bold mb-0.5"
+    }, "\uD83D\uDCA1 MP \u7BC0\u7701\uFF1A", tooltip.proj.mpSaving), tooltip.proj.nid && /*#__PURE__*/React.createElement("div", {
+      className: "text-slate-400 mb-0.5"
+    }, "\uD83D\uDD16 \u5C08\u6848 NID\uFF1A", tooltip.proj.nid), /*#__PURE__*/React.createElement("div", {
+      className: "text-slate-400"
+    }, "\uD83D\uDCC5 ", tooltip.task.name), tooltip.task.nid && /*#__PURE__*/React.createElement("div", {
+      className: "text-slate-500"
+    }, "\uD83D\uDD16 \u5340\u9593 NID\uFF1A", tooltip.task.nid), /*#__PURE__*/React.createElement("div", {
+      className: "text-slate-500"
+    }, "W", tooltip.task.start, " \u2013 W", tooltip.task.end, "\uFF08", weekToMonth(tooltip.task.start, months), " ~ ", weekToMonth(tooltip.task.end, months), "\uFF09"), isTaskDeadlineSoon(tooltip.task) && /*#__PURE__*/React.createElement("div", {
+      className: "mt-1 text-orange-300 font-bold"
+    }, "\u23F0 \u6392\u7A0B\u5373\u5C07\u5230\u671F\uFF1A\u5269 ", tooltip.task.end - todayWeek + 1, " \u9031 \uFF08\u6642\u7A0B\u5DF2\u904E ", Math.round((todayWeek - tooltip.task.start + 1) / (tooltip.task.end - tooltip.task.start + 1) * 100), "%\uFF09"), tooltip.weekLog && /*#__PURE__*/React.createElement("div", {
+      className: "mt-2 pt-2 border-t border-slate-700"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "font-bold mb-0.5"
+    }, STATUS_META[tooltip.weekLog.status]?.icon, " \u672C\u9031 W", currentWeek, "\uFF1A", STATUS_META[tooltip.weekLog.status]?.label, tooltip.weekLog.reporterRole === 'manager' && /*#__PURE__*/React.createElement("span", {
+      className: "ml-1 text-yellow-300 text-[11px]"
+    }, "\u270F\uFE0F(\u4E3B\u7BA1\u88DC\u767B)")), tooltip.weekLog.note && /*#__PURE__*/React.createElement("div", {
+      className: "text-slate-400 whitespace-pre-wrap"
+    }, tooltip.weekLog.note)), tooltip.history.length > 0 && /*#__PURE__*/React.createElement("div", {
+      className: "mt-2 pt-2 border-t border-slate-700 text-slate-500"
+    }, "\u6B77\u53F2\u56DE\u5831\uFF1A", tooltip.history.map(([w, l]) => `W${w}${STATUS_META[l.status]?.icon || ''}`).join('　')), /*#__PURE__*/React.createElement("div", {
+      className: "mt-1.5 text-[10px] text-slate-500"
+    }, "\u9EDE\u64CA\u53EF\u958B\u555F\u8A73\u7D30 / \u56DE\u5831\u8996\u7A97"))), selectedTaskInfo && /*#__PURE__*/React.createElement(TaskModal, {
+      info: selectedTaskInfo,
+      role: role,
+      currentUser: currentUser,
+      currentWeek: currentWeek,
+      todayWeek: todayWeek,
+      weeksTotal: weeksTotal,
+      allowRetroCheckin: allowRetroCheckin,
+      logs: taskLogs[selectedTaskInfo.task.id] || {},
+      onClose: () => setSelectedTaskInfo(null),
+      onSaveLog: handleSaveLog,
+      onUpdateTaskDetails: handleUpdateTaskDetails,
+      onDeleteTask: handleDeleteTask,
+      onUpdateScore: handleUpdateScore
+    }), showExtraNoteModal && /*#__PURE__*/React.createElement(ExtraNoteModal, {
+      currentWeek: currentWeek,
+      initialNote: extraNotes[noteTargetUser || currentUser]?.[currentWeek] || '',
+      readOnly: role !== 'manager' && isViewingPast && !allowRetroCheckin,
+      targetUser: noteTargetUser,
+      meta: extraNoteMeta[noteTargetUser || currentUser]?.[currentWeek],
+      onClose: () => {
+        setShowExtraNoteModal(false);
+        setNoteTargetUser(null);
+      },
+      onSave: handleSaveExtraNote
+    }), showWeeklyPlanModal && /*#__PURE__*/React.createElement(WeeklyPlanModal, {
+      currentWeek: currentWeek,
+      initialNote: weeklyPlans[noteTargetUser || currentUser]?.[currentWeek] || '',
+      readOnly: role !== 'manager' && isViewingPast && !allowRetroCheckin,
+      targetUser: noteTargetUser,
+      meta: weeklyPlanMeta[noteTargetUser || currentUser]?.[currentWeek],
+      onClose: () => {
+        setShowWeeklyPlanModal(false);
+        setNoteTargetUser(null);
+      },
+      onSave: handleSaveWeeklyPlan
+    }), showDeadlinePanel && /*#__PURE__*/React.createElement(DeadlinePanel, {
+      items: deadlineTasks,
+      onClose: () => setShowDeadlinePanel(false),
+      onSelect: item => {
+        setShowDeadlinePanel(false);
+        setScrollTargetWeek(Math.min(item.task.end, weeksTotal)); // 捲動定位到該任務結束週
+        setSelectedTaskInfo({
+          proj: item.proj,
+          task: item.task,
+          isActiveThisWeek: item.task.start <= currentWeek && item.task.end >= currentWeek,
+          weekLog: taskLogs[item.task.id]?.[currentWeek]
         });
-      }), !isOverview && /*#__PURE__*/React.createElement("span", {
-        className: `relative z-10 truncate px-1.5 whitespace-nowrap ${isCompact ? 'text-[10px]' : 'text-[12px]'} ${textClass}`,
-        style: {
-          textShadow: '0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.75)'
-        }
-      }, isPending && '❗', deadlineSoon && '⏰', task.name)));
-    })))));
-  })))))), tooltip && /*#__PURE__*/React.createElement("div", {
-    className: "fixed z-[200] pointer-events-none",
-    style: {
-      left: Math.min(tooltip.x + 14, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 300),
-      top: Math.min(tooltip.y + 14, (typeof window !== 'undefined' ? window.innerHeight : 800) - 200)
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-slate-900/95 text-white rounded-lg shadow-xl px-3.5 py-3 text-xs max-w-xs border border-slate-700"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "font-bold text-[13px] mb-1 text-yellow-200"
-  }, tooltip.proj.name), /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-400 mb-0.5"
-  }, "\uD83D\uDC64 ", tooltip.proj.owner, "\u3000\xB7\u3000", tooltip.proj.category), tooltip.proj.deliverable && /*#__PURE__*/React.createElement("div", {
-    className: "text-amber-200/90 mb-0.5"
-  }, "\uD83C\uDFAF ", tooltip.proj.deliverable), tooltip.proj.mpSaving && /*#__PURE__*/React.createElement("div", {
-    className: "text-emerald-300 font-bold mb-0.5"
-  }, "\uD83D\uDCA1 MP \u7BC0\u7701\uFF1A", tooltip.proj.mpSaving), tooltip.proj.nid && /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-400 mb-0.5"
-  }, "\uD83D\uDD16 \u5C08\u6848 NID\uFF1A", tooltip.proj.nid), /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-400"
-  }, "\uD83D\uDCC5 ", tooltip.task.name), tooltip.task.nid && /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-500"
-  }, "\uD83D\uDD16 \u5340\u9593 NID\uFF1A", tooltip.task.nid), /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-500"
-  }, "W", tooltip.task.start, " \u2013 W", tooltip.task.end, "\uFF08", weekToMonth(tooltip.task.start, months), " ~ ", weekToMonth(tooltip.task.end, months), "\uFF09"), isTaskDeadlineSoon(tooltip.task) && /*#__PURE__*/React.createElement("div", {
-    className: "mt-1 text-orange-300 font-bold"
-  }, "\u23F0 \u6392\u7A0B\u5373\u5C07\u5230\u671F\uFF1A\u5269 ", tooltip.task.end - todayWeek + 1, " \u9031 \uFF08\u6642\u7A0B\u5DF2\u904E ", Math.round((todayWeek - tooltip.task.start + 1) / (tooltip.task.end - tooltip.task.start + 1) * 100), "%\uFF09"), tooltip.weekLog && /*#__PURE__*/React.createElement("div", {
-    className: "mt-2 pt-2 border-t border-slate-700"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "font-bold mb-0.5"
-  }, STATUS_META[tooltip.weekLog.status]?.icon, " \u672C\u9031 W", currentWeek, "\uFF1A", STATUS_META[tooltip.weekLog.status]?.label, tooltip.weekLog.reporterRole === 'manager' && /*#__PURE__*/React.createElement("span", {
-    className: "ml-1 text-yellow-300 text-[11px]"
-  }, "\u270F\uFE0F(\u4E3B\u7BA1\u88DC\u767B)")), tooltip.weekLog.note && /*#__PURE__*/React.createElement("div", {
-    className: "text-slate-400 whitespace-pre-wrap"
-  }, tooltip.weekLog.note)), tooltip.history.length > 0 && /*#__PURE__*/React.createElement("div", {
-    className: "mt-2 pt-2 border-t border-slate-700 text-slate-500"
-  }, "\u6B77\u53F2\u56DE\u5831\uFF1A", tooltip.history.map(([w, l]) => `W${w}${STATUS_META[l.status]?.icon || ''}`).join('　')), /*#__PURE__*/React.createElement("div", {
-    className: "mt-1.5 text-[10px] text-slate-500"
-  }, "\u9EDE\u64CA\u53EF\u958B\u555F\u8A73\u7D30 / \u56DE\u5831\u8996\u7A97"))), selectedTaskInfo && /*#__PURE__*/React.createElement(TaskModal, {
-    info: selectedTaskInfo,
-    role: role,
-    currentUser: currentUser,
-    currentWeek: currentWeek,
-    todayWeek: todayWeek,
-    weeksTotal: weeksTotal,
-    allowRetroCheckin: allowRetroCheckin,
-    onClose: () => setSelectedTaskInfo(null),
-    onSaveLog: handleSaveLog,
-    onUpdateTaskDetails: handleUpdateTaskDetails,
-    onDeleteTask: handleDeleteTask,
-    onUpdateScore: handleUpdateScore
-  }), showExtraNoteModal && /*#__PURE__*/React.createElement(ExtraNoteModal, {
-    currentWeek: currentWeek,
-    initialNote: extraNotes[noteTargetUser || currentUser]?.[currentWeek] || '',
-    readOnly: role !== 'manager' && isViewingPast && !allowRetroCheckin,
-    targetUser: noteTargetUser,
-    meta: extraNoteMeta[noteTargetUser || currentUser]?.[currentWeek],
-    onClose: () => {
-      setShowExtraNoteModal(false);
-      setNoteTargetUser(null);
-    },
-    onSave: handleSaveExtraNote
-  }), showWeeklyPlanModal && /*#__PURE__*/React.createElement(WeeklyPlanModal, {
-    currentWeek: currentWeek,
-    initialNote: weeklyPlans[noteTargetUser || currentUser]?.[currentWeek] || '',
-    readOnly: role !== 'manager' && isViewingPast && !allowRetroCheckin,
-    targetUser: noteTargetUser,
-    meta: weeklyPlanMeta[noteTargetUser || currentUser]?.[currentWeek],
-    onClose: () => {
-      setShowWeeklyPlanModal(false);
-      setNoteTargetUser(null);
-    },
-    onSave: handleSaveWeeklyPlan
-  }), showDeadlinePanel && /*#__PURE__*/React.createElement(DeadlinePanel, {
-    items: deadlineTasks,
-    onClose: () => setShowDeadlinePanel(false),
-    onSelect: item => {
-      setShowDeadlinePanel(false);
-      setScrollTargetWeek(Math.min(item.task.end, weeksTotal)); // 捲動定位到該任務結束週
-      setSelectedTaskInfo({
-        proj: item.proj,
-        task: item.task,
-        isActiveThisWeek: item.task.start <= currentWeek && item.task.end >= currentWeek,
-        weekLog: taskLogs[item.task.id]?.[currentWeek]
-      });
-    }
-  }), showPendingPanel && /*#__PURE__*/React.createElement(PendingPanel, {
-    pending: myPendingTasks,
-    completed: myCompletedTasks,
-    currentWeek: todayWeek,
-    planPending: planPendingThisWeek,
-    extraFilled: !!extraNotes[currentUser]?.[todayWeek],
-    planMeta: weeklyPlanMeta[currentUser]?.[todayWeek],
-    extraMeta: extraNoteMeta[currentUser]?.[todayWeek],
-    onFillPlan: () => {
-      setShowPendingPanel(false);
-      setCurrentWeek(todayWeek);
-      setShowWeeklyPlanModal(true);
-    },
-    onFillExtra: () => {
-      setShowPendingPanel(false);
-      setCurrentWeek(todayWeek);
-      setShowExtraNoteModal(true);
-    },
-    onClose: () => setShowPendingPanel(false),
-    onSelect: (item, log) => {
-      setShowPendingPanel(false);
-      setCurrentWeek(todayWeek);
-      setSelectedTaskInfo({
-        proj: item.proj,
-        task: item.task,
-        isActiveThisWeek: true,
-        weekLog: log
-      });
-    }
-  }), showRetroPanel && role === 'member' && /*#__PURE__*/React.createElement(PendingPanel, {
-    retro: true,
-    pending: myRetroPendingTasks,
-    completed: myRetroCompletedTasks,
-    currentWeek: currentWeek,
-    planPending: !weeklyPlans[currentUser]?.[currentWeek],
-    extraFilled: !!extraNotes[currentUser]?.[currentWeek],
-    planMeta: weeklyPlanMeta[currentUser]?.[currentWeek],
-    extraMeta: extraNoteMeta[currentUser]?.[currentWeek],
-    onFillPlan: () => {
-      setShowRetroPanel(false);
-      setShowWeeklyPlanModal(true);
-    },
-    onFillExtra: () => {
-      setShowRetroPanel(false);
-      setShowExtraNoteModal(true);
-    },
-    onClose: () => setShowRetroPanel(false),
-    onSelect: (item, log) => {
-      setShowRetroPanel(false);
-      setSelectedTaskInfo({
-        proj: item.proj,
-        task: item.task,
-        isActiveThisWeek: true,
-        weekLog: log
-      });
-    }
-  }), showWeekEditPanel && role === 'manager' && /*#__PURE__*/React.createElement(ManagerWeekPanel, {
-    week: currentWeek,
-    todayWeek: todayWeek,
-    users: users,
-    projects: projects,
-    taskLogs: taskLogs,
-    extraNotes: extraNotes,
-    weeklyPlans: weeklyPlans,
-    weeklyComments: weeklyComments,
-    extraNoteMeta: extraNoteMeta,
-    weeklyPlanMeta: weeklyPlanMeta,
-    weeklyCommentMeta: weeklyCommentMeta,
-    onClose: () => setShowWeekEditPanel(false),
-    onSelectTask: (proj, task, log) => {
-      setShowWeekEditPanel(false);
-      setSelectedTaskInfo({
-        proj,
-        task,
-        isActiveThisWeek: true,
-        weekLog: log
-      });
-    },
-    onEditExtra: u => {
-      setShowWeekEditPanel(false);
-      setNoteTargetUser(u);
-      setShowExtraNoteModal(true);
-    },
-    onEditPlan: u => {
-      setShowWeekEditPanel(false);
-      setNoteTargetUser(u);
-      setShowWeeklyPlanModal(true);
-    },
-    onEditComment: u => {
-      setShowWeekEditPanel(false);
-      setCommentTarget(u);
-    }
-  }), showWeeklyReport && /*#__PURE__*/React.createElement(WeeklyReportDashboard, {
-    currentWeek: currentWeek,
-    year: scheduleYear,
-    users: users,
-    projects: projects,
-    taskLogs: taskLogs,
-    extraNotes: extraNotes,
-    weeklyPlans: weeklyPlans,
-    weeklyComments: weeklyComments,
-    extraNoteMeta: extraNoteMeta,
-    weeklyPlanMeta: weeklyPlanMeta,
-    weeklyCommentMeta: weeklyCommentMeta,
-    currentUser: currentUser,
-    role: role,
-    highlightedTaskId: highlightedTaskId,
-    onHighlightTask: handleHighlightTask,
-    onEditComment: userName => setCommentTarget(userName),
-    onClose: closeWeeklyReport
-  }), commentTarget && /*#__PURE__*/React.createElement(CommentModal, {
-    member: commentTarget,
-    currentWeek: currentWeek,
-    initialComment: weeklyComments[commentTarget]?.[currentWeek] || '',
-    meta: weeklyCommentMeta[commentTarget]?.[currentWeek],
-    onClose: () => setCommentTarget(null),
-    onSave: c => handleSaveComment(commentTarget, c)
-  }), editingProject && /*#__PURE__*/React.createElement(ProjectEditModal, {
-    info: editingProject,
-    existingCategories: existingCategories,
-    users: users,
-    onClose: () => setEditingProject(null),
-    onSave: handleSaveProject
-  }), addingInterval && /*#__PURE__*/React.createElement(IntervalModal, {
-    project: addingInterval,
-    currentWeek: currentWeek,
-    weeksTotal: weeksTotal,
-    onClose: () => setAddingInterval(null),
-    onSave: handleAddInterval
-  }), showAuditPanel && /*#__PURE__*/React.createElement(AuditPanel, {
-    onClose: () => setShowAuditPanel(false)
-  }), showMemberPanel && /*#__PURE__*/React.createElement(MemberPanel, {
-    users: users,
-    projects: projects,
-    year: scheduleYear,
-    onAdd: handleAddUser,
-    onRename: handleRenameUser,
-    onDelete: handleDeleteUser,
-    onClose: () => setShowMemberPanel(false)
-  }), showAccessPanel && role === 'manager' && /*#__PURE__*/React.createElement(AccessPanel, {
-    currentUser: currentUser,
-    role: role,
-    empId: empId,
-    showToast: showToast,
-    onClose: () => setShowAccessPanel(false)
-  }), showUsagePanel && role === 'manager' && /*#__PURE__*/React.createElement(UsageStatsPanel, {
-    onClose: () => setShowUsagePanel(false)
-  }), deliverableProj && /*#__PURE__*/React.createElement(DeliverableModal, {
-    proj: deliverableProj,
-    role: role,
-    currentUser: currentUser,
-    onClose: () => setDeliverableProj(null),
-    onSave: handleSaveDeliverable
-  }), confirmInfo && /*#__PURE__*/React.createElement(ConfirmModal, {
-    info: confirmInfo,
-    onCancel: () => setConfirmInfo(null)
-  }), toast && /*#__PURE__*/React.createElement("div", {
-    className: `fixed bottom-6 left-1/2 -translate-x-1/2 z-[300] bg-slate-900 text-white text-sm font-bold px-5 py-3 rounded-xl shadow-2xl border flex items-center gap-3 ${toast.isError ? 'border-red-500' : 'border-slate-700 animate-bounce'}`
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "whitespace-pre-wrap"
-  }, toast.msg), toast.action && /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      dismissToast();
-      toast.action.onClick();
-    },
-    className: "flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-slate-900 px-3 py-1 rounded-lg text-xs font-black transition"
-  }, "\u21A9 ", toast.action.label), (toast.isError || toast.action) && /*#__PURE__*/React.createElement("button", {
-    onClick: dismissToast,
-    className: "flex-shrink-0 text-white/50 hover:text-white font-bold px-1",
-    title: "\u95DC\u9589"
-  }, "\u2715")));
+      }
+    }), showPendingPanel && /*#__PURE__*/React.createElement(PendingPanel, {
+      pending: myPendingTasks,
+      completed: myCompletedTasks,
+      currentWeek: todayWeek,
+      planPending: planPendingThisWeek,
+      extraFilled: !!extraNotes[currentUser]?.[todayWeek],
+      planMeta: weeklyPlanMeta[currentUser]?.[todayWeek],
+      extraMeta: extraNoteMeta[currentUser]?.[todayWeek],
+      onFillPlan: () => {
+        setShowPendingPanel(false);
+        setCurrentWeek(todayWeek);
+        setShowWeeklyPlanModal(true);
+      },
+      onFillExtra: () => {
+        setShowPendingPanel(false);
+        setCurrentWeek(todayWeek);
+        setShowExtraNoteModal(true);
+      },
+      onClose: () => setShowPendingPanel(false),
+      onSelect: (item, log) => {
+        setShowPendingPanel(false);
+        setCurrentWeek(todayWeek);
+        setSelectedTaskInfo({
+          proj: item.proj,
+          task: item.task,
+          isActiveThisWeek: true,
+          weekLog: log
+        });
+      }
+    }), showRetroPanel && role === 'member' && /*#__PURE__*/React.createElement(PendingPanel, {
+      retro: true,
+      pending: myRetroPendingTasks,
+      completed: myRetroCompletedTasks,
+      currentWeek: currentWeek,
+      planPending: !weeklyPlans[currentUser]?.[currentWeek],
+      extraFilled: !!extraNotes[currentUser]?.[currentWeek],
+      planMeta: weeklyPlanMeta[currentUser]?.[currentWeek],
+      extraMeta: extraNoteMeta[currentUser]?.[currentWeek],
+      onFillPlan: () => {
+        setShowRetroPanel(false);
+        setShowWeeklyPlanModal(true);
+      },
+      onFillExtra: () => {
+        setShowRetroPanel(false);
+        setShowExtraNoteModal(true);
+      },
+      onClose: () => setShowRetroPanel(false),
+      onSelect: (item, log) => {
+        setShowRetroPanel(false);
+        setSelectedTaskInfo({
+          proj: item.proj,
+          task: item.task,
+          isActiveThisWeek: true,
+          weekLog: log
+        });
+      }
+    }), showWeekEditPanel && role === 'manager' && /*#__PURE__*/React.createElement(ManagerWeekPanel, {
+      week: currentWeek,
+      todayWeek: todayWeek,
+      users: users,
+      projects: projects,
+      taskLogs: taskLogs,
+      extraNotes: extraNotes,
+      weeklyPlans: weeklyPlans,
+      weeklyComments: weeklyComments,
+      extraNoteMeta: extraNoteMeta,
+      weeklyPlanMeta: weeklyPlanMeta,
+      weeklyCommentMeta: weeklyCommentMeta,
+      onClose: () => setShowWeekEditPanel(false),
+      onSelectTask: (proj, task, log) => {
+        setShowWeekEditPanel(false);
+        setSelectedTaskInfo({
+          proj,
+          task,
+          isActiveThisWeek: true,
+          weekLog: log
+        });
+      },
+      onEditExtra: u => {
+        setShowWeekEditPanel(false);
+        setNoteTargetUser(u);
+        setShowExtraNoteModal(true);
+      },
+      onEditPlan: u => {
+        setShowWeekEditPanel(false);
+        setNoteTargetUser(u);
+        setShowWeeklyPlanModal(true);
+      },
+      onEditComment: u => {
+        setShowWeekEditPanel(false);
+        setCommentTarget(u);
+      }
+    }), commentTarget && /*#__PURE__*/React.createElement(CommentModal, {
+      member: commentTarget,
+      currentWeek: currentWeek,
+      initialComment: weeklyComments[commentTarget]?.[currentWeek] || '',
+      meta: weeklyCommentMeta[commentTarget]?.[currentWeek],
+      onClose: () => setCommentTarget(null),
+      onSave: c => handleSaveComment(commentTarget, c)
+    }), editingProject && /*#__PURE__*/React.createElement(ProjectEditModal, {
+      info: editingProject,
+      existingCategories: existingCategories,
+      users: users,
+      onClose: () => setEditingProject(null),
+      onSave: handleSaveProject
+    }), addingInterval && /*#__PURE__*/React.createElement(IntervalModal, {
+      project: addingInterval,
+      currentWeek: currentWeek,
+      weeksTotal: weeksTotal,
+      onClose: () => setAddingInterval(null),
+      onSave: handleAddInterval
+    }), showAuditPanel && /*#__PURE__*/React.createElement(AuditPanel, {
+      onClose: () => setShowAuditPanel(false)
+    }), showMemberPanel && /*#__PURE__*/React.createElement(MemberPanel, {
+      users: users,
+      projects: projects,
+      year: scheduleYear,
+      onAdd: handleAddUser,
+      onRename: handleRenameUser,
+      onDelete: handleDeleteUser,
+      onClose: () => setShowMemberPanel(false)
+    }), showAccessPanel && role === 'manager' && /*#__PURE__*/React.createElement(AccessPanel, {
+      currentUser: currentUser,
+      role: role,
+      empId: empId,
+      showToast: showToast,
+      onClose: () => setShowAccessPanel(false)
+    }), showUsagePanel && role === 'manager' && /*#__PURE__*/React.createElement(UsageStatsPanel, {
+      onClose: () => setShowUsagePanel(false)
+    }), deliverableProj && /*#__PURE__*/React.createElement(DeliverableModal, {
+      proj: deliverableProj,
+      role: role,
+      currentUser: currentUser,
+      onClose: () => setDeliverableProj(null),
+      onSave: handleSaveDeliverable
+    }), confirmInfo && /*#__PURE__*/React.createElement(ConfirmModal, {
+      info: confirmInfo,
+      onCancel: () => setConfirmInfo(null)
+    }), /*#__PURE__*/React.createElement("div", {
+      className: "sr-only",
+      role: "status",
+      "aria-live": "polite"
+    }, toast && !toast.isError ? toast.msg : ''), /*#__PURE__*/React.createElement("div", {
+      className: "sr-only",
+      role: "alert",
+      "aria-live": "assertive"
+    }, toast && toast.isError ? toast.msg : ''), toast && /*#__PURE__*/React.createElement("div", {
+      className: `fixed bottom-6 left-1/2 -translate-x-1/2 z-[300] bg-slate-900 text-white text-sm font-bold px-5 py-3 rounded-xl shadow-2xl border flex items-center gap-3 ${toast.isError ? 'border-red-500' : 'border-slate-700 animate-bounce'}`
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "whitespace-pre-wrap",
+      "aria-hidden": "true"
+    }, toast.msg), toast.action && /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        dismissToast();
+        toast.action.onClick();
+      },
+      className: "flex-shrink-0 bg-amber-500 hover:bg-amber-400 text-slate-900 px-3 py-1 rounded-lg text-xs font-black transition"
+    }, "\u21A9 ", toast.action.label), (toast.isError || toast.action) && /*#__PURE__*/React.createElement("button", {
+      onClick: dismissToast,
+      "aria-label": "\u95DC\u9589\u901A\u77E5",
+      className: "flex-shrink-0 text-white/50 hover:text-white font-bold px-1",
+      title: "\u95DC\u9589"
+    }, "\u2715")))
+  );
 }
 
 // 投影友善:晶片加邊框確保輪廓、標籤文字不再用透明度淡化(投影機對比打折,淡字會消失)
+// 統計晶片。給 onToggle 就變成可切換的篩選鈕(用 <button>,鍵盤與讀螢幕器自然支援,
+// 不需要另外套 clickable();aria-pressed 才播報得出「已按下/未按下」的切換語意)。
 function StatChip({
   label,
   value,
-  className
+  className,
+  onToggle,
+  active = false,
+  title
 }) {
-  return /*#__PURE__*/React.createElement("span", {
-    className: `flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border ${className}`
+  const base = `flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border ${className}`;
+  if (!onToggle) {
+    return /*#__PURE__*/React.createElement("span", {
+      className: base
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "font-medium text-[11px]"
+    }, label), /*#__PURE__*/React.createElement("span", {
+      className: "text-[13px] leading-none"
+    }, value));
+  }
+  return /*#__PURE__*/React.createElement("button", {
+    onClick: onToggle,
+    "aria-pressed": active,
+    title: title,
+    className: `${base} transition ${active ? 'ring-2 ring-offset-1 ring-yellow-600' : 'hover:brightness-95'}`
   }, /*#__PURE__*/React.createElement("span", {
     className: "font-medium text-[11px]"
   }, label), /*#__PURE__*/React.createElement("span", {
     className: "text-[13px] leading-none"
-  }, value));
+  }, value), active && /*#__PURE__*/React.createElement("span", {
+    className: "text-[11px] font-black",
+    "aria-hidden": "true"
+  }, "\u2715"));
 }
 function LoadingScreen() {
   return /*#__PURE__*/React.createElement("div", {
@@ -2943,12 +3511,14 @@ function TaskModal({
   todayWeek,
   weeksTotal = WEEKS_TOTAL,
   allowRetroCheckin,
+  logs = {},
   onClose,
   onSaveLog,
   onUpdateTaskDetails,
   onDeleteTask,
   onUpdateScore
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const {
     proj,
     task,
@@ -2970,6 +3540,27 @@ function TaskModal({
   useModalDirtyReset();
   const [scheduleError, setScheduleError] = useState('');
   const [noteError, setNoteError] = useState('');
+  const [showAllHistory, setShowAllHistory] = useState(false);
+
+  // 此計畫區間「本週之前」的歷次回報,新到舊。
+  // 寫本週回報時最需要的參考就是「上週寫到哪、狀態是什麼」,原本只有甘特條 hover tooltip 看得到 →
+  // 使用者得先關掉這個彈窗、去甘特條上 hover、記住內容、再開回來。資料本來就在 client 端(taskLogs),不需要再打 API。
+  const history = useMemo(() => Object.entries(logs).map(([w, log]) => ({
+    week: Number(w),
+    log
+  })).filter(h => h.week < currentWeek && h.log).sort((a, b) => b.week - a.week), [logs, currentWeek]);
+  const HISTORY_PREVIEW = 3; // 預設只展開最近 3 週,其餘收起來(避免長區間洗版)
+  const shownHistory = showAllHistory ? history : history.slice(0, HISTORY_PREVIEW);
+
+  // 沿用某一週的回報當本週草稿:狀態與內容一起帶入,使用者可再修改後送出。
+  // 例行性/持續性的工作每週內容差異不大,重打一次是純粹的重工;帶入後文字就攤在 textarea 裡,
+  // 使用者看得到自己送出的是什麼,不會有「以為填了新內容」的錯覺。
+  const reuseLog = h => {
+    setStatus(h.log.status);
+    setNote(h.log.note || '');
+    setNoteError('');
+    markModalDirty();
+  };
   const submitLog = async () => {
     if (saving) return;
     if (!status) {
@@ -3006,9 +3597,9 @@ function TaskModal({
       setSaving(false);
     }
   };
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[100] flex justify-center items-center p-4"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -3024,20 +3615,10 @@ function TaskModal({
     className: `ml-2 px-1.5 rounded text-[10px] font-bold border ${PROJECT_TYPES[proj.type].chip}`
   }, proj.type.toUpperCase(), " ", PROJECT_TYPES[proj.type].label)), /*#__PURE__*/React.createElement("h3", {
     className: "font-bold text-lg leading-snug"
-  }, proj.name)), /*#__PURE__*/React.createElement("button", {
+  }, proj.name)), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/60 hover:text-white flex-shrink-0"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     className: "p-6 space-y-6"
   }, /*#__PURE__*/React.createElement("div", {
     className: "bg-slate-100 p-4 rounded-xl border border-slate-300"
@@ -3056,6 +3637,7 @@ function TaskModal({
       markModalDirty();
     },
     disabled: !isManager,
+    onKeyDown: onEnterSubmit(submitSchedule),
     className: "w-full border border-slate-300 rounded-md p-2 text-sm mb-3 text-center disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500"
   }), /*#__PURE__*/React.createElement("div", {
     className: "flex space-x-3 items-center"
@@ -3063,7 +3645,7 @@ function TaskModal({
     className: "w-1/2"
   }, /*#__PURE__*/React.createElement("label", {
     className: "text-[10px] text-slate-500 font-bold"
-  }, "\u958B\u59CB\u9031"), /*#__PURE__*/React.createElement("input", {
+  }, "\u958B\u59CB\u9031", /*#__PURE__*/React.createElement(ReqMark, null)), /*#__PURE__*/React.createElement("input", {
     type: "number",
     min: "1",
     max: weeksTotal,
@@ -3074,12 +3656,13 @@ function TaskModal({
       markModalDirty();
     },
     disabled: !isManager,
+    onKeyDown: onEnterSubmit(submitSchedule),
     className: "w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500"
   })), /*#__PURE__*/React.createElement("div", {
     className: "w-1/2"
   }, /*#__PURE__*/React.createElement("label", {
     className: "text-[10px] text-slate-500 font-bold"
-  }, "\u7D50\u675F\u9031"), /*#__PURE__*/React.createElement("input", {
+  }, "\u7D50\u675F\u9031", /*#__PURE__*/React.createElement(ReqMark, null)), /*#__PURE__*/React.createElement("input", {
     type: "number",
     min: "1",
     max: weeksTotal,
@@ -3090,6 +3673,7 @@ function TaskModal({
       markModalDirty();
     },
     disabled: !isManager,
+    onKeyDown: onEnterSubmit(submitSchedule),
     className: "w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500"
   }))), /*#__PURE__*/React.createElement("div", {
     className: "mt-3"
@@ -3104,6 +3688,7 @@ function TaskModal({
       markModalDirty();
     },
     disabled: !isManager,
+    onKeyDown: onEnterSubmit(submitSchedule),
     className: "w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500",
     placeholder: "\u5982 N001\u2026"
   })), scheduleError && /*#__PURE__*/React.createElement("div", {
@@ -3121,7 +3706,41 @@ function TaskModal({
     onClick: () => onDeleteTask(proj, task),
     className: "flex-shrink-0 px-3 py-1.5 rounded text-sm font-bold text-red-600 bg-red-50 border border-red-200 hover:bg-red-100 transition",
     title: "\u522A\u9664\u6B64\u8A08\u756B\u5340\u9593\uFF08\u8EDF\u522A\u9664\uFF0C\u53EF\u7531\u8CC7\u6599\u5EAB\u9084\u539F\uFF09"
-  }, "\uD83D\uDDD1 \u522A\u9664\u5340\u9593"))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h4", {
+  }, "\uD83D\uDDD1 \u522A\u9664\u5340\u9593"))), history.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "border border-slate-300 rounded-xl overflow-hidden"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bg-slate-100 px-4 py-2 flex items-center justify-between gap-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-sm font-bold text-slate-800"
+  }, "\u524D\u5E7E\u9031\u56DE\u5831\uFF08", history.length, " \u9031\uFF09"), history.length > HISTORY_PREVIEW && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowAllHistory(v => !v),
+    className: "flex-shrink-0 text-xs font-bold text-blue-700 hover:text-blue-900 hover:underline",
+    "aria-expanded": showAllHistory
+  }, showAllHistory ? '只看最近 3 週' : `顯示全部 ${history.length} 週`)), /*#__PURE__*/React.createElement("div", {
+    className: "max-h-56 overflow-y-auto divide-y divide-slate-200"
+  }, shownHistory.map(h => /*#__PURE__*/React.createElement("div", {
+    key: h.week,
+    className: "px-4 py-2.5 bg-white"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center flex-wrap gap-1.5"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-bold text-[11px] font-mono"
+  }, "W", String(h.week).padStart(2, '0')), /*#__PURE__*/React.createElement("span", {
+    className: `px-2 py-0.5 rounded text-[11px] font-bold ${STATUS_META[h.log.status]?.tag}`
+  }, STATUS_META[h.log.status]?.icon, " ", STATUS_META[h.log.status]?.label), h.log.reporterRole === 'manager' && /*#__PURE__*/React.createElement("span", {
+    className: "px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-bold text-[10px]",
+    title: "\u6B64\u7B46\u7531\u4E3B\u7BA1\u4EE3\u70BA\u4FEE\u6B63/\u88DC\u767B"
+  }, "\u270F\uFE0F \u4E3B\u7BA1\u4FEE\u6B63"), canClockIn && /*#__PURE__*/React.createElement("button", {
+    onClick: () => reuseLog(h),
+    className: "ml-auto flex-shrink-0 px-2 py-0.5 rounded border text-[11px] font-bold bg-white ctl-raised text-slate-600 border-slate-400 hover:border-indigo-500 hover:bg-indigo-50 transition",
+    title: `把 W${String(h.week).padStart(2, '0')} 的狀態與內容帶入本週草稿，可再修改後送出`
+  }, "\u6CBF\u7528")), /*#__PURE__*/React.createElement("div", {
+    className: "mt-1 text-xs text-slate-700 whitespace-pre-wrap break-words leading-relaxed"
+  }, h.log.note || /*#__PURE__*/React.createElement("span", {
+    className: "text-slate-500 italic"
+  }, "\uFF08\u672A\u586B\u5BEB\u8AAA\u660E\uFF09")), h.log.updatedAt && /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] text-slate-500 mt-1"
+  }, "\uD83D\uDD58 \u6700\u5F8C\u7DE8\u8F2F ", h.log.updatedAt, h.log.reporter ? `（${h.log.reporter}）` : ''))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h4", {
     className: "text-sm font-bold text-slate-800 mb-3 flex items-center"
   }, "W", String(currentWeek).padStart(2, '0'), " \u5BE6\u969B\u57F7\u884C\u56DE\u5831", isActiveThisWeek && /*#__PURE__*/React.createElement("span", {
     className: `ml-2 px-2 py-0.5 rounded-full text-[11px] font-bold ${weekLog ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-500'}`,
@@ -3147,7 +3766,13 @@ function TaskModal({
     className: "text-xs text-slate-500 mt-0.5"
   }, "\u56DE\u5831\u5F8C\u6703\u5728\u8A72\u9031\u7518\u7279\u689D\u6A19\u793A\u5C0D\u61C9\u984F\u8272\uFF08\u6709\u57F7\u884C=\u7DA0\u3001Monitor=\u85CD\u3001\u672A\u57F7\u884C=\u7070\uFF09\u3002Monitor \u70BA\u4F8B\u884C\u76E3\u63A7\u5DE5\u4F5C\uFF0C\u53EF\u4E0D\u586B\u8AAA\u660E\u3002"), /*#__PURE__*/React.createElement("div", {
     className: "text-xs text-indigo-600 mt-1 font-bold"
-  }, "\uD83C\uDFC6 \u5B8C\u6210\u56DE\u5831\u9810\u8A2D\u7372\u5F97 1 \u5206\uFF08\u672A\u56DE\u5831\u70BA 0 \u5206\uFF09\uFF0C\u4E3B\u7BA1\u53EF\u4F9D\u8868\u73FE\u8ABF\u6574\u5206\u6578\u3002")), /*#__PURE__*/React.createElement("div", {
+  }, "\uD83C\uDFC6 \u5B8C\u6210\u56DE\u5831\u9810\u8A2D\u7372\u5F97 1 \u5206\uFF08\u672A\u56DE\u5831\u70BA 0 \u5206\uFF09\uFF0C\u4E3B\u7BA1\u53EF\u4F9D\u8868\u73FE\u8ABF\u6574\u5206\u6578\u3002")), history.length > 0 && !status && /*#__PURE__*/React.createElement("button", {
+    onClick: () => reuseLog(history[0]),
+    className: "mb-3 w-full px-3 py-2 rounded-lg border border-indigo-400 bg-indigo-50 text-indigo-800 text-xs font-bold hover:bg-indigo-100 transition flex items-center justify-center gap-1.5",
+    title: `把 W${String(history[0].week).padStart(2, '0')} 的狀態與內容帶入，可再修改後送出`
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true"
+  }, "\u21A9"), "\u6CBF\u7528\u4E0A\u6B21\u56DE\u5831\uFF08W", String(history[0].week).padStart(2, '0'), "\u30FB", STATUS_META[history[0].log.status]?.label, "\uFF09"), /*#__PURE__*/React.createElement("div", {
     className: "space-y-3"
   }, /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-3 gap-2"
@@ -3239,6 +3864,7 @@ function ExtraNoteModal({
   onClose,
   onSave
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [note, setNote] = useState(initialNote);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -3255,9 +3881,9 @@ function ExtraNoteModal({
     }
   };
   if (readOnly) {
-    return /*#__PURE__*/React.createElement("div", {
+    return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
       className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[110] flex justify-center items-center p-4"
-    }, /*#__PURE__*/React.createElement("div", {
+    }), /*#__PURE__*/React.createElement("div", {
       className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden",
       onClick: e => e.stopPropagation()
     }, /*#__PURE__*/React.createElement("div", {
@@ -3270,20 +3896,10 @@ function ExtraNoteModal({
       style: {
         color: '#FFFFFF'
       }
-    }, "\uD83D\uDD12 W", currentWeek, " \u975E\u5C08\u6848\u5DE5\u4F5C\uFF08\u552F\u8B80\uFF09"), /*#__PURE__*/React.createElement("button", {
+    }, "\uD83D\uDD12 W", currentWeek, " \u975E\u5C08\u6848\u5DE5\u4F5C\uFF08\u552F\u8B80\uFF09"), /*#__PURE__*/React.createElement(CloseButton, {
       onClick: onClose,
       className: "text-white/60 hover:text-white"
-    }, /*#__PURE__*/React.createElement("svg", {
-      className: "w-6 h-6",
-      fill: "none",
-      viewBox: "0 0 24 24",
-      stroke: "currentColor"
-    }, /*#__PURE__*/React.createElement("path", {
-      strokeLinecap: "round",
-      strokeLinejoin: "round",
-      strokeWidth: 2,
-      d: "M6 18L18 6M6 6l12 12"
-    })))), /*#__PURE__*/React.createElement("div", {
+    })), /*#__PURE__*/React.createElement("div", {
       className: "p-6"
     }, /*#__PURE__*/React.createElement("p", {
       className: "text-xs text-slate-500 mb-3"
@@ -3303,9 +3919,9 @@ function ExtraNoteModal({
   return (
     /*#__PURE__*/
     // 注意:全站慣例 — 所有彈出視窗/面板的遮罩都「不」綁 onClick 關閉(避免誤點視窗外遺失輸入),一律用「取消」「×」或送出按鈕關閉;新增 Modal 請沿用
-    React.createElement("div", {
+    React.createElement("div", _extends({}, focus, {
       className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[110] flex justify-center items-center p-4"
-    }, /*#__PURE__*/React.createElement("div", {
+    }), /*#__PURE__*/React.createElement("div", {
       className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden",
       onClick: e => e.stopPropagation()
     }, /*#__PURE__*/React.createElement("div", {
@@ -3318,20 +3934,10 @@ function ExtraNoteModal({
       style: {
         color: '#FFFFFF'
       }
-    }, "\uD83D\uDCDD \u586B\u5BEB W", currentWeek, " \u975E\u5C08\u6848\u5DE5\u4F5C", targetUser ? `（${targetUser}）` : ''), /*#__PURE__*/React.createElement("button", {
+    }, "\uD83D\uDCDD \u586B\u5BEB W", currentWeek, " \u975E\u5C08\u6848\u5DE5\u4F5C", targetUser ? `（${targetUser}）` : ''), /*#__PURE__*/React.createElement(CloseButton, {
       onClick: onClose,
       className: "text-white/60 hover:text-white"
-    }, /*#__PURE__*/React.createElement("svg", {
-      className: "w-6 h-6",
-      fill: "none",
-      viewBox: "0 0 24 24",
-      stroke: "currentColor"
-    }, /*#__PURE__*/React.createElement("path", {
-      strokeLinecap: "round",
-      strokeLinejoin: "round",
-      strokeWidth: 2,
-      d: "M6 18L18 6M6 6l12 12"
-    })))), /*#__PURE__*/React.createElement("div", {
+    })), /*#__PURE__*/React.createElement("div", {
       className: "p-6"
     }, targetUser && /*#__PURE__*/React.createElement("div", {
       className: "mb-4 bg-amber-100 border border-amber-400 text-amber-900 rounded-lg px-3 py-2.5 text-xs font-bold flex items-center"
@@ -3387,6 +3993,7 @@ function DeliverableModal({
   onClose,
   onSave
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const canEdit = role === 'manager' || proj.owner === currentUser;
   const [text, setText] = useState(proj.deliverable || '');
   const [mpSaving, setMpSaving] = useState(proj.mpSaving || '');
@@ -3401,9 +4008,9 @@ function DeliverableModal({
       setSaving(false);
     }
   };
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[130] flex justify-center items-center p-4"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -3423,20 +4030,10 @@ function DeliverableModal({
     style: {
       color: '#FEF3C7'
     }
-  }, proj.name, "\uFF08\u8CA0\u8CAC\u4EBA\uFF1A", proj.owner, "\uFF09")), /*#__PURE__*/React.createElement("button", {
+  }, proj.name, "\uFF08\u8CA0\u8CAC\u4EBA\uFF1A", proj.owner, "\uFF09")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/70 hover:text-white flex-shrink-0"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     className: "p-6"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-sm text-slate-500 mb-4 border-l-4 border-amber-400 pl-3"
@@ -3468,6 +4065,7 @@ function DeliverableModal({
       setMpSaving(e.target.value);
       markModalDirty();
     },
+    onKeyDown: onEnterSubmit(submit),
     placeholder: "\u4F8B\u5982\uFF1A0.5 \u4EBA/\u6708\u3001\u6BCF\u5E74\u7BC0\u7701 120 \u5C0F\u6642\u2026",
     className: "w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-amber-400"
   })), /*#__PURE__*/React.createElement("div", {
@@ -3507,6 +4105,7 @@ function WeeklyPlanModal({
   onClose,
   onSave
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [note, setNote] = useState(initialNote);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -3523,9 +4122,9 @@ function WeeklyPlanModal({
     }
   };
   if (readOnly) {
-    return /*#__PURE__*/React.createElement("div", {
+    return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
       className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[110] flex justify-center items-center p-4"
-    }, /*#__PURE__*/React.createElement("div", {
+    }), /*#__PURE__*/React.createElement("div", {
       className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden",
       onClick: e => e.stopPropagation()
     }, /*#__PURE__*/React.createElement("div", {
@@ -3538,20 +4137,10 @@ function WeeklyPlanModal({
       style: {
         color: '#FFFFFF'
       }
-    }, "\uD83D\uDD12 W", currentWeek, " \u4E0B\u9031\u9810\u8A08\u5DE5\u4F5C\uFF08\u552F\u8B80\uFF09"), /*#__PURE__*/React.createElement("button", {
+    }, "\uD83D\uDD12 W", currentWeek, " \u4E0B\u9031\u9810\u8A08\u5DE5\u4F5C\uFF08\u552F\u8B80\uFF09"), /*#__PURE__*/React.createElement(CloseButton, {
       onClick: onClose,
       className: "text-white/60 hover:text-white"
-    }, /*#__PURE__*/React.createElement("svg", {
-      className: "w-6 h-6",
-      fill: "none",
-      viewBox: "0 0 24 24",
-      stroke: "currentColor"
-    }, /*#__PURE__*/React.createElement("path", {
-      strokeLinecap: "round",
-      strokeLinejoin: "round",
-      strokeWidth: 2,
-      d: "M6 18L18 6M6 6l12 12"
-    })))), /*#__PURE__*/React.createElement("div", {
+    })), /*#__PURE__*/React.createElement("div", {
       className: "p-6"
     }, /*#__PURE__*/React.createElement("p", {
       className: "text-xs text-slate-500 mb-3"
@@ -3568,9 +4157,9 @@ function WeeklyPlanModal({
       className: "px-6 py-2 text-sm bg-slate-600 hover:bg-slate-700 text-white font-bold rounded-lg"
     }, "\u95DC\u9589")))));
   }
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[110] flex justify-center items-center p-4"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -3583,20 +4172,10 @@ function WeeklyPlanModal({
     style: {
       color: '#FFFFFF'
     }
-  }, "\uD83D\uDCC5 \u586B\u5BEB W", currentWeek, " \u4E0B\u9031\u9810\u8A08\u57F7\u884C\u5DE5\u4F5C", targetUser ? `（${targetUser}）` : ''), /*#__PURE__*/React.createElement("button", {
+  }, "\uD83D\uDCC5 \u586B\u5BEB W", currentWeek, " \u4E0B\u9031\u9810\u8A08\u57F7\u884C\u5DE5\u4F5C", targetUser ? `（${targetUser}）` : ''), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/60 hover:text-white"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     className: "p-6"
   }, targetUser && /*#__PURE__*/React.createElement("div", {
     className: "mb-4 bg-amber-100 border border-amber-400 text-amber-900 rounded-lg px-3 py-2.5 text-xs font-bold flex items-center"
@@ -3646,9 +4225,10 @@ function DeadlinePanel({
   onClose,
   onSelect
 }) {
-  return /*#__PURE__*/React.createElement("div", {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-sm bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -3666,20 +4246,10 @@ function DeadlinePanel({
     style: {
       color: '#FFF7ED'
     }
-  }, "\u5269\u9918 \u22642 \u9031\u6216\u6642\u7A0B\u5DF2\u904E 70% \u7684\u8A08\u756B\u5340\u9593")), /*#__PURE__*/React.createElement("button", {
+  }, "\u5269\u9918 \u22642 \u9031\u6216\u6642\u7A0B\u5DF2\u904E 70% \u7684\u8A08\u756B\u5340\u9593")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/70 hover:text-white p-1"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 overflow-y-auto p-4 space-y-2.5"
   }, items.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "text-center text-slate-500 py-16"
@@ -3738,15 +4308,16 @@ function PendingPanel({
   onClose,
   onSelect
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const totalRequired = pending.length + completed.length + 1; // 任務總數 + 1項下週預計
   const completedCount = completed.length + (planPending ? 0 : 1);
   const percent = totalRequired > 0 ? Math.round(completedCount / totalRequired * 100) : 100;
   const allDone = pending.length === 0 && !planPending;
   const wkLabel = retro ? `W${String(currentWeek).padStart(2, '0')}` : '本週'; // 補登模式所有文案以週次取代「本週」
 
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-md bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -3760,20 +4331,10 @@ function PendingPanel({
     className: "font-bold text-lg flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("span", null, retro ? `🕘 W${String(currentWeek).padStart(2, '0')} 歷史回報補登` : `📋 W${String(currentWeek).padStart(2, '0')} 本週回報中心`)), /*#__PURE__*/React.createElement("p", {
     className: `text-xs mt-0.5 ${retro ? 'text-amber-200' : 'text-blue-200'}`
-  }, retro ? '主管已開放補登：可修改此週任務打卡、非專案事項與下週預計工作' : '整合本週排定任務打卡 ＋ 每週必填工作預計')), /*#__PURE__*/React.createElement("button", {
+  }, retro ? '主管已開放補登：可修改此週任務打卡、非專案事項與下週預計工作' : '整合本週排定任務打卡 ＋ 每週必填工作預計')), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/60 hover:text-white p-1"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     className: "bg-white/10 rounded-xl p-3 border border-white/20"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex justify-between items-center text-xs font-bold mb-1.5"
@@ -3930,6 +4491,7 @@ function ManagerWeekPanel({
   onEditPlan,
   onEditComment
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [member, setMember] = useState(users[0] || '');
   const wk = String(week).padStart(2, '0');
   const rows = [];
@@ -3974,9 +4536,9 @@ function ManagerWeekPanel({
   })), /*#__PURE__*/React.createElement("div", {
     className: "flex-shrink-0 text-slate-600 font-bold text-xs bg-white border border-slate-300 rounded-full px-3 py-1.5 group-hover:bg-slate-700 group-hover:text-white transition"
   }, "\u7DE8\u8F2F \u203A")));
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-md bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -3990,20 +4552,10 @@ function ManagerWeekPanel({
     className: "font-bold text-lg"
   }, "\uD83D\uDEE0 W", wk, " \u56DE\u5831\u7DE8\u8F2F\uFF08\u4E3B\u7BA1\uFF09"), /*#__PURE__*/React.createElement("p", {
     className: "text-xs text-amber-200 mt-0.5"
-  }, "\u4EE3\u6210\u54E1\u88DC\u767B/\u4FEE\u6B63\u6B64\u9031\u56DE\u5831\uFF0C\u7570\u52D5\u6703\u6A19\u8A18\u4E3B\u7BA1\u4FEE\u6B63\u4E26\u7559\u4E0B\u7A3D\u6838\u7D00\u9304")), /*#__PURE__*/React.createElement("button", {
+  }, "\u4EE3\u6210\u54E1\u88DC\u767B/\u4FEE\u6B63\u6B64\u9031\u56DE\u5831\uFF0C\u7570\u52D5\u6703\u6A19\u8A18\u4E3B\u7BA1\u4FEE\u6B63\u4E26\u7559\u4E0B\u7A3D\u6838\u7D00\u9304")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/60 hover:text-white p-1"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     className: "bg-white/10 rounded-xl p-3 border border-white/20 flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-xs font-bold whitespace-nowrap"
@@ -4076,6 +4628,7 @@ function CommentModal({
   onClose,
   onSave
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [text, setText] = useState(initialComment);
   const [saving, setSaving] = useState(false);
   useModalDirtyReset();
@@ -4089,9 +4642,9 @@ function CommentModal({
       setSaving(false);
     }
   };
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/60 backdrop-blur-sm modal-scrim z-[140] flex justify-center items-center p-4"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -4109,20 +4662,10 @@ function CommentModal({
     style: {
       color: '#EDE9FE'
     }
-  }, "\u4E3B\u7BA1\u5EFA\u8B70(\u9078\u586B)\uFF0C\u5132\u5B58\u5F8C\u5168\u9AD4\u6210\u54E1\u65BC\u5718\u968A\u7E3D\u7D50\u770B\u677F\u53EF\u898B")), /*#__PURE__*/React.createElement("button", {
+  }, "\u4E3B\u7BA1\u5EFA\u8B70(\u9078\u586B)\uFF0C\u5132\u5B58\u5F8C\u5168\u9AD4\u6210\u54E1\u65BC\u5718\u968A\u7E3D\u7D50\u770B\u677F\u53EF\u898B")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/60 hover:text-white"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     className: "p-6"
   }, initialComment ? /*#__PURE__*/React.createElement("div", {
     className: "mb-4 bg-violet-50 border border-violet-300 text-violet-800 rounded-lg px-3 py-2.5 text-sm font-bold"
@@ -4191,14 +4734,20 @@ function WeeklyReportDashboard({
   weeklyCommentMeta = {},
   currentUser,
   role,
+  panelWidth = 672,
   highlightedTaskId,
   onHighlightTask,
   onEditComment,
   onClose
 }) {
   const isManager = role === 'manager';
+  // 看板變窄(投影機/筆電)時卡片內容改單欄:md: 斷點看的是「視窗寬」不是「面板寬」,不改會在窄面板裡擠成兩欄
+  const narrowPanel = panelWidth < 560;
+  // 更窄(≈1024 螢幕→面板 358)時成員列連晶片文字也放不下(實測溢出 26px),只留圖示＋title
+  const tightRow = panelWidth < 440;
   const [copied, setCopied] = useState(false); // 全團隊複製回饋
   const [copiedUser, setCopiedUser] = useState(null); // 個別成員複製回饋
+  const [copiedPending, setCopiedPending] = useState(false); // 催報名單複製回饋
   // 成員預設勾選「只看我的週報」；主管不寫週報，固定看全團隊
   const [onlyMine, setOnlyMine] = useState(!isManager);
   // 展開狀態：勾選自己時預設展開；看團隊時預設折疊
@@ -4339,6 +4888,31 @@ function WeeklyReportDashboard({
     setTimeout(() => setCopiedUser(null), 2000);
   });
 
+  // 催報名單:看板已經算得出每個人「回報 0/5」,但看完之後沒有任何後續動作——
+  // 主管還是得自己把名字抄到通訊軟體上。這裡直接組好可貼的文字(純前端,零後端成本)。
+  // 只列「真的有缺」的人:未回報任務 >0 或下週預計未填;全員都交了就不給空名單,直接回報好消息。
+  const pendingSummary = useMemo(() => visibleSummary.filter(s => s.pendingTasks.length > 0 || !s.weekPlan), [visibleSummary]);
+  const buildPendingText = () => {
+    const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} 待回報提醒】`, ''];
+    pendingSummary.forEach(s => {
+      const miss = [];
+      if (s.pendingTasks.length > 0) miss.push(`專案回報 ${s.pendingTasks.length} 項未填`);
+      if (!s.weekPlan) miss.push('下週預計未填');
+      lines.push(`• ${s.user}：${miss.join('、')}`);
+      // 把未回報的項目名稱一併列出,收到訊息的人不用再回系統查是哪幾項
+      s.pendingTasks.forEach(({
+        proj,
+        task
+      }) => lines.push(`    - ${proj.name}｜${task.name}`));
+    });
+    lines.push('', `（共 ${pendingSummary.length} 人待補，請於本週內完成回報）`);
+    return lines.join('\n');
+  };
+  const copyPendingList = () => doCopy(buildPendingText(), () => {
+    setCopiedPending(true);
+    setTimeout(() => setCopiedPending(false), 2000);
+  });
+
   // 全部展開 / 全部收合
   const expandAll = () => setExpandedUsers(new Set(users));
   const collapseAll = () => setExpandedUsers(new Set());
@@ -4359,7 +4933,7 @@ function WeeklyReportDashboard({
     planMeta,
     commentMeta
   }) => /*#__PURE__*/React.createElement("div", {
-    className: "p-4 grid grid-cols-1 md:grid-cols-2 gap-4"
+    className: `p-4 grid grid-cols-1 gap-4 ${narrowPanel ? '' : 'md:grid-cols-2'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "space-y-2.5"
   }, /*#__PURE__*/React.createElement("div", {
@@ -4368,12 +4942,12 @@ function WeeklyReportDashboard({
     proj,
     task,
     log
-  }) => /*#__PURE__*/React.createElement("div", {
-    key: task.id,
-    onClick: onHighlightTask ? () => onHighlightTask(proj, task) : undefined,
+  }) => /*#__PURE__*/React.createElement("div", _extends({
+    key: task.id
+  }, clickable(onHighlightTask ? () => onHighlightTask(proj, task) : undefined, `在甘特圖高亮 ${proj.name}｜${task.name}`), {
     title: onHighlightTask ? '點擊在左側甘特圖高亮此項目的計畫區間' : undefined,
     className: `text-sm p-2.5 rounded-lg border ${onHighlightTask ? 'cursor-pointer' : ''} ${highlightedTaskId === task.id ? 'ring-2 ring-blue-500 border-blue-400 bg-blue-50/70' : log.status === 'not_executed' ? 'bg-slate-100 border-slate-300 opacity-80' : log.status === 'monitor' ? 'bg-sky-50/70 border-sky-200' : 'bg-green-50/60 border-green-200'}`
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "font-bold text-slate-700 text-xs leading-snug break-words"
   }, proj.name, highlightedTaskId === task.id && /*#__PURE__*/React.createElement("span", {
     className: "ml-1 text-blue-600 text-[10px]"
@@ -4398,7 +4972,7 @@ function WeeklyReportDashboard({
   }, "\u672C\u9031\u7121\u5C08\u6848\u6295\u5165"), pendingTasks.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "text-[11px] text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5"
   }, "\u5C1A\u6709 ", pendingTasks.length, " \u9805\u672C\u9031\u6392\u5B9A\u4EFB\u52D9\u672A\u56DE\u5831")), /*#__PURE__*/React.createElement("div", {
-    className: "space-y-2.5 md:border-l md:border-slate-100 md:pl-4"
+    className: `space-y-2.5 ${narrowPanel ? 'border-t border-slate-200 pt-2' : 'md:border-l md:border-slate-100 md:pl-4'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-bold text-slate-500 border-b border-slate-200 pb-1"
   }, "\uD83D\uDCDD \u65E5\u5E38\u71DF\u904B / \u81E8\u6642\u4EA4\u8FA6\uFF08\u975E\u5C08\u6848\uFF09"), extraNote ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -4416,7 +4990,7 @@ function WeeklyReportDashboard({
   })) : /*#__PURE__*/React.createElement("div", {
     className: "text-sm text-slate-500 italic py-2"
   }, "\u672A\u586B\u5BEB")), comment && /*#__PURE__*/React.createElement("div", {
-    className: "md:col-span-2"
+    className: narrowPanel ? '' : 'md:col-span-2'
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-bold text-violet-700 border-b border-violet-100 pb-1 mb-2"
   }, "\uD83D\uDC51 \u4E3B\u7BA1\u56DE\u8986"), /*#__PURE__*/React.createElement("div", {
@@ -4425,138 +4999,173 @@ function WeeklyReportDashboard({
     meta: commentMeta,
     showManagerTag: false
   })));
-  return /*#__PURE__*/React.createElement("div", {
-    className: "fixed inset-y-0 right-0 w-full max-w-2xl bg-slate-100 shadow-2xl z-[120] flex flex-col border-l border-slate-300"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "px-6 py-4 text-white flex justify-between items-center shadow-md",
-    style: {
-      backgroundColor: '#001F5B'
-    }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
-    className: "font-bold text-xl"
-  }, "\uD83D\uDCCA W", String(currentWeek).padStart(2, '0'), " \u5718\u968A\u5DE5\u4F5C\u7E3D\u7D50\u770B\u677F"), /*#__PURE__*/React.createElement("p", {
-    className: "text-xs text-blue-200 mt-1"
-  }, "\u5F59\u7E3D\u5404\u6210\u54E1\u300C\u5C08\u6848\u5BE6\u969B\u57F7\u884C\u300D\u8207\u300C\u975E\u5C08\u6848\u4E8B\u9805\u300D")), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center space-x-2"
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: exportExcel,
-    disabled: exporting,
-    className: `px-3 py-1.5 rounded-lg text-xs font-bold transition border text-white disabled:opacity-70 ${exportFailed ? 'bg-red-600 hover:bg-red-500 border-red-400/60' : 'bg-green-600 hover:bg-green-500 border-green-400/60'}`,
-    title: "\u4E0B\u8F09 Excel \u9031\u5831(.xlsx)"
-  }, exporting ? '⏳ 產生中…' : exportFailed ? '❌ 匯出失敗，點擊重試' : '⬇️ 匯出 Excel'), /*#__PURE__*/React.createElement("button", {
-    onClick: copyReport,
-    className: `px-3 py-1.5 rounded-lg text-xs font-bold transition border ${copied ? 'bg-green-500 border-green-400 text-white' : 'bg-white/10 hover:bg-white/20 border-white/20 text-white'}`
-  }, copied ? '✓ 已複製' : '📋 複製週報文字'), /*#__PURE__*/React.createElement("button", {
-    onClick: onClose,
-    className: "text-white hover:bg-white/20 p-2 rounded-full"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  }))))), /*#__PURE__*/React.createElement("div", {
-    className: "bg-white px-6 py-2 border-b border-slate-300 flex items-center gap-2 flex-wrap"
-  }, !isManager && /*#__PURE__*/React.createElement("label", {
-    className: "flex items-center space-x-1.5 cursor-pointer select-none bg-slate-100 border border-slate-300 rounded-lg px-2 py-1"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "checkbox",
-    checked: onlyMine,
-    onChange: e => {
-      setOnlyMine(e.target.checked);
-      if (!e.target.checked) setExpandedUsers(new Set());else setExpandedUsers(new Set([currentUser]));
-    },
-    className: "w-3.5 h-3.5 rounded text-blue-600"
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "font-medium text-slate-700 text-[11px]"
-  }, "\u53EA\u770B\u6211\u7684\u9031\u5831")), showTeamView && /*#__PURE__*/React.createElement(React.Fragment, null, !isManager && /*#__PURE__*/React.createElement("div", {
-    className: "h-4 border-l border-slate-300"
-  }), /*#__PURE__*/React.createElement("button", {
-    onClick: expandAll,
-    className: "text-[11px] text-blue-600 hover:text-blue-800 font-bold"
-  }, "\u5C55\u958B\u5168\u90E8"), /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-400"
-  }, "|"), /*#__PURE__*/React.createElement("button", {
-    onClick: collapseAll,
-    className: "text-[11px] text-blue-600 hover:text-blue-800 font-bold"
-  }, "\u6536\u5408\u5168\u90E8"))), /*#__PURE__*/React.createElement("div", {
-    className: "flex-1 overflow-y-auto p-6 space-y-5"
-  }, visibleSummary.map(s => {
-    const {
-      user,
-      activeTasks,
-      pendingTasks,
-      extraNote,
-      weekPlan,
-      total
-    } = s;
-    if (activeTasks.length === 0 && !extraNote && !weekPlan && pendingTasks.length === 0) return null;
-    const rate = total > 0 ? Math.round(activeTasks.length / total * 100) : 0;
-    const isExpanded = showTeamView ? expandedUsers.has(user) : true; // 個人模式固定展開
-    const isCopiedUser = copiedUser === user;
-    return /*#__PURE__*/React.createElement("div", {
-      key: user,
-      className: "bg-white dark:bg-slate-800/80 rounded-xl shadow-sm border border-slate-300 dark:border-slate-700 overflow-hidden"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: `bg-slate-200 dark:bg-slate-800 px-4 py-2 border-b border-slate-300 dark:border-slate-700 font-bold text-slate-800 dark:text-slate-100 flex items-center ${showTeamView ? 'cursor-pointer hover:bg-slate-200/70 dark:hover:bg-slate-700/70 transition' : ''}`,
-      onClick: showTeamView ? () => toggleExpand(user) : undefined
-    }, showTeamView && /*#__PURE__*/React.createElement("span", {
-      className: "mr-1.5 text-slate-600 dark:text-slate-400 text-xs select-none"
-    }, isExpanded ? '▼' : '▶'), /*#__PURE__*/React.createElement("div", {
-      className: "w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs mr-2 flex-shrink-0"
-    }, user[0]), /*#__PURE__*/React.createElement("span", {
-      className: "mr-3"
-    }, user), total > 0 && /*#__PURE__*/React.createElement("div", {
-      className: "flex items-center flex-1 max-w-[260px]"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "flex-1 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full overflow-hidden"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: `h-full rounded-full transition-all ${rate === 100 ? 'bg-green-500' : rate >= 50 ? 'bg-blue-500' : 'bg-yellow-400'}`,
+  return (
+    /*#__PURE__*/
+    // 從視窗最頂端貼到最底端的右側欄位(fixed):連 header 那一列(管理／登出／深色切換)一起蓋住,
+    // 視覺上是一整條完整的欄位;要用那些按鈕時先關掉看板即可。
+    // 左側主內容區另以 marginRight 內縮同樣寬度,所以工具列與甘特不會被蓋到。
+    React.createElement("div", {
+      className: "fixed top-0 right-0 bottom-0 z-[120] bg-slate-100 shadow-[-4px_0_12px_rgba(0,0,0,0.18)] flex flex-col border-l border-slate-300",
       style: {
-        width: `${rate}%`
+        width: panelWidth,
+        maxWidth: '100%'
       }
-    })), /*#__PURE__*/React.createElement("span", {
-      className: "ml-2 text-[10px] font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap"
-    }, activeTasks.length, "/", total, " \u56DE\u5831"), /*#__PURE__*/React.createElement("span", {
-      className: `ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${s.weekScore >= total ? 'bg-green-100 text-green-800 border-green-400 dark:bg-green-900/40 dark:text-green-300 dark:border-green-700/50' : 'bg-indigo-100 text-indigo-800 border-indigo-400 dark:bg-indigo-900/40 dark:text-indigo-300 dark:border-indigo-700/50'}`,
-      title: `本週得分＝各任務打卡分數加總（回報預設 1 分、主管可調 0.3~1；未回報 0 分）／滿分＝本週排定任務數`
-    }, "\uD83C\uDFC6 ", s.weekScore, "/", total, " \u5206")), !isExpanded && showTeamView && /*#__PURE__*/React.createElement("div", {
-      className: "ml-auto flex items-center gap-1.5 text-[10px]"
-    }, activeTasks.length > 0 && /*#__PURE__*/React.createElement("span", {
-      className: "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded font-bold border border-green-300 dark:border-green-700/50"
-    }, "\u2705", activeTasks.filter(a => a.log.status === 'executed').length), activeTasks.filter(a => a.log.status === 'monitor').length > 0 && /*#__PURE__*/React.createElement("span", {
-      className: "bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 px-1.5 py-0.5 rounded font-bold border border-sky-300 dark:border-sky-700/50"
-    }, "\uD83D\uDC41\uFE0F", activeTasks.filter(a => a.log.status === 'monitor').length), pendingTasks.length > 0 && /*#__PURE__*/React.createElement("span", {
-      className: "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300 px-1.5 py-0.5 rounded font-bold border border-yellow-300 dark:border-yellow-700/50"
-    }, "\u2757", pendingTasks.length), extraNote && /*#__PURE__*/React.createElement("span", {
-      className: "bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded font-bold border border-orange-300 dark:border-orange-700/50"
-    }, "\uD83D\uDCDD"), weekPlan && /*#__PURE__*/React.createElement("span", {
-      className: "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded font-bold border border-indigo-300 dark:border-indigo-700/50"
-    }, "\uD83D\uDCC5"), s.comment && /*#__PURE__*/React.createElement("span", {
-      className: "bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 px-1.5 py-0.5 rounded font-bold border border-violet-300 dark:border-violet-700/50",
-      title: "\u5DF2\u6709\u4E3B\u7BA1\u56DE\u8986"
-    }, "\uD83D\uDCAC")), /*#__PURE__*/React.createElement("button", {
-      onClick: e => {
-        e.stopPropagation();
-        copyUserReport(s);
+    }, /*#__PURE__*/React.createElement("div", {
+      className: `text-white flex justify-between items-center shadow-md gap-2 ${narrowPanel ? 'px-3 py-2.5' : 'px-6 py-4'}`,
+      style: {
+        backgroundColor: '#001F5B'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "min-w-0"
+    }, /*#__PURE__*/React.createElement("h2", {
+      className: `font-bold whitespace-nowrap truncate ${narrowPanel ? 'text-base leading-tight' : 'text-xl'}`
+    }, "\uD83D\uDCCA W", String(currentWeek).padStart(2, '0'), " ", narrowPanel ? '團隊總結' : '團隊工作總結看板'), !narrowPanel && /*#__PURE__*/React.createElement("p", {
+      className: "text-xs text-blue-200 mt-1"
+    }, "\u5F59\u7E3D\u5404\u6210\u54E1\u300C\u5C08\u6848\u5BE6\u969B\u57F7\u884C\u300D\u8207\u300C\u975E\u5C08\u6848\u4E8B\u9805\u300D")), /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center space-x-2 flex-shrink-0"
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: exportExcel,
+      disabled: exporting,
+      className: `px-3 py-1.5 rounded-lg text-xs font-bold transition border text-white disabled:opacity-70 whitespace-nowrap ${exportFailed ? 'bg-red-600 hover:bg-red-500 border-red-400/60' : 'bg-green-600 hover:bg-green-500 border-green-400/60'}`,
+      title: "\u4E0B\u8F09 Excel \u9031\u5831(.xlsx)"
+    }, exporting ? '⏳ 產生中…' : exportFailed ? narrowPanel ? '❌ 重試' : '❌ 匯出失敗，點擊重試' : narrowPanel ? '⬇️ Excel' : '⬇️ 匯出 Excel'), /*#__PURE__*/React.createElement("button", {
+      onClick: copyReport,
+      className: `px-3 py-1.5 rounded-lg text-xs font-bold transition border whitespace-nowrap ${copied ? 'bg-green-500 border-green-400 text-white' : 'bg-white/10 hover:bg-white/20 border-white/20 text-white'}`,
+      title: "\u8907\u88FD\u6574\u4EFD\u5718\u968A\u9031\u5831\u6587\u5B57"
+    }, copied ? '✓ 已複製' : narrowPanel ? '📋 複製全部' : '📋 複製週報文字'), /*#__PURE__*/React.createElement(CloseButton, {
+      onClick: onClose,
+      className: "text-white hover:bg-white/20 p-2 rounded-full"
+    }))), /*#__PURE__*/React.createElement("div", {
+      className: `bg-white py-2 border-b border-slate-300 flex items-center gap-2 flex-wrap ${narrowPanel ? 'px-3' : 'px-6'}`
+    }, !isManager && /*#__PURE__*/React.createElement("label", {
+      className: "flex items-center space-x-1.5 cursor-pointer select-none bg-slate-100 border border-slate-300 rounded-lg px-2 py-1"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "checkbox",
+      checked: onlyMine,
+      onChange: e => {
+        setOnlyMine(e.target.checked);
+        if (!e.target.checked) setExpandedUsers(new Set());else setExpandedUsers(new Set([currentUser]));
       },
-      className: `ml-auto px-2 py-0.5 rounded text-[10px] font-bold transition border ${isCopiedUser ? 'bg-green-500 border-green-400 text-white dark:bg-green-700 dark:border-green-600' : 'bg-slate-100 hover:bg-slate-300 border-slate-400 text-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 dark:border-slate-600 dark:text-slate-200'}`,
-      title: `複製 ${user} 的週報文字`
-    }, isCopiedUser ? '✓ 已複製' : '📋 複製週報'), isManager && onEditComment && /*#__PURE__*/React.createElement("button", {
-      onClick: e => {
-        e.stopPropagation();
-        onEditComment(user);
-      },
-      className: `ml-1.5 px-2 py-0.5 rounded text-[10px] font-bold transition border ${s.comment ? 'bg-violet-100 hover:bg-violet-200 border-violet-400 text-violet-800 dark:bg-violet-900/40 dark:hover:bg-violet-900/60 dark:border-violet-700/50 dark:text-violet-300' : 'bg-slate-200 hover:bg-slate-300 border-slate-300 text-slate-600 dark:bg-slate-700 dark:hover:bg-slate-600 dark:border-slate-600 dark:text-slate-300'}`,
-      title: s.comment ? `編輯對 ${user} 的本週回覆` : `回覆 ${user} 的本週週報（選填）`
-    }, s.comment ? '💬 編輯回覆' : '💬 主管回覆')), isExpanded && renderCardBody(s));
-  }), visibleSummary.filter(s => s.activeTasks.length > 0 || s.extraNote || s.weekPlan || s.pendingTasks.length > 0).length === 0 && /*#__PURE__*/React.createElement("div", {
-    className: "text-center text-slate-500 italic py-12"
-  }, "\u672C\u9031\u5C1A\u7121\u56DE\u5831\u8CC7\u6599")));
+      className: "w-3.5 h-3.5 rounded text-blue-600"
+    }), /*#__PURE__*/React.createElement("span", {
+      className: "font-medium text-slate-700 text-[11px]"
+    }, "\u53EA\u770B\u6211\u7684\u9031\u5831")), showTeamView && /*#__PURE__*/React.createElement(React.Fragment, null, !isManager && /*#__PURE__*/React.createElement("div", {
+      className: "h-4 border-l border-slate-300"
+    }), /*#__PURE__*/React.createElement("button", {
+      onClick: expandAll,
+      className: "text-[11px] text-blue-600 hover:text-blue-800 font-bold"
+    }, "\u5C55\u958B\u5168\u90E8"), /*#__PURE__*/React.createElement("span", {
+      className: "text-slate-500",
+      "aria-hidden": "true"
+    }, "|"), /*#__PURE__*/React.createElement("button", {
+      onClick: collapseAll,
+      className: "text-[11px] text-blue-600 hover:text-blue-800 font-bold"
+    }, "\u6536\u5408\u5168\u90E8"), isManager && pendingSummary.length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+      className: "text-slate-400",
+      "aria-hidden": "true"
+    }, "|"), /*#__PURE__*/React.createElement("button", {
+      onClick: copyPendingList,
+      className: `px-2 py-0.5 rounded-lg text-[11px] font-bold border transition ${copiedPending ? 'bg-green-600 border-green-700 text-white' : 'bg-amber-100 text-amber-900 border-amber-500 hover:bg-amber-200'}`,
+      title: `複製 ${pendingSummary.length} 位待回報成員的名單與缺漏項目，可直接貼到通訊軟體`
+    }, copiedPending ? '✓ 已複製名單' : `複製待回報名單（${pendingSummary.length}）`)), /*#__PURE__*/React.createElement("div", {
+      className: "ml-auto flex items-center gap-1.5 text-[10px] text-slate-600 dark:text-slate-400"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "font-bold text-slate-700 dark:text-slate-300"
+    }, "\u5DF2\u56DE\u5831"), ['executed', 'monitor', 'not_executed'].map(k => /*#__PURE__*/React.createElement("span", {
+      key: k,
+      className: "flex items-center gap-1 whitespace-nowrap"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: `w-3 h-2.5 rounded-full ${STATUS_META[k].fill}`
+    }), STATUS_META[k].label)), /*#__PURE__*/React.createElement("span", {
+      className: "text-slate-400 dark:text-slate-500"
+    }, "\uFF5C"), /*#__PURE__*/React.createElement("span", {
+      className: "flex items-center gap-1 whitespace-nowrap font-bold text-slate-700 dark:text-slate-300"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: `w-3 h-2.5 rounded-full ${BAR_TRACK}`
+    }), "\u672A\u56DE\u5831\uFF08\u7559\u7A7A\uFF09")))), /*#__PURE__*/React.createElement("div", {
+      className: `flex-1 overflow-y-auto space-y-5 ${narrowPanel ? 'p-3' : 'p-6'}`
+    }, visibleSummary.map(s => {
+      const {
+        user,
+        activeTasks,
+        pendingTasks,
+        extraNote,
+        weekPlan,
+        total
+      } = s;
+      if (activeTasks.length === 0 && !extraNote && !weekPlan && pendingTasks.length === 0) return null;
+      const isExpanded = showTeamView ? expandedUsers.has(user) : true; // 個人模式固定展開
+      const isCopiedUser = copiedUser === user;
+      // 進度條改「分段組成」:一條就同時表達回報率與狀態分佈,取代原本 ✅/👁️/❗ 三顆晶片。
+      // 已回報三段沿用全站狀態色(STATUS_META.fill),未回報留空槽——有填/沒填才不會被誤讀成同一類。
+      const cExec = activeTasks.filter(a => a.log.status === 'executed').length;
+      const cMon = activeTasks.filter(a => a.log.status === 'monitor').length;
+      const cNot = activeTasks.filter(a => a.log.status === 'not_executed').length;
+      const cPend = pendingTasks.length;
+      const barSegs = [{
+        n: cExec,
+        key: 'executed'
+      }, {
+        n: cMon,
+        key: 'monitor'
+      }, {
+        n: cNot,
+        key: 'not_executed'
+      }]; // 未回報不入列:留空槽即代表未回報(條填滿程度＝回報率)
+      const barTitle = `已回報 ${activeTasks.length}/${total}（有執行 ${cExec}・Monitor ${cMon}・未執行 ${cNot}）／未回報 ${cPend}`;
+      return /*#__PURE__*/React.createElement("div", {
+        key: user,
+        className: "bg-white dark:bg-slate-800/80 rounded-xl shadow-sm border border-slate-300 dark:border-slate-700 overflow-hidden"
+      }, /*#__PURE__*/React.createElement("div", _extends({
+        className: `bg-slate-200 dark:bg-slate-800 py-2 border-b border-slate-300 dark:border-slate-700 font-bold text-slate-800 dark:text-slate-100 flex items-center overflow-hidden ${tightRow ? 'gap-1 px-2' : narrowPanel ? 'gap-1.5 px-2.5' : 'gap-2 px-4'} ${showTeamView ? 'cursor-pointer hover:bg-slate-200/70 dark:hover:bg-slate-700/70 transition' : ''}`
+      }, clickable(showTeamView ? () => toggleExpand(user) : undefined, `${isExpanded ? '收合' : '展開'} ${user} 的週報（${barTitle}）`, {
+        expanded: isExpanded
+      })), showTeamView && /*#__PURE__*/React.createElement("span", {
+        className: "flex-shrink-0 text-slate-600 dark:text-slate-400 text-xs select-none"
+      }, isExpanded ? '▼' : '▶'), /*#__PURE__*/React.createElement("div", {
+        className: "flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs"
+      }, user[0]), /*#__PURE__*/React.createElement("span", {
+        className: "min-w-0 truncate",
+        title: user
+      }, user), total > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+        className: `flex-shrink-0 h-2.5 rounded-full overflow-hidden flex ${BAR_TRACK} ${tightRow ? 'w-12' : narrowPanel ? 'w-14' : 'w-24'}`,
+        title: barTitle
+      }, barSegs.filter(x => x.n > 0).map(x => /*#__PURE__*/React.createElement("div", {
+        key: x.key,
+        className: STATUS_META[x.key].fill,
+        style: {
+          width: `${x.n / total * 100}%`
+        }
+      }))), !tightRow && /*#__PURE__*/React.createElement("span", {
+        className: `flex-shrink-0 text-[10px] font-bold whitespace-nowrap ${cPend > 0 ? 'text-amber-800 dark:text-amber-300' : 'text-slate-700 dark:text-slate-300'}`
+      }, activeTasks.length, "/", total, narrowPanel ? '' : ' 回報'), /*#__PURE__*/React.createElement("span", {
+        className: `flex-shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${s.weekScore >= total ? 'bg-green-100 text-green-800 border-green-400 dark:bg-green-900/40 dark:text-green-300 dark:border-green-700/50' : 'bg-indigo-100 text-indigo-800 border-indigo-400 dark:bg-indigo-900/40 dark:text-indigo-300 dark:border-indigo-700/50'}`,
+        title: `本週得分＝各任務打卡分數加總（回報預設 1 分、主管可調 0.3~1；未回報 0 分）／滿分＝本週排定任務數`
+      }, tightRow ? `${s.weekScore}/${total}分` : `🏆 ${s.weekScore}/${total}${narrowPanel ? '' : ' 分'}`)), !isExpanded && showTeamView && !weekPlan && /*#__PURE__*/React.createElement("span", {
+        className: "flex-shrink-0 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold border border-amber-400 dark:border-amber-700/50 whitespace-nowrap",
+        title: "\u5C1A\u672A\u586B\u5BEB\u300C\u4E0B\u9031\u9810\u8A08\u57F7\u884C\u5DE5\u4F5C\u300D\uFF08\u5F37\u5236\u56DE\u5831\u9805\u76EE\uFF09"
+      }, "\uD83D\uDCC5 ", narrowPanel ? '未填' : '下週預計未填'), !isExpanded && showTeamView && !isManager && s.comment && /*#__PURE__*/React.createElement("span", {
+        className: "flex-shrink-0 bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 px-1.5 py-0.5 rounded text-[10px] font-bold border border-violet-300 dark:border-violet-700/50",
+        title: "\u5DF2\u6709\u4E3B\u7BA1\u56DE\u8986"
+      }, "\uD83D\uDCAC"), /*#__PURE__*/React.createElement("button", {
+        onClick: e => {
+          e.stopPropagation();
+          copyUserReport(s);
+        },
+        className: `ml-auto flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold transition border whitespace-nowrap ${isCopiedUser ? 'bg-green-600 border-green-700 text-white dark:bg-green-700 dark:border-green-600' : 'bg-white ctl-raised hover:bg-slate-200 border-slate-500 text-slate-700 dark:text-slate-200'}`,
+        title: `複製 ${user} 的週報文字（可貼到郵件／通訊軟體）`
+      }, isCopiedUser ? '✓ 已複製' : '複製週報'), isManager && onEditComment && /*#__PURE__*/React.createElement("button", {
+        onClick: e => {
+          e.stopPropagation();
+          onEditComment(user);
+        },
+        className: `flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold transition border whitespace-nowrap ${s.comment ? 'bg-violet-100 hover:bg-violet-200 border-violet-500 text-violet-800 dark:bg-violet-900/40 dark:hover:bg-violet-900/60 dark:border-violet-700/50 dark:text-violet-300' : 'bg-white ctl-raised hover:bg-violet-50 border-violet-500 text-violet-700 dark:text-violet-300'}`,
+        title: s.comment ? `編輯對 ${user} 的本週回覆` : `回覆 ${user} 的本週週報（選填）`
+      }, s.comment ? '✓ 已回覆' : '主管回覆')), isExpanded && renderCardBody(s));
+    }), visibleSummary.filter(s => s.activeTasks.length > 0 || s.extraNote || s.weekPlan || s.pendingTasks.length > 0).length === 0 && /*#__PURE__*/React.createElement("div", {
+      className: "text-center text-slate-500 italic py-12"
+    }, "\u672C\u9031\u5C1A\u7121\u56DE\u5831\u8CC7\u6599")))
+  );
 }
 function ProjectEditModal({
   info,
@@ -4565,6 +5174,7 @@ function ProjectEditModal({
   onClose,
   onSave
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const isEdit = info.mode === 'edit';
   const p = info.project;
   const [name, setName] = useState(isEdit ? p.name : '');
@@ -4600,9 +5210,9 @@ function ProjectEditModal({
       setSaving(false);
     }
   };
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[130] flex justify-center items-center p-4"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-md overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -4614,24 +5224,14 @@ function ProjectEditModal({
     className: "font-bold text-lg"
   }, isEdit ? '✎ 編輯專案' : '＋ 新增專案'), /*#__PURE__*/React.createElement("p", {
     className: "text-xs text-blue-200 mt-0.5"
-  }, "\u8CA0\u8CAC\u4EBA\uFF1A", info.owner)), /*#__PURE__*/React.createElement("button", {
+  }, "\u8CA0\u8CAC\u4EBA\uFF1A", info.owner)), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/60 hover:text-white"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     className: "p-6 space-y-4"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     className: "text-xs font-bold text-slate-500"
-  }, "\u5C08\u6848\u540D\u7A31"), /*#__PURE__*/React.createElement("input", {
+  }, "\u5C08\u6848\u540D\u7A31", /*#__PURE__*/React.createElement(ReqMark, null)), /*#__PURE__*/React.createElement("input", {
     type: "text",
     value: name,
     onChange: e => {
@@ -4640,11 +5240,12 @@ function ProjectEditModal({
       markModalDirty();
     },
     autoFocus: true,
+    onKeyDown: onEnterSubmit(submit),
     className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500",
     placeholder: "\u8F38\u5165\u5C08\u6848\u540D\u7A31\u2026"
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     className: "text-xs font-bold text-slate-500"
-  }, "\u5206\u985E"), /*#__PURE__*/React.createElement("input", {
+  }, "\u5206\u985E", /*#__PURE__*/React.createElement(ReqMark, null)), /*#__PURE__*/React.createElement("input", {
     type: "text",
     list: "category-options",
     value: category,
@@ -4653,6 +5254,7 @@ function ProjectEditModal({
       setError('');
       markModalDirty();
     },
+    onKeyDown: onEnterSubmit(submit),
     className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500",
     placeholder: "\u9078\u64C7\u73FE\u6709\u5206\u985E\u6216\u8F38\u5165\u65B0\u5206\u985E\u2026"
   }), /*#__PURE__*/React.createElement("datalist", {
@@ -4695,6 +5297,7 @@ function ProjectEditModal({
       setNid(e.target.value);
       markModalDirty();
     },
+    onKeyDown: onEnterSubmit(submit),
     className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500",
     placeholder: "\u5C08\u6848\u6D41\u6C34\u7DE8\u865F\uFF0C\u53EF\u542B\u591A\u7D44\uFF08\u5982 N001, N002\uFF09\u2026"
   })), error && /*#__PURE__*/React.createElement("div", {
@@ -4720,6 +5323,7 @@ function IntervalModal({
   onClose,
   onSave
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [taskName, setTaskName] = useState('');
   const [start, setStart] = useState(currentWeek);
   const [end, setEnd] = useState(currentWeek);
@@ -4746,9 +5350,9 @@ function IntervalModal({
       setSaving(false);
     }
   };
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[130] flex justify-center items-center p-4"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-md overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -4760,24 +5364,14 @@ function IntervalModal({
     className: "font-bold text-lg"
   }, "\uFF0B \u65B0\u589E\u8A08\u756B\u5340\u9593"), /*#__PURE__*/React.createElement("p", {
     className: "text-xs text-blue-200 mt-0.5 truncate max-w-[300px]"
-  }, project.name)), /*#__PURE__*/React.createElement("button", {
+  }, project.name)), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/60 hover:text-white"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     className: "p-6 space-y-4"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     className: "text-xs font-bold text-slate-500"
-  }, "\u8A08\u756B\u540D\u7A31"), /*#__PURE__*/React.createElement("input", {
+  }, "\u8A08\u756B\u540D\u7A31", /*#__PURE__*/React.createElement(ReqMark, null)), /*#__PURE__*/React.createElement("input", {
     type: "text",
     value: taskName,
     onChange: e => {
@@ -4786,6 +5380,7 @@ function IntervalModal({
       markModalDirty();
     },
     autoFocus: true,
+    onKeyDown: onEnterSubmit(submit),
     className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500",
     placeholder: "\u8F38\u5165\u6B64\u5340\u9593\u7684\u8A08\u756B\u9805\u76EE\u2026"
   })), /*#__PURE__*/React.createElement("div", {
@@ -4794,7 +5389,7 @@ function IntervalModal({
     className: "w-1/2"
   }, /*#__PURE__*/React.createElement("label", {
     className: "text-xs font-bold text-slate-500"
-  }, "\u958B\u59CB\u9031"), /*#__PURE__*/React.createElement("input", {
+  }, "\u958B\u59CB\u9031", /*#__PURE__*/React.createElement(ReqMark, null)), /*#__PURE__*/React.createElement("input", {
     type: "number",
     min: "1",
     max: weeksTotal,
@@ -4804,12 +5399,13 @@ function IntervalModal({
       setError('');
       markModalDirty();
     },
+    onKeyDown: onEnterSubmit(submit),
     className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"
   })), /*#__PURE__*/React.createElement("div", {
     className: "w-1/2"
   }, /*#__PURE__*/React.createElement("label", {
     className: "text-xs font-bold text-slate-500"
-  }, "\u7D50\u675F\u9031"), /*#__PURE__*/React.createElement("input", {
+  }, "\u7D50\u675F\u9031", /*#__PURE__*/React.createElement(ReqMark, null)), /*#__PURE__*/React.createElement("input", {
     type: "number",
     min: "1",
     max: weeksTotal,
@@ -4819,6 +5415,7 @@ function IntervalModal({
       setError('');
       markModalDirty();
     },
+    onKeyDown: onEnterSubmit(submit),
     className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"
   }))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     className: "text-xs font-bold text-slate-500"
@@ -4829,6 +5426,7 @@ function IntervalModal({
       setNid(e.target.value);
       markModalDirty();
     },
+    onKeyDown: onEnterSubmit(submit),
     className: "mt-1 w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500",
     placeholder: "\u5982 N001\u2026"
   })), error && /*#__PURE__*/React.createElement("div", {
@@ -4853,6 +5451,7 @@ function ConfirmModal({
   info,
   onCancel
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [busy, setBusy] = useState(false); // 防連點:確認處理中鎖定按鈕
   const confirm = async () => {
     if (busy) return;
@@ -4863,9 +5462,9 @@ function ConfirmModal({
       setBusy(false);
     }
   };
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[150] flex justify-center items-center p-4"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "bg-white rounded-2xl shadow-2xl modal-card w-full max-w-sm overflow-hidden",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -4960,6 +5559,7 @@ const AUDIT_ENTITY_LABELS = {
 function UsageStatsPanel({
   onClose
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [days, setDays] = useState(30);
   const [stats, setStats] = useState(null);
   const [loadError, setLoadError] = useState(null);
@@ -5008,9 +5608,9 @@ function UsageStatsPanel({
   }, value), sub && /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] text-slate-500 mt-0.5"
   }, sub));
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-md bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -5028,20 +5628,10 @@ function UsageStatsPanel({
     style: {
       color: '#CCFBF1'
     }
-  }, "\u767B\u5165\u6B21\u6578\uFF08\u542B\u91CD\u65B0\u6574\u7406\u81EA\u52D5\u767B\u5165\uFF09\uFF0C\u8A55\u4F30\u7DB2\u9801\u4F7F\u7528\u7387")), /*#__PURE__*/React.createElement("button", {
+  }, "\u767B\u5165\u6B21\u6578\uFF08\u542B\u91CD\u65B0\u6574\u7406\u81EA\u52D5\u767B\u5165\uFF09\uFF0C\u8A55\u4F30\u7DB2\u9801\u4F7F\u7528\u7387")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/70 hover:text-white p-1"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     className: "bg-white px-5 py-2 border-b border-slate-300 flex items-center gap-1.5"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-[11px] font-bold text-slate-500 mr-1"
@@ -5150,6 +5740,7 @@ function AccessPanel({
   showToast,
   onClose
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [enabled, setEnabled] = useState(false);
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -5276,9 +5867,9 @@ function AccessPanel({
       setTesting(false);
     }
   };
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-md bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -5296,20 +5887,10 @@ function AccessPanel({
     style: {
       color: '#FECDD3'
     }
-  }, "\u4F9D\u4EBA\u54E1\u540D\u518A\u90E8\u9580(DEPT_1/2/3)\u6216\u5DE5\u865F\u767D\u540D\u55AE\u5361\u63A7\uFF0C\u4EFB\u4E00\u898F\u5247\u7B26\u5408\u5373\u53EF\u700F\u89BD")), /*#__PURE__*/React.createElement("button", {
+  }, "\u4F9D\u4EBA\u54E1\u540D\u518A\u90E8\u9580(DEPT_1/2/3)\u6216\u5DE5\u865F\u767D\u540D\u55AE\u5361\u63A7\uFF0C\u4EFB\u4E00\u898F\u5247\u7B26\u5408\u5373\u53EF\u700F\u89BD")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/70 hover:text-white p-1"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 overflow-y-auto p-5 space-y-5"
   }, loading ? /*#__PURE__*/React.createElement("div", {
     className: "text-center text-slate-500 py-10"
@@ -5351,7 +5932,7 @@ function AccessPanel({
       [f.key]: e.target.value
     })),
     onKeyDown: e => {
-      if (e.key === 'Enter' && !e.isComposing) addRule();
+      if (e.key === 'Enter' && !isComposingEvent(e)) addRule();
     },
     placeholder: f.ph,
     className: "w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-rose-500"
@@ -5362,7 +5943,7 @@ function AccessPanel({
     value: ruleNote,
     onChange: e => setRuleNote(e.target.value),
     onKeyDown: e => {
-      if (e.key === 'Enter' && !e.isComposing) addRule();
+      if (e.key === 'Enter' && !isComposingEvent(e)) addRule();
     },
     placeholder: "\u5982\uFF1AMSD \u5168\u54E1",
     className: "w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-rose-500"
@@ -5419,7 +6000,7 @@ function AccessPanel({
       setTestResult(null);
     },
     onKeyDown: e => {
-      if (e.key === 'Enter' && !e.isComposing) runTest();
+      if (e.key === 'Enter' && !isComposingEvent(e)) runTest();
     },
     placeholder: `輸入工號，如 ${empId || '00058897'}`,
     className: "flex-1 min-w-0 border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm font-mono outline-none focus:border-rose-500"
@@ -5453,6 +6034,7 @@ function MemberPanel({
   onDelete,
   onClose
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -5501,9 +6083,9 @@ function MemberPanel({
     setRenaming(false);
     if (ok) setEditing(null);
   };
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[115] flex justify-end"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-sm bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -5515,20 +6097,10 @@ function MemberPanel({
     className: "font-bold text-lg"
   }, "\uD83D\uDC65 \u6210\u54E1\u7BA1\u7406"), /*#__PURE__*/React.createElement("p", {
     className: "text-xs text-blue-200 mt-0.5"
-  }, "\u65B0\u589E\u7684\u6210\u54E1\u5373\u53EF\u767B\u5165\u56DE\u5831\uFF0C\u4E26\u53EF\u70BA\u5176\u5B89\u6392\u5C08\u6848")), /*#__PURE__*/React.createElement("button", {
+  }, "\u65B0\u589E\u7684\u6210\u54E1\u5373\u53EF\u767B\u5165\u56DE\u5831\uFF0C\u4E26\u53EF\u70BA\u5176\u5B89\u6392\u5C08\u6848")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/60 hover:text-white p-1"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     className: "p-4 border-b border-slate-300 bg-slate-100"
   }, /*#__PURE__*/React.createElement("label", {
     className: "text-xs font-bold text-slate-500"
@@ -5540,9 +6112,7 @@ function MemberPanel({
       setName(e.target.value);
       setError('');
     },
-    onKeyDown: e => {
-      if (e.key === 'Enter') submit();
-    },
+    onKeyDown: onEnterSubmit(submit),
     placeholder: "\u8F38\u5165\u65B0\u6210\u54E1\u986F\u793A\u540D\u7A31\u2026",
     autoFocus: true,
     className: `flex-1 border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 ${error ? 'border-red-400' : 'border-slate-300'}`
@@ -5585,6 +6155,7 @@ function MemberPanel({
         error: ''
       })),
       onKeyDown: e => {
+        if (isComposingEvent(e)) return;
         if (e.key === 'Enter') submitRename();
         if (e.key === 'Escape') setEditing(null);
       },
@@ -5626,24 +6197,75 @@ function MemberPanel({
     className: "text-center text-slate-500 py-10 text-sm"
   }, "\u5C1A\u7121\u6210\u54E1\uFF0C\u8ACB\u65BC\u4E0A\u65B9\u65B0\u589E\u3002"))));
 }
+
+// 近 n 天的日期字串(yyyy-MM-dd,本地時區):快捷鈕用
+const daysAgoStr = n => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const AUDIT_TOP = 300;
 function AuditPanel({
   onClose
 }) {
+  const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [logs, setLogs] = useState(null); // null=載入中
+  const [actors, setActors] = useState([]);
+  const [matched, setMatched] = useState(0); // 符合條件的總筆數(可能大於實際載入的 300 筆)
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('');
+  const [loading, setLoading] = useState(false);
+  // 伺服器端條件:改變時重新查詢(關鍵字仍是前端即時過濾,見下方說明)
+  const [cond, setCond] = useState({
+    from: '',
+    to: '',
+    actor: '',
+    action: '',
+    entityType: ''
+  });
+  const setC = (k, v) => setCond(prev => ({
+    ...prev,
+    [k]: v
+  }));
+  const hasCond = !!(cond.from || cond.to || cond.actor || cond.action || cond.entityType);
+
+  // ⚠ 日期/成員/動作/類型一律走**伺服器端**篩選:本端點只回最近 300 筆,
+  //   若在前端過濾,查「上個月某人改了什麼」時最近 300 筆可能全是本週的 → 永遠查不到東西。
+  //   關鍵字則留在前端即時過濾(打字不必每個字都打一次 API),語意是「在已篩出的結果裡再找」。
   React.useEffect(() => {
-    apiGet('/api/audit-log?top=300').then(d => setLogs(d.logs || [])).catch(e => setError(e.message || '無法連線資料庫'));
-  }, []);
+    let cancelled = false;
+    setLoading(true);
+    const qs = new URLSearchParams({
+      top: String(AUDIT_TOP)
+    });
+    Object.entries(cond).forEach(([k, v]) => {
+      if (v) qs.set(k, v);
+    });
+    apiGet('/api/audit-log?' + qs.toString()).then(d => {
+      if (cancelled) return; // 快速連按條件時,舊回應不可覆蓋新結果
+      setLogs(d.logs || []);
+      setMatched(d.matched ?? (d.logs || []).length);
+      if (d.actors) setActors(d.actors);
+      setError(null);
+    }).catch(e => {
+      if (!cancelled) setError(e.message || '無法連線資料庫');
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cond]);
   const shown = useMemo(() => {
     if (!logs) return [];
     const kw = filter.trim().toLowerCase();
     if (!kw) return logs;
     return logs.filter(l => `${l.actor} ${l.empId || ''} ${l.action} ${l.entityType} ${l.entityId || ''} ${l.summary || ''} ${l.newValue || ''} ${l.detail || ''} ${l.at}`.toLowerCase().includes(kw));
   }, [logs, filter]);
-  return /*#__PURE__*/React.createElement("div", {
+  const selectCls = "border border-slate-300 rounded-lg px-2 py-1 text-[11px] bg-white outline-none focus:border-blue-500 min-w-0";
+  return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[115] flex justify-end"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "w-full max-w-lg bg-white h-full shadow-2xl flex flex-col",
     onClick: e => e.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
@@ -5655,35 +6277,122 @@ function AuditPanel({
     className: "font-bold text-lg"
   }, "\uD83D\uDCDC \u7570\u52D5\u7D00\u9304"), /*#__PURE__*/React.createElement("p", {
     className: "text-xs text-blue-200 mt-0.5"
-  }, "\u6700\u8FD1 300 \u7B46\u64CD\u4F5C\u7A3D\u6838\uFF08\u8AB0\u3001\u4F55\u6642\u3001\u505A\u4E86\u4EC0\u9EBC\uFF09")), /*#__PURE__*/React.createElement("button", {
+  }, "\u64CD\u4F5C\u7A3D\u6838\uFF08\u8AB0\u3001\u4F55\u6642\u3001\u505A\u4E86\u4EC0\u9EBC\uFF09")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/60 hover:text-white p-1"
-  }, /*#__PURE__*/React.createElement("svg", {
-    className: "w-6 h-6",
-    fill: "none",
-    viewBox: "0 0 24 24",
-    stroke: "currentColor"
-  }, /*#__PURE__*/React.createElement("path", {
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    strokeWidth: 2,
-    d: "M6 18L18 6M6 6l12 12"
-  })))), /*#__PURE__*/React.createElement("div", {
-    className: "p-3 border-b border-slate-300 bg-slate-100"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "p-3 border-b border-slate-300 bg-slate-100 space-y-2"
   }, /*#__PURE__*/React.createElement("input", {
     value: filter,
     onChange: e => setFilter(e.target.value),
-    placeholder: "\u7BE9\u9078\uFF1A\u4EBA\u54E1 / \u52D5\u4F5C / \u5C08\u6848 / \u5167\u5BB9\u2026",
+    placeholder: "\u5728\u7BE9\u9078\u7D50\u679C\u4E2D\u641C\u5C0B\uFF1A\u4EBA\u54E1 / \u52D5\u4F5C / \u5C08\u6848 / \u5167\u5BB9\u2026",
+    onKeyDown: e => {
+      if (e.key === 'Escape' && filter) {
+        e.stopPropagation();
+        setFilter('');
+      }
+    },
     className: "w-full border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-500"
-  })), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-1.5 flex-wrap"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-[11px] font-bold text-slate-600 flex-shrink-0"
+  }, "\u671F\u9593"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: cond.from,
+    max: cond.to || undefined,
+    onChange: e => setC('from', e.target.value),
+    "aria-label": "\u8D77\u59CB\u65E5\u671F",
+    className: selectCls
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "text-[11px] text-slate-500"
+  }, "\u2013"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: cond.to,
+    min: cond.from || undefined,
+    onChange: e => setC('to', e.target.value),
+    "aria-label": "\u7D50\u675F\u65E5\u671F",
+    className: selectCls
+  }), [['近 7 天', 6], ['近 30 天', 29]].map(([label, d]) => /*#__PURE__*/React.createElement("button", {
+    key: label,
+    onClick: () => setCond(prev => ({
+      ...prev,
+      from: daysAgoStr(d),
+      to: ''
+    })),
+    className: "flex-shrink-0 px-2 py-1 rounded-lg border border-slate-400 bg-white ctl-raised text-[11px] font-bold text-slate-600 hover:border-blue-500 hover:bg-blue-50 transition"
+  }, label))), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-1.5 flex-wrap"
+  }, /*#__PURE__*/React.createElement("select", {
+    value: cond.actor,
+    onChange: e => setC('actor', e.target.value),
+    "aria-label": "\u64CD\u4F5C\u4EBA\u54E1",
+    className: selectCls
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "\u5168\u90E8\u4EBA\u54E1"), actors.map(a => /*#__PURE__*/React.createElement("option", {
+    key: a,
+    value: a
+  }, a))), /*#__PURE__*/React.createElement("select", {
+    value: cond.action,
+    onChange: e => setC('action', e.target.value),
+    "aria-label": "\u52D5\u4F5C\u985E\u578B",
+    className: selectCls
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "\u5168\u90E8\u52D5\u4F5C"), Object.entries(AUDIT_ACTION_META).map(([k, m]) => /*#__PURE__*/React.createElement("option", {
+    key: k,
+    value: k
+  }, m.label))), /*#__PURE__*/React.createElement("select", {
+    value: cond.entityType,
+    onChange: e => setC('entityType', e.target.value),
+    "aria-label": "\u5C0D\u8C61\u985E\u578B",
+    className: selectCls
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "\u5168\u90E8\u5C0D\u8C61"), Object.entries(AUDIT_ENTITY_LABELS).map(([k, label]) => /*#__PURE__*/React.createElement("option", {
+    key: k,
+    value: k
+  }, label))), hasCond && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setCond({
+      from: '',
+      to: '',
+      actor: '',
+      action: '',
+      entityType: ''
+    }),
+    className: "flex-shrink-0 px-2 py-1 rounded-lg border border-slate-400 bg-white ctl-raised text-[11px] font-bold text-blue-700 hover:border-blue-500 hover:bg-blue-50 transition"
+  }, "\u6E05\u9664\u689D\u4EF6")), /*#__PURE__*/React.createElement("div", {
+    className: "text-[11px] text-slate-600",
+    "aria-live": "polite"
+  }, loading ? '查詢中…' : error ? '' : matched > AUDIT_TOP ? /*#__PURE__*/React.createElement("span", null, "\u7B26\u5408\u689D\u4EF6 ", /*#__PURE__*/React.createElement("b", {
+    className: "text-amber-800"
+  }, matched), " \u7B46\uFF0C\u50C5\u986F\u793A\u6700\u8FD1 ", AUDIT_TOP, " \u7B46", filter && /*#__PURE__*/React.createElement(React.Fragment, null, "\uFF08\u95DC\u9375\u5B57\u518D\u7BE9\u51FA ", shown.length, " \u7B46\uFF09"), "\uFF0C\u8ACB\u7E2E\u5C0F\u671F\u9593\u7BC4\u570D") : /*#__PURE__*/React.createElement("span", null, "\u7B26\u5408\u689D\u4EF6 ", /*#__PURE__*/React.createElement("b", null, matched), " \u7B46", filter && /*#__PURE__*/React.createElement(React.Fragment, null, "\uFF0C\u95DC\u9375\u5B57\u518D\u7BE9\u51FA ", shown.length, " \u7B46")))), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 overflow-y-auto p-3 space-y-1.5 text-xs"
   }, error ? /*#__PURE__*/React.createElement("div", {
     className: "text-red-600 bg-red-50 border border-red-100 rounded-lg p-3"
   }, error) : logs === null ? /*#__PURE__*/React.createElement("div", {
     className: "text-center text-slate-500 py-10"
-  }, "\u8F09\u5165\u4E2D\u2026") : shown.length === 0 ? /*#__PURE__*/React.createElement("div", {
-    className: "text-center text-slate-500 py-10"
-  }, "\u6C92\u6709\u7B26\u5408\u7684\u7D00\u9304") : shown.map(l => {
+  }, "\u8F09\u5165\u4E2D\u2026") : shown.length === 0 ?
+  /*#__PURE__*/
+  // 空結果要說清楚是「條件太窄」還是「真的沒紀錄」,並直接給收回條件的出口
+  React.createElement("div", {
+    className: "text-center py-10 space-y-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-slate-500"
+  }, hasCond || filter ? '沒有符合目前篩選條件的紀錄' : '尚無異動紀錄'), (hasCond || filter) && /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setCond({
+        from: '',
+        to: '',
+        actor: '',
+        action: '',
+        entityType: ''
+      });
+      setFilter('');
+    },
+    className: "px-3 py-1 rounded-lg border border-slate-400 bg-white ctl-raised text-[11px] font-bold text-blue-700 hover:border-blue-500 hover:bg-blue-50 transition"
+  }, "\u6E05\u9664\u5168\u90E8\u689D\u4EF6")) : shown.map(l => {
     const meta = AUDIT_ACTION_META[l.action] || {
       label: l.action,
       cls: 'bg-slate-100 text-slate-600'

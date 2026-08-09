@@ -13,7 +13,11 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const jsx = fs.readFileSync(path.join(root, 'ClientApp', 'app.jsx'), 'utf8');
+// 註解要先剝掉再比對:說明文字裡常引用 class 名稱當範例(例如解釋某個寫法為何不能用),
+// 不剝的話會把「反面教材」當成實際使用中的 class 而誤報。
+//   /* */ 整塊移除;// 到行尾也移除,但 `://` 不算(避免吃掉 http:// 之後的內容)。
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+const jsx = stripComments(fs.readFileSync(path.join(root, 'ClientApp', 'app.jsx'), 'utf8'));
 // input.css 內的 class 帶 CSS 轉義反斜線(.bg-blue-50\/70),比對前先去掉
 const css = fs.readFileSync(path.join(root, 'ClientApp', 'input.css'), 'utf8').replace(/\\/g, '');
 
@@ -47,6 +51,23 @@ for (const { name, re } of PATTERNS) {
     missingTotal += missing.length;
     report.push(`  [${name}] ${missing.join(', ')}`);
   }
+}
+
+// 6) 任意變體(arbitrary variant)的上色 class,如 [&>th]:bg-slate-100。
+//    Tailwind 產生的是 .\[\&\>th\]\:bg-slate-100>th 這個「獨立選擇器」,
+//    `.dark .bg-slate-100` 匹配不到它 → 深色下該元素留在淺色底。
+//    ⚠ 上面 1~5 的比對是對原始字串做 regex,`[&>th]:bg-slate-100` 會被當成 `bg-slate-100`,
+//      只要基底色有映射就誤判通過 —— 成果清單表頭曾因此漏網(深色下對比僅 1.36)。
+//      故此處單獨比對「完整字面」是否出現在 input.css 的 .dark 規則中。
+const ARBITRARY_RE = /\[&>[^\]]*\]:(?:bg|text|border)-[a-z]+-\d+(?:\/\d+)?/g;
+const arbUsed = uniq(jsx, ARBITRARY_RE);
+const arbMissing = arbUsed.filter(c => !css.includes(`.dark .${c}`)).sort();
+if (arbMissing.length) {
+  missingTotal += arbMissing.length;
+  report.push(`  [任意變體] ${arbMissing.join(', ')}`
+    + `\n      → 這類 class 的 .dark 規則要寫完整字面,例如:`
+    + `\n        .dark .\\[\\&\\>th\\]\\:bg-slate-100>th { background-color:#334155; }`
+    + `\n      → 或(建議)把顏色直接掛在子元素自己的 class 上,讓既有 .dark 映射自然生效。`);
 }
 
 if (missingTotal === 0) {
