@@ -289,6 +289,18 @@ const reportPanelWidth = vw => Math.round(Math.min(672, Math.max(400, vw * 0.35)
 //   1366 是投影機基準解析度,它放得下完整工具列,收掉只會讓投影情境比現在更差。
 const STATS_BAR_FULL_W = 1200; // 第一條:概況數字＋全隊狀態晶片＋圖例＋鍵盤提示
 const TOOLBAR_FULL_W = 1345; // 第二條:搜尋框＋a~e 晶片＋成員/年度/檢視/密度/補登/展開收合
+// 概況列的「極窄」門檻:收掉狀態晶片與鍵盤提示之後,這排仍有三塊不可刪的東西——
+// 標題 118＋進度條 150＋圖例 302,加上 padding 32 與 3 個 gap 36 = **646**。
+// 1024 投影機開看板時 availW 只有 624 → 溢位 22px,那一列自己吐出橫向捲軸(實測)。
+// 極窄時**一項都不刪**(圖例是讀甘特條的必需資訊、標題與回報率是這排存在的理由),
+// 改為把「間距與進度條」縮一號:padding 32→16、gap 36→24、進度條 150→120(條身仍有 46px),
+// 合計省 58px → 588,1024 有 36px 餘裕。
+// ⚠ 門檻取 700 而不是貼著 646:availW 只有「視窗寬−看板寬」兩種變因,700 與 1024 的 624 之間
+//   沒有任何實際解析度會落入,但留了中文字寬隨字體載入浮動的餘裕。
+// ⚠ 縮完仍可能不夠(例:同時開看板又按下「未回報」篩選,會多一顆晶片與分隔線),
+//   故極窄時另加 flex-wrap 讓圖例掉到第二行 —— 寧可多一行,也不要橫向捲軸(甘特本身就是橫向捲動的,
+//   同一畫面兩條橫捲軸會分不清在捲哪一個)。
+const STATS_BAR_MIN_W = 700;
 // 年度總覽的週欄保底寬度:名稱欄要加寬到多少,先由這個值倒推。
 // 20px＝兩位數週次在 9px 字級下仍清楚可讀(低於 16px 才需要改成間隔標示),
 // 也確保「整年 53 週一畫面」這個核心前提不被名稱欄吃掉。
@@ -301,6 +313,11 @@ const MIN_OVERVIEW_WEEK_W = 20;
 let MODAL_DIRTY = false;
 const markModalDirty = () => {
   MODAL_DIRTY = true;
+};
+// 送出成功後手動清旗標 —— 給「**送出後不關閉**」的視窗用(如成員管理:新增完還留在面板繼續管理)。
+// 大多數表單送出即卸載,靠 useModalDirtyReset 自動清就夠;那類視窗不需要呼叫這個。
+const clearModalDirty = () => {
+  MODAL_DIRTY = false;
 };
 // 表單型視窗掛載時呼叫:卸載(不論儲存或取消)自動重置旗標
 const useModalDirtyReset = () => {
@@ -565,7 +582,9 @@ function ResultsView({
   currentUser,
   year,
   starredIds = new Set(),
-  toggleStar
+  toggleStar,
+  activeFilters = [],
+  onClearAllFilters
 }) {
   const [filterMode, setFilterMode] = useState('all'); // 'all' | 'starred' | 'hasMp' | 'hasDeliverable' | 'missing'
   const [sortConfig, setSortConfig] = useState({
@@ -632,6 +651,21 @@ function ResultsView({
     }
     return list;
   }, [projects, filterMode, sortConfig]);
+
+  // 空狀態要列出的條件 = App 層的(搜尋/類型/成員)＋ 本頁 KPI 卡片的篩選。
+  // KPI 卡片就在畫面上,但選中的是深色實心卡、清單卻空著,不講的話使用者只會覺得「資料不見了」。
+  const KPI_LABELS = {
+    starred: '重點關注項目',
+    hasMp: '具備 MP Saving',
+    hasDeliverable: '有具體產出成果',
+    missing: '待補充產出效益'
+  };
+  const emptyFilters = [...activeFilters, ...(filterMode !== 'all' ? [{
+    key: 'kpi',
+    label: `KPI 卡片「${KPI_LABELS[filterMode]}」`,
+    clearLabel: '清除 KPI 卡片篩選',
+    clear: () => setFilterMode('all')
+  }] : [])];
 
   // 匯出目前顯示的清單(套用中的篩選與排序)為 Excel — 高階主管離線(車上)瀏覽用
   const exportExcel = async () => {
@@ -701,9 +735,11 @@ function ResultsView({
     className: "text-xs font-bold text-slate-500"
   }, "\u9EDE\u64CA\u4E0B\u65B9 KPI \u6307\u6A19\u5361\u7247\uFF0C\u5373\u53EF\u5FEB\u901F\u5207\u63DB\u6AA2\u8996\u8207\u904E\u6FFE\u6E05\u55AE\uFF1A"), /*#__PURE__*/React.createElement("button", {
     onClick: exportExcel,
-    disabled: exporting,
-    className: `flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition border shadow-sm text-white disabled:opacity-70 ${exportFailed ? 'bg-red-600 hover:bg-red-500 border-red-700' : 'bg-green-600 hover:bg-green-500 border-green-700'}`,
-    title: `下載目前顯示的清單（含套用中的篩選與排序，共 ${displayedProjects.length} 案）為 Excel，供離線瀏覽專案項目、具體產出與 MP Saving`
+    disabled: exporting || displayedProjects.length === 0
+    // ⚠ 實心鈕的白字要配 700 級底,不可用 600:白字在 green-600 上只有 3.30、red-600 3.95(實測,皆 <4.5)
+    ,
+    className: `flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition border shadow-sm text-white disabled:opacity-70 disabled:cursor-not-allowed ${exportFailed ? 'bg-red-700 hover:bg-red-600 border-red-800' : 'bg-green-700 hover:bg-green-600 border-green-800'}`,
+    title: displayedProjects.length === 0 ? '目前的篩選條件沒有符合的專案，沒有可匯出的內容' : `下載目前顯示的清單（含套用中的篩選與排序，共 ${displayedProjects.length} 案）為 Excel，供離線瀏覽專案項目、具體產出與 MP Saving`
   }, exporting ? '⏳ 產生中…' : exportFailed ? '❌ 匯出失敗，點擊重試' : `⬇️ 匯出 Excel（${displayedProjects.length} 案）`)), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 md:grid-cols-5 gap-4"
   }, /*#__PURE__*/React.createElement("button", {
@@ -712,55 +748,55 @@ function ResultsView({
   }, /*#__PURE__*/React.createElement("div", {
     className: `w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'all' ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`
   }, "\uD83D\uDCC1"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: `text-xs font-bold ${filterMode === 'all' ? 'text-blue-200' : 'text-slate-500'}`
+    className: `text-xs font-bold ${filterMode === 'all' ? 'text-white' : 'text-slate-500'}`
   }, "\u5168\u90E8\u5C08\u6848"), /*#__PURE__*/React.createElement("div", {
     className: "text-lg font-black"
   }, projects.length, " ", /*#__PURE__*/React.createElement("span", {
-    className: `text-xs font-medium ${filterMode === 'all' ? 'text-blue-200' : 'text-slate-500'}`
+    className: `text-xs font-medium ${filterMode === 'all' ? 'text-white' : 'text-slate-500'}`
   }, "\u6848")))), /*#__PURE__*/React.createElement("button", {
     onClick: () => setFilterMode('starred'),
-    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'starred' ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-offset-2 ring-amber-500/30' : 'bg-white text-slate-800 border-slate-300 hover:border-amber-300 hover:bg-amber-50/40'}`
+    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'starred' ? 'bg-amber-700 text-white border-amber-700 shadow-md ring-2 ring-offset-2 ring-amber-700/40' : 'bg-white text-slate-800 border-slate-300 hover:border-amber-300 hover:bg-amber-50/40'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: `w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'starred' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-600'}`
   }, "\u2B50"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: `text-xs font-bold ${filterMode === 'starred' ? 'text-amber-100' : 'text-slate-500'}`
+    className: `text-xs font-bold ${filterMode === 'starred' ? 'text-white' : 'text-slate-500'}`
   }, "\u91CD\u9EDE\u95DC\u6CE8\u9805\u76EE"), /*#__PURE__*/React.createElement("div", {
     className: "text-lg font-black"
   }, projects.filter(p => starredIds.has(p.id)).length, " ", /*#__PURE__*/React.createElement("span", {
-    className: `text-xs font-medium ${filterMode === 'starred' ? 'text-amber-100' : 'text-slate-500'}`
+    className: `text-xs font-medium ${filterMode === 'starred' ? 'text-white' : 'text-slate-500'}`
   }, "\u6848")))), /*#__PURE__*/React.createElement("button", {
     onClick: () => setFilterMode('hasMp'),
-    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'hasMp' ? 'bg-emerald-600 text-white border-emerald-600 shadow-md ring-2 ring-offset-2 ring-emerald-600/30' : 'bg-white text-slate-800 border-slate-300 hover:border-emerald-300 hover:bg-emerald-50/40'}`
+    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'hasMp' ? 'bg-emerald-700 text-white border-emerald-700 shadow-md ring-2 ring-offset-2 ring-emerald-700/40' : 'bg-white text-slate-800 border-slate-300 hover:border-emerald-300 hover:bg-emerald-50/40'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: `w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'hasMp' ? 'bg-white/10 text-white' : 'bg-emerald-100 text-emerald-600'}`
   }, "\uD83D\uDCA1"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: `text-xs font-bold ${filterMode === 'hasMp' ? 'text-emerald-100' : 'text-slate-500'}`
+    className: `text-xs font-bold ${filterMode === 'hasMp' ? 'text-white' : 'text-slate-500'}`
   }, "\u5177\u5099 MP Saving"), /*#__PURE__*/React.createElement("div", {
     className: "text-lg font-black"
   }, projects.filter(p => p.mpSaving).length, " ", /*#__PURE__*/React.createElement("span", {
-    className: `text-xs font-medium ${filterMode === 'hasMp' ? 'text-emerald-100' : 'text-slate-500'}`
+    className: `text-xs font-medium ${filterMode === 'hasMp' ? 'text-white' : 'text-slate-500'}`
   }, "\u6848")))), /*#__PURE__*/React.createElement("button", {
     onClick: () => setFilterMode('hasDeliverable'),
-    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'hasDeliverable' ? 'bg-amber-600 text-white border-amber-600 shadow-md ring-2 ring-offset-2 ring-amber-600/30' : 'bg-white text-slate-800 border-slate-300 hover:border-amber-300 hover:bg-amber-50/40'}`
+    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'hasDeliverable' ? 'bg-orange-700 text-white border-orange-700 shadow-md ring-2 ring-offset-2 ring-orange-700/40' : 'bg-white text-slate-800 border-slate-300 hover:border-amber-300 hover:bg-amber-50/40'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: `w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'hasDeliverable' ? 'bg-white/10 text-white' : 'bg-amber-100 text-amber-600'}`
   }, "\uD83C\uDFAF"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: `text-xs font-bold ${filterMode === 'hasDeliverable' ? 'text-amber-100' : 'text-slate-500'}`
+    className: `text-xs font-bold ${filterMode === 'hasDeliverable' ? 'text-white' : 'text-slate-500'}`
   }, "\u6709\u5177\u9AD4\u7522\u51FA\u6210\u679C"), /*#__PURE__*/React.createElement("div", {
     className: "text-lg font-black"
   }, projects.filter(p => p.deliverable).length, " ", /*#__PURE__*/React.createElement("span", {
-    className: `text-xs font-medium ${filterMode === 'hasDeliverable' ? 'text-amber-100' : 'text-slate-500'}`
+    className: `text-xs font-medium ${filterMode === 'hasDeliverable' ? 'text-white' : 'text-slate-500'}`
   }, "/ ", projects.length, " \u6848")))), /*#__PURE__*/React.createElement("button", {
     onClick: () => setFilterMode('missing'),
-    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'missing' ? 'bg-red-600 text-white border-red-600 shadow-md ring-2 ring-offset-2 ring-red-600/30' : 'bg-white text-slate-800 border-slate-300 hover:border-red-300 hover:bg-red-50/40'}`
+    className: `p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'missing' ? 'bg-red-700 text-white border-red-700 shadow-md ring-2 ring-offset-2 ring-red-700/40' : 'bg-white text-slate-800 border-slate-300 hover:border-red-300 hover:bg-red-50/40'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: `w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'missing' ? 'bg-white/10 text-white' : 'bg-red-100 text-red-600'}`
   }, "\u26A0\uFE0F"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: `text-xs font-bold ${filterMode === 'missing' ? 'text-red-100' : 'text-slate-500'}`
+    className: `text-xs font-bold ${filterMode === 'missing' ? 'text-white' : 'text-slate-500'}`
   }, "\u5F85\u88DC\u5145\u7522\u51FA\u6548\u76CA"), /*#__PURE__*/React.createElement("div", {
     className: "text-lg font-black"
   }, projects.filter(p => !p.deliverable && !p.mpSaving).length, " ", /*#__PURE__*/React.createElement("span", {
-    className: `text-xs font-medium ${filterMode === 'missing' ? 'text-red-100' : 'text-slate-500'}`
+    className: `text-xs font-medium ${filterMode === 'missing' ? 'text-white' : 'text-slate-500'}`
   }, "\u6848")))))), sortConfig.key && /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between bg-blue-50 border border-blue-200 px-4 py-2 rounded-xl text-xs font-bold text-blue-900 shadow-sm"
   }, /*#__PURE__*/React.createElement("span", null, "\u76EE\u524D\u5DF2\u5957\u7528\u6B04\u4F4D\u6392\u5E8F (", sortConfig.direction === 'asc' ? '升冪 ▲' : '降冪 ▼', ")"), /*#__PURE__*/React.createElement("button", {
@@ -801,14 +837,24 @@ function ResultsView({
       title: proj.name
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex items-start"
-    }, role === 'manager' ? /*#__PURE__*/React.createElement("button", {
-      onClick: e => toggleStar && toggleStar(proj.id, e),
-      className: `flex-shrink-0 mr-1.5 text-base transition transform hover:scale-125 ${starredIds.has(proj.id) ? 'text-amber-500' : 'text-slate-400 hover:text-amber-400'}`,
+    }, role === 'manager' ?
+    /*#__PURE__*/
+    // ⚠ 熱區靠 padding 撐開,不能只放一個字元:★ 本身只有 13×24(WCAG 2.5.8 AA 要 24×24),
+    //   而它是主管標記重點專案的唯一入口,又坐在 24px 高的密集列裡緊貼專案名稱,很容易點歪。
+    //   `-ml-1.5` 抵銷左內距、右內距取代原本的 mr-1.5 → 版面位置與加大前完全一樣。
+    // ⚠ 未標記態用 slate-500 不用 slate-400:後者投影 50:1 只有 4.13(本專案基準 4.5),
+    //   而這是可點擊的控制項,不是純裝飾。
+    React.createElement("button", {
+      onClick: e => toggleStar && toggleStar(proj.id, e)
+      // ★ 用 amber-600 不用 amber-500:後者(#F59E0B)在白底上只有 2.15,連圖形物件的 3:1 都不到。
+      // amber-600 淺色 3.14、深色因 .dark .text-amber-600→#FCD34D 反而更亮,兩邊都看得見金星。
+      ,
+      className: `flex-shrink-0 -ml-1.5 px-1.5 py-1 leading-none text-base transition transform hover:scale-125 ${starredIds.has(proj.id) ? 'text-amber-600' : 'text-slate-500 hover:text-amber-400'}`,
       "aria-pressed": starredIds.has(proj.id),
       "aria-label": `${proj.name}：${starredIds.has(proj.id) ? '取消重點關注標記' : '標記為重點關注項目'}`,
       title: starredIds.has(proj.id) ? '取消重點關注標記' : '標記為重點關注項目'
     }, starredIds.has(proj.id) ? '★' : '☆') : starredIds.has(proj.id) ? /*#__PURE__*/React.createElement("span", {
-      className: "flex-shrink-0 mr-1.5 text-base text-amber-500",
+      className: "flex-shrink-0 mr-1.5 text-base text-amber-600",
       title: "\u91CD\u9EDE\u95DC\u6CE8\u9805\u76EE"
     }, "\u2605") : null, /*#__PURE__*/React.createElement("span", {
       className: "whitespace-normal break-words leading-snug"
@@ -821,13 +867,15 @@ function ResultsView({
     }, cleanDeliverable ? /*#__PURE__*/React.createElement("div", {
       className: "text-slate-800 font-semibold whitespace-normal break-words leading-snug"
     }, cleanDeliverable) : /*#__PURE__*/React.createElement("span", {
-      className: "text-slate-400 font-light"
+      className: "text-slate-500 font-light",
+      "aria-hidden": "true"
     }, "\u2014")), /*#__PURE__*/React.createElement("td", {
       className: "px-3 py-1 align-top overflow-hidden"
     }, proj.mpSaving ? /*#__PURE__*/React.createElement("span", {
       className: "inline-block max-w-full px-2 py-0.5 rounded text-[13px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 break-words leading-snug"
     }, proj.mpSaving) : /*#__PURE__*/React.createElement("span", {
-      className: "text-slate-400 font-light"
+      className: "text-slate-500 font-light",
+      "aria-hidden": "true"
     }, "\u2014")), /*#__PURE__*/React.createElement("td", {
       className: "px-3 py-1 align-top",
       title: proj.nid || ''
@@ -837,12 +885,20 @@ function ResultsView({
       key: i,
       className: "inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold border border-slate-300 whitespace-nowrap"
     }, n))) : /*#__PURE__*/React.createElement("span", {
-      className: "text-slate-400 font-light"
+      className: "text-slate-500 font-light",
+      "aria-hidden": "true"
     }, "\u2014")));
   }), displayedProjects.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
     colSpan: 8,
-    className: "py-8 text-center text-slate-500 font-medium"
-  }, "\u7B26\u5408\u7BE9\u9078\u689D\u4EF6\u7684\u5C08\u6848\u9805\u76EE\u70BA\u7A7A"))))));
+    className: "text-center text-slate-500 font-medium"
+  }, /*#__PURE__*/React.createElement(EmptyFilterState, {
+    filters: emptyFilters,
+    onClearAll: () => {
+      setFilterMode('all');
+      onClearAllFilters && onClearAllFilters();
+    },
+    emptyNote: `${year} 年度目前沒有專案項目。`
+  })))))));
 }
 function App() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -1087,6 +1143,9 @@ function App() {
   //   視窗窄跟那個理由無關,而它是行動項,所以維持只看 showWeeklyReport。
   const tightStatsBar = showWeeklyReport || availW < STATS_BAR_FULL_W;
   const tightToolbar = showWeeklyReport || availW < TOOLBAR_FULL_W;
+  // 概況列已收無可收(剩下的三塊都不能刪)、但寬度仍不夠時的最後一手:縮間距與進度條(見 STATS_BAR_MIN_W)。
+  // 只看 availW,不看 showWeeklyReport —— 1366 以上就算開著看板也放得下,不需要縮。
+  const ultraTightStatsBar = availW < STATS_BAR_MIN_W;
   // 年度總覽的名稱欄:原本寫死 240,1920 下明明還有空間卻不用 → 22% 的名稱被截(週檢視只有 1%)。
   // 改成「把剩餘空間讓給名稱欄,但先保證每個週欄至少 MIN_OVERVIEW_WEEK_W」,
   // 整年仍在同一畫面(表格 width:100%,週欄只是變窄,不會產生水平捲軸);
@@ -1682,8 +1741,10 @@ function App() {
           e.preventDefault();
           return;
         }
+        // 成員管理有「新增成員」與「行內改名」兩個輸入框 → 與其他表單型視窗一樣要走 closeGuard,
+        // 否則打到一半的姓名按 ESC 會直接消失(全站 16 個彈窗裡原本只有這個沒接上)
         if (showMemberPanel) {
-          setShowMemberPanel(false);
+          closeGuard(() => setShowMemberPanel(false));
           e.preventDefault();
           return;
         }
@@ -1944,6 +2005,45 @@ function App() {
     });
   };
 
+  // 目前生效中的篩選條件 — 供空狀態「講出是什麼把清單清空的」並就地給出口(見 EmptyFilterState)。
+  // ⚠ 成員下拉比對的是 defaultOwnerFilter 而非 'all':成員的預設本來就是「只看自己」,
+  //   把它列成「生效中的篩選」並叫人清掉,只會讓成員看到別人的專案,不是他要的。
+  const ownerDefault = defaultOwnerFilter(role, currentUser);
+  const activeFilters = useMemo(() => {
+    const list = [];
+    if (searchText.trim()) list.push({
+      key: 'search',
+      label: `搜尋「${searchText.trim()}」`,
+      clearLabel: '清除搜尋',
+      clear: () => setSearchText('')
+    });
+    if (typeFilter.size > 0) list.push({
+      key: 'type',
+      label: `類型 ${[...typeFilter].map(k => String(k).toUpperCase()).join('、')}`,
+      clearLabel: '清除類型',
+      clear: () => setTypeFilter(new Set())
+    });
+    if (ownerFilter !== ownerDefault) list.push({
+      key: 'owner',
+      label: `成員「${ownerFilter === 'all' ? '全部成員' : ownerFilter}」`,
+      clearLabel: '清除成員',
+      clear: () => setOwnerFilter(ownerDefault)
+    });
+    if (pendingOnly) list.push({
+      key: 'pending',
+      label: '只看未回報',
+      clearLabel: '清除「只看未回報」',
+      clear: () => setPendingOnly(false)
+    });
+    return list;
+  }, [searchText, typeFilter, ownerFilter, ownerDefault, pendingOnly]);
+  const clearAllFilters = () => {
+    setSearchText('');
+    setTypeFilter(new Set());
+    setOwnerFilter(ownerDefault);
+    setPendingOnly(false);
+  };
+
   // --- 篩選 ---
   const filteredProjects = useMemo(() => {
     const kw = searchText.trim().toLowerCase();
@@ -2191,7 +2291,7 @@ function App() {
         setCurrentWeek(w);
         setScrollTargetWeek(w);
       },
-      className: "w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
+      className: "w-6 h-6 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
       "aria-label": "\u4E0A\u4E00\u9031",
       title: "\u4E0A\u4E00\u9031"
     }, "\u2039"), /*#__PURE__*/React.createElement("span", {
@@ -2215,7 +2315,7 @@ function App() {
         setCurrentWeek(w);
         setScrollTargetWeek(w);
       },
-      className: "w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
+      className: "w-6 h-6 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
       "aria-label": "\u4E0B\u4E00\u9031",
       title: "\u4E0B\u4E00\u9031"
     }, "\u203A")) : /*#__PURE__*/React.createElement("div", {
@@ -2226,7 +2326,7 @@ function App() {
         setCurrentWeek(w);
         setScrollTargetWeek(w);
       },
-      className: "w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
+      className: "w-6 h-6 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition",
       "aria-label": "\u6AA2\u8996\u524D\u4E00\u9031(\u552F\u8B80)",
       title: "\u6AA2\u8996\u524D\u4E00\u9031(\u552F\u8B80)"
     }, "\u2039"), /*#__PURE__*/React.createElement("span", {
@@ -2251,7 +2351,7 @@ function App() {
         setScrollTargetWeek(w);
       },
       disabled: currentWeek >= todayWeek,
-      className: `w-5 h-5 flex items-center justify-center rounded-full text-xs font-bold transition ${currentWeek >= todayWeek ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-white/10 hover:bg-white/30'}`,
+      className: `w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold transition ${currentWeek >= todayWeek ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-white/10 hover:bg-white/30'}`,
       "aria-label": "\u6AA2\u8996\u5F8C\u4E00\u9031",
       title: "\u6AA2\u8996\u5F8C\u4E00\u9031"
     }, "\u203A")), role === 'member' && isViewingPast && /*#__PURE__*/React.createElement("button", {
@@ -2300,6 +2400,8 @@ function App() {
       className: "relative"
     }, /*#__PURE__*/React.createElement("button", {
       onClick: () => setShowAdminMenu(v => !v),
+      "aria-expanded": showAdminMenu,
+      "aria-haspopup": "true",
       className: `px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20 text-white ${showAdminMenu ? 'bg-white/25' : 'bg-white/10 hover:bg-white/20'}`,
       title: "\u7BA1\u7406\u529F\u80FD\uFF1A\u6210\u54E1\u7BA1\u7406\u3001\u700F\u89BD\u6B0A\u9650\u3001\u4F7F\u7528\u7D71\u8A08\u3001\u7570\u52D5\u7D00\u9304"
     }, "\u2699\uFE0F \u7BA1\u7406 ", showAdminMenu ? '▴' : '▾'), showAdminMenu && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
@@ -2405,7 +2507,7 @@ function App() {
     }, "\u5DF2\u586B\u5BEB\u7522\u51FA\u9805\u76EE\uFF1A", projects.filter(p => p.deliverable).length, " / ", projects.length, " \u6848"), /*#__PURE__*/React.createElement("div", {
       className: "bg-emerald-100/80 border border-emerald-300 text-emerald-900 px-3 py-1 rounded-full font-bold"
     }, "\uD83D\uDCA1 MP Saving\uFF1A", projects.filter(p => p.mpSaving).length, " \u6848"))) : /*#__PURE__*/React.createElement("div", {
-      className: "px-4 py-2 border-b border-slate-300 bg-gradient-to-r from-slate-50 to-white flex items-center gap-3 text-xs overflow-x-auto"
+      className: `py-2 border-b border-slate-300 bg-gradient-to-r from-slate-50 to-white flex items-center text-xs overflow-x-auto ${ultraTightStatsBar ? 'px-2 gap-2 gap-y-1 flex-wrap' : 'px-4 gap-3'}`
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex items-center flex-shrink-0"
     }, /*#__PURE__*/React.createElement("span", {
@@ -2415,7 +2517,7 @@ function App() {
     }, weekToMonth(currentWeek, months)), /*#__PURE__*/React.createElement("span", {
       className: "ml-1 text-[10px] font-bold text-slate-700"
     }, ownerFilter === 'all' ? '全隊' : ownerFilter, "\u6982\u6CC1")), /*#__PURE__*/React.createElement("div", {
-      className: "flex items-center flex-shrink-0 min-w-[150px]"
+      className: `flex items-center flex-shrink-0 ${ultraTightStatsBar ? 'min-w-[120px]' : 'min-w-[150px]'}`
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex-1 h-2 bg-slate-300 rounded-full overflow-hidden"
     }, /*#__PURE__*/React.createElement("div", {
@@ -2639,14 +2741,14 @@ function App() {
     }), /*#__PURE__*/React.createElement("button", {
       onClick: () => setCollapsedOwners(new Set()),
       title: "\u5C55\u958B\u5168\u90E8\u6210\u54E1\u7FA4\u7D44",
-      className: "text-blue-600 hover:text-blue-800 font-medium"
+      className: "text-blue-600 hover:text-blue-800 font-medium px-1.5 py-1 rounded"
     }, "\u5C55\u958B"), /*#__PURE__*/React.createElement("span", {
       className: "text-slate-500",
       "aria-hidden": "true"
     }, "|"), /*#__PURE__*/React.createElement("button", {
       onClick: () => setCollapsedOwners(new Set(users)),
       title: "\u6536\u5408\u5168\u90E8\u6210\u54E1\u7FA4\u7D44",
-      className: "text-blue-600 hover:text-blue-800 font-medium"
+      className: "text-blue-600 hover:text-blue-800 font-medium px-1.5 py-1 rounded"
     }, "\u6536\u5408"))), allowRetroCheckin && /*#__PURE__*/React.createElement("div", {
       className: "bg-amber-50 border-b border-amber-300 px-4 py-2 flex items-center justify-between text-xs text-amber-900 font-bold z-30"
     }, /*#__PURE__*/React.createElement("div", {
@@ -2665,7 +2767,9 @@ function App() {
       currentUser: currentUser,
       year: scheduleYear,
       starredIds: starredIds,
-      toggleStar: toggleStar
+      toggleStar: toggleStar,
+      activeFilters: activeFilters,
+      onClearAllFilters: clearAllFilters
     }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
       "aria-hidden": "true",
       className: "sticky left-0 z-20 pointer-events-none",
@@ -2784,16 +2888,20 @@ function App() {
     }, groupedProjects.length === 0 ? /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
       colSpan: weeksTotal + 3,
       className: "p-10 text-center text-slate-500"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "text-3xl mb-2"
-    }, pendingOnly && weekStats.pending === 0 ? '🎉' : '🔍'), pendingOnly && weekStats.pending === 0 ? /*#__PURE__*/React.createElement("div", {
+    }, pendingOnly && weekStats.pending === 0 ? /*#__PURE__*/React.createElement("div", {
       className: "space-y-2"
     }, /*#__PURE__*/React.createElement("div", {
+      className: "text-3xl mb-2",
+      "aria-hidden": "true"
+    }, "\uD83C\uDF89"), /*#__PURE__*/React.createElement("div", {
       className: "font-bold text-slate-700"
     }, "W", String(currentWeek).padStart(2, '0'), " ", ownerFilter === 'all' ? '全隊' : ownerFilter, "\u5DF2\u5168\u6578\u56DE\u5831\uFF0C\u6C92\u6709\u5F85\u8FFD\u8E64\u7684\u9805\u76EE\u3002"), /*#__PURE__*/React.createElement("button", {
       onClick: () => setPendingOnly(false),
       className: "px-3 py-1 rounded-lg bg-white border border-slate-400 font-bold text-slate-700 hover:bg-slate-100 transition"
-    }, "\u986F\u793A\u5168\u90E8\u5C08\u6848")) : '找不到符合條件的專案。調整搜尋關鍵字或清除篩選後再試一次。')) : groupedProjects.map(group => {
+    }, "\u986F\u793A\u5168\u90E8\u5C08\u6848")) : /*#__PURE__*/React.createElement(EmptyFilterState, {
+      filters: activeFilters,
+      onClearAll: clearAllFilters
+    }))) : groupedProjects.map(group => {
       const isCollapsed = collapsedOwners.has(group.owner);
       let gActive = 0,
         gReported = 0;
@@ -2940,7 +3048,7 @@ function App() {
           e.stopPropagation();
           setDeliverableProj(proj);
         },
-        className: `flex-shrink-0 ml-1 text-[12px] leading-none transition hover:scale-125 ${proj.deliverable ? 'opacity-90' : 'opacity-25 hover:opacity-70'}`,
+        className: `flex-shrink-0 px-1 py-1.5 -my-1.5 text-[12px] leading-none transition hover:scale-125 ${proj.deliverable ? 'opacity-90' : 'opacity-25 hover:opacity-70'}`,
         title: proj.deliverable || proj.mpSaving ? `具體產出項目：${proj.deliverable || '（未填寫）'}${proj.mpSaving ? `\n💡 MP Saving：${proj.mpSaving}` : ''}` : '具體產出項目（尚未填寫，點擊檢視/填寫）'
       }, "\uD83C\uDFAF"), (() => {
         const soon = proj.tasks.filter(isTaskDeadlineSoon);
@@ -3370,6 +3478,42 @@ function StatChip({
     "aria-hidden": "true"
   }, "\u2715"));
 }
+
+// 「條件篩到 0 筆」的共用空狀態(週檢視/年度總覽/成果清單)。
+// ⚠ 空狀態要做兩件事,少一件都不算數:
+//   ①**講出是什麼把清單清空的** —— 造成 0 筆的條件散在三處(工具列的搜尋框與 a~e 晶片、
+//     header 右側的成員下拉、成果清單自己的 KPI 卡片),使用者看不到「現在同時生效了哪些」。
+//   ②**就地給出口** —— 原本週檢視只寫「調整搜尋關鍵字或清除篩選後再試一次」,
+//     清除鈕卻遠在工具列;成果清單更只有一句「符合篩選條件的專案項目為空」,連該做什麼都沒說。
+// 每個條件各給一顆清除鈕(使用者通常只想拿掉其中一個,不是全部重來),兩個以上才多給「清除全部」。
+function EmptyFilterState({
+  filters = [],
+  onClearAll,
+  emptyNote = '這個年度目前沒有專案。'
+}) {
+  const btn = 'px-2.5 py-1 rounded-lg bg-white border border-slate-400 text-[11px] font-bold text-slate-700 hover:bg-slate-100 hover:border-blue-500 transition';
+  return /*#__PURE__*/React.createElement("div", {
+    className: "py-10 text-center"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-3xl mb-2",
+    "aria-hidden": "true"
+  }, "\uD83D\uDD0D"), /*#__PURE__*/React.createElement("div", {
+    className: "font-bold text-slate-700"
+  }, "\u627E\u4E0D\u5230\u7B26\u5408\u689D\u4EF6\u7684\u5C08\u6848"), filters.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "mt-1 text-xs text-slate-600"
+  }, emptyNote) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "mt-1 text-xs text-slate-600"
+  }, "\u76EE\u524D\u751F\u6548\u7684\u7BE9\u9078\uFF1A", filters.map(f => f.label).join('、')), /*#__PURE__*/React.createElement("div", {
+    className: "mt-3 flex items-center justify-center gap-2 flex-wrap"
+  }, filters.map(f => /*#__PURE__*/React.createElement("button", {
+    key: f.key,
+    onClick: f.clear,
+    className: btn
+  }, "\u2715 ", f.clearLabel)), filters.length > 1 && /*#__PURE__*/React.createElement("button", {
+    onClick: onClearAll,
+    className: `${btn} text-blue-700 border-blue-400`
+  }, "\u6E05\u9664\u5168\u90E8\u689D\u4EF6"))));
+}
 function LoadingScreen() {
   return /*#__PURE__*/React.createElement("div", {
     className: "flex-1 flex justify-center items-center bg-slate-100 app-bg p-4"
@@ -3540,7 +3684,10 @@ function TaskModal({
   useModalDirtyReset();
   const [scheduleError, setScheduleError] = useState('');
   const [noteError, setNoteError] = useState('');
-  const [showAllHistory, setShowAllHistory] = useState(false);
+  // 前幾週回報:**預設收合**。它是「參考資料」不是「要填的東西」,展開時會佔掉彈窗一大塊,
+  // 把真正要操作的「本週實際執行回報」推到畫面外。需要對照時才展開。
+  // ⚠ 收合不影響最高頻的動作:「↩ 沿用上次回報」是獨立主按鈕(在狀態選擇區上方),不在這一區裡。
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // 此計畫區間「本週之前」的歷次回報,新到舊。
   // 寫本週回報時最需要的參考就是「上週寫到哪、狀態是什麼」,原本只有甘特條 hover tooltip 看得到 →
@@ -3549,8 +3696,9 @@ function TaskModal({
     week: Number(w),
     log
   })).filter(h => h.week < currentWeek && h.log).sort((a, b) => b.week - a.week), [logs, currentWeek]);
-  const HISTORY_PREVIEW = 3; // 預設只展開最近 3 週,其餘收起來(避免長區間洗版)
-  const shownHistory = showAllHistory ? history : history.slice(0, HISTORY_PREVIEW);
+  // 展開後直接列出全部:原本還有一層「先 3 週、再顯示全部」的中間狀態,改成預設收合之後
+  // 會變成「展開 → 再按顯示全部」兩次點擊才看得到完整歷史。清單本身有 max-h-56 內部捲動撐著,
+  // 一次全列不會把版面推爆,所以收掉那層中間狀態,只留「收合 ⇄ 展開」兩態。
 
   // 沿用某一週的回報當本週草稿:狀態與內容一起帶入,使用者可再修改後送出。
   // 例行性/持續性的工作每週內容差異不大,重打一次是純粹的重工;帶入後文字就攤在 textarea 裡,
@@ -3708,17 +3856,26 @@ function TaskModal({
     title: "\u522A\u9664\u6B64\u8A08\u756B\u5340\u9593\uFF08\u8EDF\u522A\u9664\uFF0C\u53EF\u7531\u8CC7\u6599\u5EAB\u9084\u539F\uFF09"
   }, "\uD83D\uDDD1 \u522A\u9664\u5340\u9593"))), history.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "border border-slate-300 rounded-xl overflow-hidden"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "bg-slate-100 px-4 py-2 flex items-center justify-between gap-2"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setHistoryOpen(v => !v),
+    className: "w-full bg-slate-100 hover:bg-slate-200 px-4 py-2 flex items-center justify-between gap-2 text-left transition",
+    "aria-expanded": historyOpen,
+    "aria-controls": "task-history-list"
   }, /*#__PURE__*/React.createElement("span", {
-    className: "text-sm font-bold text-slate-800"
-  }, "\u524D\u5E7E\u9031\u56DE\u5831\uFF08", history.length, " \u9031\uFF09"), history.length > HISTORY_PREVIEW && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowAllHistory(v => !v),
-    className: "flex-shrink-0 text-xs font-bold text-blue-700 hover:text-blue-900 hover:underline",
-    "aria-expanded": showAllHistory
-  }, showAllHistory ? '只看最近 3 週' : `顯示全部 ${history.length} 週`)), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2 min-w-0"
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "flex-shrink-0 text-[10px] text-slate-600"
+  }, historyOpen ? '▼' : '▶'), /*#__PURE__*/React.createElement("span", {
+    className: "flex-shrink-0 text-sm font-bold text-slate-800"
+  }, "\u524D\u5E7E\u9031\u56DE\u5831\uFF08", history.length, " \u9031\uFF09"), !historyOpen && /*#__PURE__*/React.createElement("span", {
+    className: `flex-shrink-0 px-2 py-0.5 rounded text-[11px] font-bold ${STATUS_META[history[0].log.status]?.tag}`
+  }, "\u6700\u8FD1 W", String(history[0].week).padStart(2, '0'), " ", STATUS_META[history[0].log.status]?.icon, " ", STATUS_META[history[0].log.status]?.label)), /*#__PURE__*/React.createElement("span", {
+    className: "flex-shrink-0 text-xs font-bold text-blue-700"
+  }, historyOpen ? '收合' : '展開')), historyOpen && /*#__PURE__*/React.createElement("div", {
+    id: "task-history-list",
     className: "max-h-56 overflow-y-auto divide-y divide-slate-200"
-  }, shownHistory.map(h => /*#__PURE__*/React.createElement("div", {
+  }, history.map(h => /*#__PURE__*/React.createElement("div", {
     key: h.week,
     className: "px-4 py-2.5 bg-white"
   }, /*#__PURE__*/React.createElement("div", {
@@ -4567,7 +4724,7 @@ function ManagerWeekPanel({
     key: u,
     value: u
   }, u))), week !== todayWeek && /*#__PURE__*/React.createElement("span", {
-    className: "text-[10px] font-bold bg-amber-300 text-amber-900 px-2 py-1 rounded-full whitespace-nowrap"
+    className: "text-[10px] font-bold bg-amber-300 text-amber-950 px-2 py-1 rounded-full whitespace-nowrap"
   }, "\u6B77\u53F2\u9031\u6B21"))), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 overflow-y-auto p-5 space-y-5"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -5026,11 +5183,11 @@ function WeeklyReportDashboard({
     }, /*#__PURE__*/React.createElement("button", {
       onClick: exportExcel,
       disabled: exporting,
-      className: `px-3 py-1.5 rounded-lg text-xs font-bold transition border text-white disabled:opacity-70 whitespace-nowrap ${exportFailed ? 'bg-red-600 hover:bg-red-500 border-red-400/60' : 'bg-green-600 hover:bg-green-500 border-green-400/60'}`,
+      className: `px-3 py-1.5 rounded-lg text-xs font-bold transition border text-white disabled:opacity-70 whitespace-nowrap ${exportFailed ? 'bg-red-700 hover:bg-red-600 border-red-400/60' : 'bg-green-700 hover:bg-green-600 border-green-400/60'}`,
       title: "\u4E0B\u8F09 Excel \u9031\u5831(.xlsx)"
     }, exporting ? '⏳ 產生中…' : exportFailed ? narrowPanel ? '❌ 重試' : '❌ 匯出失敗，點擊重試' : narrowPanel ? '⬇️ Excel' : '⬇️ 匯出 Excel'), /*#__PURE__*/React.createElement("button", {
       onClick: copyReport,
-      className: `px-3 py-1.5 rounded-lg text-xs font-bold transition border whitespace-nowrap ${copied ? 'bg-green-500 border-green-400 text-white' : 'bg-white/10 hover:bg-white/20 border-white/20 text-white'}`,
+      className: `px-3 py-1.5 rounded-lg text-xs font-bold transition border whitespace-nowrap ${copied ? 'bg-green-700 border-green-400 text-white' : 'bg-white/10 hover:bg-white/20 border-white/20 text-white'}`,
       title: "\u8907\u88FD\u6574\u4EFD\u5718\u968A\u9031\u5831\u6587\u5B57"
     }, copied ? '✓ 已複製' : narrowPanel ? '📋 複製全部' : '📋 複製週報文字'), /*#__PURE__*/React.createElement(CloseButton, {
       onClick: onClose,
@@ -5065,7 +5222,7 @@ function WeeklyReportDashboard({
       "aria-hidden": "true"
     }, "|"), /*#__PURE__*/React.createElement("button", {
       onClick: copyPendingList,
-      className: `px-2 py-0.5 rounded-lg text-[11px] font-bold border transition ${copiedPending ? 'bg-green-600 border-green-700 text-white' : 'bg-amber-100 text-amber-900 border-amber-500 hover:bg-amber-200'}`,
+      className: `px-2 py-1 rounded-lg text-[11px] font-bold border transition ${copiedPending ? 'bg-green-700 border-green-800 text-white' : 'bg-amber-100 text-amber-900 border-amber-500 hover:bg-amber-200'}`,
       title: `複製 ${pendingSummary.length} 位待回報成員的名單與缺漏項目，可直接貼到通訊軟體`
     }, copiedPending ? '✓ 已複製名單' : `複製待回報名單（${pendingSummary.length}）`)), /*#__PURE__*/React.createElement("div", {
       className: "ml-auto flex items-center gap-1.5 text-[10px] text-slate-600 dark:text-slate-400"
@@ -5152,14 +5309,14 @@ function WeeklyReportDashboard({
           e.stopPropagation();
           copyUserReport(s);
         },
-        className: `ml-auto flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold transition border whitespace-nowrap ${isCopiedUser ? 'bg-green-600 border-green-700 text-white dark:bg-green-700 dark:border-green-600' : 'bg-white ctl-raised hover:bg-slate-200 border-slate-500 text-slate-700 dark:text-slate-200'}`,
+        className: `ml-auto flex-shrink-0 px-2 py-1 rounded text-[10px] font-bold transition border whitespace-nowrap ${isCopiedUser ? 'bg-green-700 border-green-800 text-white dark:bg-green-700 dark:border-green-600' : 'bg-white ctl-raised hover:bg-slate-200 border-slate-500 text-slate-700 dark:text-slate-200'}`,
         title: `複製 ${user} 的週報文字（可貼到郵件／通訊軟體）`
       }, isCopiedUser ? '✓ 已複製' : '複製週報'), isManager && onEditComment && /*#__PURE__*/React.createElement("button", {
         onClick: e => {
           e.stopPropagation();
           onEditComment(user);
         },
-        className: `flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold transition border whitespace-nowrap ${s.comment ? 'bg-violet-100 hover:bg-violet-200 border-violet-500 text-violet-800 dark:bg-violet-900/40 dark:hover:bg-violet-900/60 dark:border-violet-700/50 dark:text-violet-300' : 'bg-white ctl-raised hover:bg-violet-50 border-violet-500 text-violet-700 dark:text-violet-300'}`,
+        className: `flex-shrink-0 px-2 py-1 rounded text-[10px] font-bold transition border whitespace-nowrap ${s.comment ? 'bg-violet-100 hover:bg-violet-200 border-violet-500 text-violet-800 dark:bg-violet-900/40 dark:hover:bg-violet-900/60 dark:border-violet-700/50 dark:text-violet-300' : 'bg-white ctl-raised hover:bg-violet-50 border-violet-500 text-violet-700 dark:text-violet-300'}`,
         title: s.comment ? `編輯對 ${user} 的本週回覆` : `回覆 ${user} 的本週週報（選填）`
       }, s.comment ? '✓ 已回覆' : '主管回覆')), isExpanded && renderCardBody(s));
     }), visibleSummary.filter(s => s.activeTasks.length > 0 || s.extraNote || s.weekPlan || s.pendingTasks.length > 0).length === 0 && /*#__PURE__*/React.createElement("div", {
@@ -6035,6 +6192,7 @@ function MemberPanel({
   onClose
 }) {
   const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
+  useModalDirtyReset(); // 16 個彈窗裡原本只有這個沒掛:打到一半的成員姓名按 ESC 會直接消失,與其他表單不一致
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -6056,7 +6214,8 @@ function MemberPanel({
     if (ok) {
       setName('');
       setError('');
-    }
+      clearModalDirty();
+    } // 面板不關閉,旗標要自己清,否則關窗時會誤跳「放棄未儲存」
   };
   const submitRename = async () => {
     const n = (editing?.value || '').trim();
@@ -6069,6 +6228,7 @@ function MemberPanel({
     }
     if (n === editing.old) {
       setEditing(null);
+      clearModalDirty();
       return;
     } // 沒改,直接關閉
     if (users.includes(n)) {
@@ -6081,7 +6241,10 @@ function MemberPanel({
     setRenaming(true);
     const ok = await onRename(editing.old, n);
     setRenaming(false);
-    if (ok) setEditing(null);
+    if (ok) {
+      setEditing(null);
+      clearModalDirty();
+    }
   };
   return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[115] flex justify-end"
@@ -6111,6 +6274,7 @@ function MemberPanel({
     onChange: e => {
       setName(e.target.value);
       setError('');
+      markModalDirty();
     },
     onKeyDown: onEnterSubmit(submit),
     placeholder: "\u8F38\u5165\u65B0\u6210\u54E1\u986F\u793A\u540D\u7A31\u2026",
@@ -6149,15 +6313,21 @@ function MemberPanel({
     }, /*#__PURE__*/React.createElement("input", {
       value: editing.value,
       autoFocus: true,
-      onChange: e => setEditing(prev => ({
-        ...prev,
-        value: e.target.value,
-        error: ''
-      })),
+      onChange: e => {
+        setEditing(prev => ({
+          ...prev,
+          value: e.target.value,
+          error: ''
+        }));
+        markModalDirty();
+      },
       onKeyDown: e => {
         if (isComposingEvent(e)) return;
         if (e.key === 'Enter') submitRename();
-        if (e.key === 'Escape') setEditing(null);
+        if (e.key === 'Escape') {
+          setEditing(null);
+          clearModalDirty();
+        }
       },
       className: `flex-1 min-w-0 border rounded-lg px-2 py-1 text-sm outline-none focus:border-blue-500 ${editing.error ? 'border-red-400' : 'border-slate-300'}`
     }), /*#__PURE__*/React.createElement("button", {

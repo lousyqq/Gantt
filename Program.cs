@@ -1100,9 +1100,13 @@ app.MapPost("/api/results-excel", async (ResultsExcelReq req) =>
                          r.IsDBNull(8) ? null : r.GetString(8)));
         }
 
-        // 依前端傳入的顯示順序輸出(套用畫面上的篩選與排序);未傳=全部
+        // 依前端傳入的顯示順序輸出(套用畫面上的篩選與排序)。
+        // ⚠ 只有「**沒傳** ProjectIds(null)」才等於全部;**傳了空陣列 = 畫面上一案都沒有**,要輸出空表。
+        //   原本寫 `is { Count: > 0 }`,空陣列會落到下面的「全部」→ 使用者在成果清單篩到 0 筆時,
+        //   按下寫著「匯出 Excel(0 案)」的按鈕會拿到**全部 69 案**的檔案,而他以為那是自己篩出來的結果。
+        //   (前端已同步把 0 案時的匯出鈕 disabled,這裡是第二道防線。)
         var rows = all;
-        if (req.ProjectIds is { Count: > 0 })
+        if (req.ProjectIds is not null)
         {
             var byId = all.ToDictionary(p => p.Id);
             rows = req.ProjectIds.Where(byId.ContainsKey).Select(id => byId[id]).ToList();

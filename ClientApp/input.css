@@ -182,6 +182,16 @@
 .dark .border-amber-200,.dark .border-amber-300,.dark .border-amber-400,.dark .border-amber-500 { border-color:#7C5A16; }
 /* 催報名單鈕的 hover:bg-amber-200 — 沿用階梯:-100(#574218,L≈0.060)再上一階 → L≈0.093 */
 .dark .hover\:bg-amber-200:hover { background-color:#6B5220; }
+/* 主題不變的亮琥珀晶片(header 的「⚠ 連線中斷」、主管回報編輯的「歷史週次」):
+   兩者都坐在**行內色的深底**上(深海軍藍 header／#92400E 標題列),那個底色不隨主題改變,
+   所以晶片本身在深淺兩色都要維持亮黃底＋深字 —— 這是全站對比最強的組合(10.5),刻意不進上面的暗色階梯。
+   ⚠ 兩條規則都是「明示維持原值」,目的是**鎖住**它們:
+     ① bg-amber-300 沒有暗色映射純屬 300 級不在檢查範圍,不寫下來的話下次補階梯時很容易被一起調暗
+        → 屆時深字配深底,兩顆晶片同時消失。
+     ② text-amber-950 千萬不可併進上一行 .dark .text-amber-900 那組亮色映射:它會變成 #FCD34D,
+        與 bg-amber-300 同值、對比 1.00 —— 「歷史週次」原本就是這樣整個字看不見的。 */
+.dark .bg-amber-300 { background-color:#FCD34D; }
+.dark .text-amber-950 { color:#451A03; }
 
 /* yellow */
 .dark .bg-yellow-50 { background-color:#3C3417; }

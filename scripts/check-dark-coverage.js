@@ -70,6 +70,51 @@ if (arbMissing.length) {
     + `\n      → 或(建議)把顏色直接掛在子元素自己的 class 上,讓既有 .dark 映射自然生效。`);
 }
 
+// 7) 「亮色實心晶片 + 會被調亮的深色文字」= 深色下亮字配亮底。
+//    上面 1~6 檢查的是「每個 class 各自有沒有映射」,但這個坑是**兩個都有(或都不需要)、加起來才壞**:
+//      bg-{color}-{300|400} 是亮色實心晶片,刻意不進暗色階梯(它坐在行內色的深底上,深淺兩色都維持亮底);
+//      text-{color}-{600..900} 卻一律被映射成亮色(那組映射是給「暗底上的彩色文字」用的)。
+//    兩者寫在同一個 className 裡,深色下就是亮底配亮字 —— 主管回報編輯的「歷史週次」晶片實測對比
+//    正好 1.00(#FCD34D 配 #FCD34D),整個字消失,而檢查照樣回報通過。
+//    作法:取兩者在 .dark 下的實際顏色算對比(晶片底沒有映射時視為亮底 —— 300/400 級本來就都是亮色),
+//    低於 3 就報。同一個 className 的判斷用「引號/大括號切段」近似,模板字串的每個三元分支會自成一段。
+const cssNoComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+const darkDecl = (cls, prop) => {
+  const m = cssNoComments.match(new RegExp(`\\.dark [^{}]*\\.${cls}\\b[^{}]*\\{[^}]*\\b${prop}\\s*:\\s*(#[0-9a-fA-F]{6})`));
+  return m ? m[1] : null;
+};
+const lum = (hex) => {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.substr(i, 2), 16) / 255)
+    .map(v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrast = (l1, l2) => (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+
+const CHIP_BG_RE = new RegExp(`(?<!hover:)bg-(${COLORS})-(300|400)`, 'g');
+const CHIP_TEXT_RE = new RegExp(`(?<!hover:)text-(${COLORS})-(600|700|800|900|950)`, 'g');
+const clashes = new Set();
+for (const seg of jsx.split(/["'`{}]/)) {
+  const bgs = uniq(seg, CHIP_BG_RE);
+  if (!bgs.length) continue;
+  for (const bg of bgs) {
+    // 沒有 .dark 映射 = 維持 Tailwind 原值(300/400 級皆為亮色),用 0.5 當代表值
+    const bgHex = darkDecl(bg, 'background-color');
+    const bgL = bgHex ? lum(bgHex) : 0.5;
+    for (const tx of uniq(seg, CHIP_TEXT_RE)) {
+      const txHex = darkDecl(tx, 'color');
+      if (!txHex) continue; // 沒被映射 = 深色下仍是深字,配亮底沒問題
+      const c = contrast(bgL, lum(txHex));
+      if (c < 3) clashes.add(`${bg} + ${tx} → 深色下 ${bgHex || '(維持亮底)'} 配 ${txHex},對比 ${c.toFixed(2)}`);
+    }
+  }
+}
+if (clashes.size) {
+  missingTotal += clashes.size;
+  report.push(`  [亮底配亮字] ${[...clashes].sort().join('\n                ')}`
+    + `\n      → 亮色實心晶片上的文字改用未被調亮的深色階(如 text-amber-950),`
+    + `\n        或把該晶片底色一併納入暗色階梯後改用亮字。`);
+}
+
 if (missingTotal === 0) {
   console.log('深色模式色彩覆蓋檢查:通過(所有彩色 class 皆有 .dark 映射)。');
   process.exit(0);

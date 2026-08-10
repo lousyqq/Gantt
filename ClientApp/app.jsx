@@ -182,6 +182,18 @@ const reportPanelWidth = (vw) => Math.round(Math.min(672, Math.max(400, vw * 0.3
 //   1366 是投影機基準解析度,它放得下完整工具列,收掉只會讓投影情境比現在更差。
 const STATS_BAR_FULL_W = 1200;   // 第一條:概況數字＋全隊狀態晶片＋圖例＋鍵盤提示
 const TOOLBAR_FULL_W = 1345;     // 第二條:搜尋框＋a~e 晶片＋成員/年度/檢視/密度/補登/展開收合
+// 概況列的「極窄」門檻:收掉狀態晶片與鍵盤提示之後,這排仍有三塊不可刪的東西——
+// 標題 118＋進度條 150＋圖例 302,加上 padding 32 與 3 個 gap 36 = **646**。
+// 1024 投影機開看板時 availW 只有 624 → 溢位 22px,那一列自己吐出橫向捲軸(實測)。
+// 極窄時**一項都不刪**(圖例是讀甘特條的必需資訊、標題與回報率是這排存在的理由),
+// 改為把「間距與進度條」縮一號:padding 32→16、gap 36→24、進度條 150→120(條身仍有 46px),
+// 合計省 58px → 588,1024 有 36px 餘裕。
+// ⚠ 門檻取 700 而不是貼著 646:availW 只有「視窗寬−看板寬」兩種變因,700 與 1024 的 624 之間
+//   沒有任何實際解析度會落入,但留了中文字寬隨字體載入浮動的餘裕。
+// ⚠ 縮完仍可能不夠(例:同時開看板又按下「未回報」篩選,會多一顆晶片與分隔線),
+//   故極窄時另加 flex-wrap 讓圖例掉到第二行 —— 寧可多一行,也不要橫向捲軸(甘特本身就是橫向捲動的,
+//   同一畫面兩條橫捲軸會分不清在捲哪一個)。
+const STATS_BAR_MIN_W = 700;
 // 年度總覽的週欄保底寬度:名稱欄要加寬到多少,先由這個值倒推。
 // 20px＝兩位數週次在 9px 字級下仍清楚可讀(低於 16px 才需要改成間隔標示),
 // 也確保「整年 53 週一畫面」這個核心前提不被名稱欄吃掉。
@@ -193,6 +205,9 @@ const MIN_OVERVIEW_WEEK_W = 20;
 // 視窗卸載時自動清除;ESC 關窗前檢查,避免打到一半的內容被默默丟棄
 let MODAL_DIRTY = false;
 const markModalDirty = () => { MODAL_DIRTY = true; };
+// 送出成功後手動清旗標 —— 給「**送出後不關閉**」的視窗用(如成員管理:新增完還留在面板繼續管理)。
+// 大多數表單送出即卸載,靠 useModalDirtyReset 自動清就夠;那類視窗不需要呼叫這個。
+const clearModalDirty = () => { MODAL_DIRTY = false; };
 // 表單型視窗掛載時呼叫:卸載(不論儲存或取消)自動重置旗標
 const useModalDirtyReset = () => {
   React.useEffect(() => () => { MODAL_DIRTY = false; }, []);
@@ -375,7 +390,7 @@ const weekToMonth = (w, months = MONTHS) => {
 
 // 成果清單面板：單一列極簡矩陣，與甘特圖欄位順序一致，且全欄位支援點擊排序
 // 成果清單=高階主管「檢視」視角:唯讀無操作欄(編輯一律回週檢視的 🎯 入口);緊湊列距讓單一成員專案盡量一頁看完
-function ResultsView({ projects, role, currentUser, year, starredIds = new Set(), toggleStar }) {
+function ResultsView({ projects, role, currentUser, year, starredIds = new Set(), toggleStar, activeFilters = [], onClearAllFilters }) {
   const [filterMode, setFilterMode] = useState('all');   // 'all' | 'starred' | 'hasMp' | 'hasDeliverable' | 'missing'
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); // key: 'category' | 'name' | 'owner' | 'deliverable' | 'mpSaving'
   const [exporting, setExporting] = useState(false);      // 匯出 Excel 防連點 + 進度回饋
@@ -432,6 +447,14 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
     }
     return list;
   }, [projects, filterMode, sortConfig]);
+
+  // 空狀態要列出的條件 = App 層的(搜尋/類型/成員)＋ 本頁 KPI 卡片的篩選。
+  // KPI 卡片就在畫面上,但選中的是深色實心卡、清單卻空著,不講的話使用者只會覺得「資料不見了」。
+  const KPI_LABELS = { starred: '重點關注項目', hasMp: '具備 MP Saving', hasDeliverable: '有具體產出成果', missing: '待補充產出效益' };
+  const emptyFilters = [
+    ...activeFilters,
+    ...(filterMode !== 'all' ? [{ key: 'kpi', label: `KPI 卡片「${KPI_LABELS[filterMode]}」`, clearLabel: '清除 KPI 卡片篩選', clear: () => setFilterMode('all') }] : []),
+  ];
 
   // 匯出目前顯示的清單(套用中的篩選與排序)為 Excel — 高階主管離線(車上)瀏覽用
   const exportExcel = async () => {
@@ -491,13 +514,25 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
 
   return (
     <div className="px-6 py-3 max-w-[1560px] w-full mx-auto space-y-3">
-      {/* 頂部 KPI 互動統計篩選卡片 (二合一：點擊直接過濾列表) */}
+      {/* 頂部 KPI 互動統計篩選卡片 (二合一：點擊直接過濾列表)
+          ⚠ 選中態一律「**700 級實心底＋純白字**」,不可用 -500/-600 實心底配 -100/-200 的淡色字(2026-08-10 修):
+            那個組合在**淺色與深色都不合格**——實測選中副標 重點關注 1.93／有具體產出 2.86／MP Saving 3.32／
+            待補充 3.95(皆 <4.5,12px 粗體屬一般文字),最低的那張幾乎讀不出字。
+            700 級底配白字後皆 ≥5.05,且深色不需要另做 .dark 映射(700 級本來就夠深)。
+          ⚠ 兩張琥珀系的卡要換到不同色相(⭐重點關注=amber-700／🎯有具體產出=orange-700):
+            原本 amber-500 與 amber-600 只差一階,一起壓深就會撞色分不出來。 */}
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-bold text-slate-500">點擊下方 KPI 指標卡片，即可快速切換檢視與過濾清單：</span>
-          <button onClick={exportExcel} disabled={exporting}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition border shadow-sm text-white disabled:opacity-70 ${exportFailed ? 'bg-red-600 hover:bg-red-500 border-red-700' : 'bg-green-600 hover:bg-green-500 border-green-700'}`}
-            title={`下載目前顯示的清單（含套用中的篩選與排序，共 ${displayedProjects.length} 案）為 Excel，供離線瀏覽專案項目、具體產出與 MP Saving`}>
+          {/* ⚠ 0 案時必須 disabled:這顆匯出的語意是「畫面上這幾案」,清單空著就沒有東西可匯出。
+              而且後端把「傳了空陣列」視同「沒指定」→ 會回**全部 69 案**,使用者按下寫著「0 案」的鈕
+              卻拿到整份清單,拿去開會就是錯的數字(後端已一併改為區分 null 與空陣列)。 */}
+          <button onClick={exportExcel} disabled={exporting || displayedProjects.length === 0}
+            // ⚠ 實心鈕的白字要配 700 級底,不可用 600:白字在 green-600 上只有 3.30、red-600 3.95(實測,皆 <4.5)
+            className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition border shadow-sm text-white disabled:opacity-70 disabled:cursor-not-allowed ${exportFailed ? 'bg-red-700 hover:bg-red-600 border-red-800' : 'bg-green-700 hover:bg-green-600 border-green-800'}`}
+            title={displayedProjects.length === 0
+              ? '目前的篩選條件沒有符合的專案，沒有可匯出的內容'
+              : `下載目前顯示的清單（含套用中的篩選與排序，共 ${displayedProjects.length} 案）為 Excel，供離線瀏覽專案項目、具體產出與 MP Saving`}>
             {exporting ? '⏳ 產生中…' : exportFailed ? '❌ 匯出失敗，點擊重試' : `⬇️ 匯出 Excel（${displayedProjects.length} 案）`}
           </button>
         </div>
@@ -506,44 +541,44 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
             className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'all' ? 'bg-[#001F5B] text-white border-[#001F5B] shadow-md ring-2 ring-offset-2 ring-[#001F5B]/30' : 'bg-white text-slate-800 border-slate-300 hover:border-slate-300 hover:bg-slate-50'}`}>
             <div className={`w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'all' ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>📁</div>
             <div>
-              <div className={`text-xs font-bold ${filterMode === 'all' ? 'text-blue-200' : 'text-slate-500'}`}>全部專案</div>
-              <div className="text-lg font-black">{projects.length} <span className={`text-xs font-medium ${filterMode === 'all' ? 'text-blue-200' : 'text-slate-500'}`}>案</span></div>
+              <div className={`text-xs font-bold ${filterMode === 'all' ? 'text-white' : 'text-slate-500'}`}>全部專案</div>
+              <div className="text-lg font-black">{projects.length} <span className={`text-xs font-medium ${filterMode === 'all' ? 'text-white' : 'text-slate-500'}`}>案</span></div>
             </div>
           </button>
 
           <button onClick={() => setFilterMode('starred')}
-            className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'starred' ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-offset-2 ring-amber-500/30' : 'bg-white text-slate-800 border-slate-300 hover:border-amber-300 hover:bg-amber-50/40'}`}>
+            className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'starred' ? 'bg-amber-700 text-white border-amber-700 shadow-md ring-2 ring-offset-2 ring-amber-700/40' : 'bg-white text-slate-800 border-slate-300 hover:border-amber-300 hover:bg-amber-50/40'}`}>
             <div className={`w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'starred' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-600'}`}>⭐</div>
             <div>
-              <div className={`text-xs font-bold ${filterMode === 'starred' ? 'text-amber-100' : 'text-slate-500'}`}>重點關注項目</div>
-              <div className="text-lg font-black">{projects.filter(p => starredIds.has(p.id)).length} <span className={`text-xs font-medium ${filterMode === 'starred' ? 'text-amber-100' : 'text-slate-500'}`}>案</span></div>
+              <div className={`text-xs font-bold ${filterMode === 'starred' ? 'text-white' : 'text-slate-500'}`}>重點關注項目</div>
+              <div className="text-lg font-black">{projects.filter(p => starredIds.has(p.id)).length} <span className={`text-xs font-medium ${filterMode === 'starred' ? 'text-white' : 'text-slate-500'}`}>案</span></div>
             </div>
           </button>
 
           <button onClick={() => setFilterMode('hasMp')}
-            className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'hasMp' ? 'bg-emerald-600 text-white border-emerald-600 shadow-md ring-2 ring-offset-2 ring-emerald-600/30' : 'bg-white text-slate-800 border-slate-300 hover:border-emerald-300 hover:bg-emerald-50/40'}`}>
+            className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'hasMp' ? 'bg-emerald-700 text-white border-emerald-700 shadow-md ring-2 ring-offset-2 ring-emerald-700/40' : 'bg-white text-slate-800 border-slate-300 hover:border-emerald-300 hover:bg-emerald-50/40'}`}>
             <div className={`w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'hasMp' ? 'bg-white/10 text-white' : 'bg-emerald-100 text-emerald-600'}`}>💡</div>
             <div>
-              <div className={`text-xs font-bold ${filterMode === 'hasMp' ? 'text-emerald-100' : 'text-slate-500'}`}>具備 MP Saving</div>
-              <div className="text-lg font-black">{projects.filter(p => p.mpSaving).length} <span className={`text-xs font-medium ${filterMode === 'hasMp' ? 'text-emerald-100' : 'text-slate-500'}`}>案</span></div>
+              <div className={`text-xs font-bold ${filterMode === 'hasMp' ? 'text-white' : 'text-slate-500'}`}>具備 MP Saving</div>
+              <div className="text-lg font-black">{projects.filter(p => p.mpSaving).length} <span className={`text-xs font-medium ${filterMode === 'hasMp' ? 'text-white' : 'text-slate-500'}`}>案</span></div>
             </div>
           </button>
 
           <button onClick={() => setFilterMode('hasDeliverable')}
-            className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'hasDeliverable' ? 'bg-amber-600 text-white border-amber-600 shadow-md ring-2 ring-offset-2 ring-amber-600/30' : 'bg-white text-slate-800 border-slate-300 hover:border-amber-300 hover:bg-amber-50/40'}`}>
+            className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'hasDeliverable' ? 'bg-orange-700 text-white border-orange-700 shadow-md ring-2 ring-offset-2 ring-orange-700/40' : 'bg-white text-slate-800 border-slate-300 hover:border-amber-300 hover:bg-amber-50/40'}`}>
             <div className={`w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'hasDeliverable' ? 'bg-white/10 text-white' : 'bg-amber-100 text-amber-600'}`}>🎯</div>
             <div>
-              <div className={`text-xs font-bold ${filterMode === 'hasDeliverable' ? 'text-amber-100' : 'text-slate-500'}`}>有具體產出成果</div>
-              <div className="text-lg font-black">{projects.filter(p => p.deliverable).length} <span className={`text-xs font-medium ${filterMode === 'hasDeliverable' ? 'text-amber-100' : 'text-slate-500'}`}>/ {projects.length} 案</span></div>
+              <div className={`text-xs font-bold ${filterMode === 'hasDeliverable' ? 'text-white' : 'text-slate-500'}`}>有具體產出成果</div>
+              <div className="text-lg font-black">{projects.filter(p => p.deliverable).length} <span className={`text-xs font-medium ${filterMode === 'hasDeliverable' ? 'text-white' : 'text-slate-500'}`}>/ {projects.length} 案</span></div>
             </div>
           </button>
 
           <button onClick={() => setFilterMode('missing')}
-            className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'missing' ? 'bg-red-600 text-white border-red-600 shadow-md ring-2 ring-offset-2 ring-red-600/30' : 'bg-white text-slate-800 border-slate-300 hover:border-red-300 hover:bg-red-50/40'}`}>
+            className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${filterMode === 'missing' ? 'bg-red-700 text-white border-red-700 shadow-md ring-2 ring-offset-2 ring-red-700/40' : 'bg-white text-slate-800 border-slate-300 hover:border-red-300 hover:bg-red-50/40'}`}>
             <div className={`w-9 h-9 rounded-full flex items-center justify-center text-base font-bold ${filterMode === 'missing' ? 'bg-white/10 text-white' : 'bg-red-100 text-red-600'}`}>⚠️</div>
             <div>
-              <div className={`text-xs font-bold ${filterMode === 'missing' ? 'text-red-100' : 'text-slate-500'}`}>待補充產出效益</div>
-              <div className="text-lg font-black">{projects.filter(p => !p.deliverable && !p.mpSaving).length} <span className={`text-xs font-medium ${filterMode === 'missing' ? 'text-red-100' : 'text-slate-500'}`}>案</span></div>
+              <div className={`text-xs font-bold ${filterMode === 'missing' ? 'text-white' : 'text-slate-500'}`}>待補充產出效益</div>
+              <div className="text-lg font-black">{projects.filter(p => !p.deliverable && !p.mpSaving).length} <span className={`text-xs font-medium ${filterMode === 'missing' ? 'text-white' : 'text-slate-500'}`}>案</span></div>
             </div>
           </button>
         </div>
@@ -595,9 +630,16 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
                   <td className="px-3 py-1 font-bold text-slate-900 text-[14px]" title={proj.name}>
                     <div className="flex items-start">
                       {role === 'manager' ? (
+                        // ⚠ 熱區靠 padding 撐開,不能只放一個字元:★ 本身只有 13×24(WCAG 2.5.8 AA 要 24×24),
+                        //   而它是主管標記重點專案的唯一入口,又坐在 24px 高的密集列裡緊貼專案名稱,很容易點歪。
+                        //   `-ml-1.5` 抵銷左內距、右內距取代原本的 mr-1.5 → 版面位置與加大前完全一樣。
+                        // ⚠ 未標記態用 slate-500 不用 slate-400:後者投影 50:1 只有 4.13(本專案基準 4.5),
+                        //   而這是可點擊的控制項,不是純裝飾。
                         <button
                           onClick={(e) => toggleStar && toggleStar(proj.id, e)}
-                          className={`flex-shrink-0 mr-1.5 text-base transition transform hover:scale-125 ${starredIds.has(proj.id) ? 'text-amber-500' : 'text-slate-400 hover:text-amber-400'}`}
+                          // ★ 用 amber-600 不用 amber-500:後者(#F59E0B)在白底上只有 2.15,連圖形物件的 3:1 都不到。
+                          // amber-600 淺色 3.14、深色因 .dark .text-amber-600→#FCD34D 反而更亮,兩邊都看得見金星。
+                          className={`flex-shrink-0 -ml-1.5 px-1.5 py-1 leading-none text-base transition transform hover:scale-125 ${starredIds.has(proj.id) ? 'text-amber-600' : 'text-slate-500 hover:text-amber-400'}`}
                           aria-pressed={starredIds.has(proj.id)}
                           aria-label={`${proj.name}：${starredIds.has(proj.id) ? '取消重點關注標記' : '標記為重點關注項目'}`}
                           title={starredIds.has(proj.id) ? '取消重點關注標記' : '標記為重點關注項目'}
@@ -605,7 +647,7 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
                           {starredIds.has(proj.id) ? '★' : '☆'}
                         </button>
                       ) : starredIds.has(proj.id) ? (
-                        <span className="flex-shrink-0 mr-1.5 text-base text-amber-500" title="重點關注項目">★</span>
+                        <span className="flex-shrink-0 mr-1.5 text-base text-amber-600" title="重點關注項目">★</span>
                       ) : null}
                       <span className="whitespace-normal break-words leading-snug">{proj.name}</span>
                     </div>
@@ -621,7 +663,7 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
                         {cleanDeliverable}
                       </div>
                     ) : (
-                      <span className="text-slate-400 font-light">—</span>
+                      <span className="text-slate-500 font-light" aria-hidden="true">—</span>
                     )}
                   </td>
                   <td className="px-3 py-1 align-top overflow-hidden">
@@ -630,7 +672,7 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
                         {proj.mpSaving}
                       </span>
                     ) : (
-                      <span className="text-slate-400 font-light">—</span>
+                      <span className="text-slate-500 font-light" aria-hidden="true">—</span>
                     )}
                   </td>
                   <td className="px-3 py-1 align-top" title={proj.nid || ''}>
@@ -641,7 +683,7 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
                         ))}
                       </div>
                     ) : (
-                      <span className="text-slate-400 font-light">—</span>
+                      <span className="text-slate-500 font-light" aria-hidden="true">—</span>
                     )}
                   </td>
                 </tr>
@@ -649,8 +691,9 @@ function ResultsView({ projects, role, currentUser, year, starredIds = new Set()
             })}
             {displayedProjects.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-slate-500 font-medium">
-                  符合篩選條件的專案項目為空
+                <td colSpan={8} className="text-center text-slate-500 font-medium">
+                  <EmptyFilterState filters={emptyFilters} onClearAll={() => { setFilterMode('all'); onClearAllFilters && onClearAllFilters(); }}
+                    emptyNote={`${year} 年度目前沒有專案項目。`} />
                 </td>
               </tr>
             )}
@@ -882,6 +925,9 @@ function App() {
   //   視窗窄跟那個理由無關,而它是行動項,所以維持只看 showWeeklyReport。
   const tightStatsBar = showWeeklyReport || availW < STATS_BAR_FULL_W;
   const tightToolbar = showWeeklyReport || availW < TOOLBAR_FULL_W;
+  // 概況列已收無可收(剩下的三塊都不能刪)、但寬度仍不夠時的最後一手:縮間距與進度條(見 STATS_BAR_MIN_W)。
+  // 只看 availW,不看 showWeeklyReport —— 1366 以上就算開著看板也放得下,不需要縮。
+  const ultraTightStatsBar = availW < STATS_BAR_MIN_W;
   // 年度總覽的名稱欄:原本寫死 240,1920 下明明還有空間卻不用 → 22% 的名稱被截(週檢視只有 1%)。
   // 改成「把剩餘空間讓給名稱欄,但先保證每個週欄至少 MIN_OVERVIEW_WEEK_W」,
   // 整年仍在同一畫面(表格 width:100%,週欄只是變窄,不會產生水平捲軸);
@@ -1304,7 +1350,9 @@ function App() {
         if (showRetroPanel) { setShowRetroPanel(false); e.preventDefault(); return; }
         if (showWeekEditPanel) { setShowWeekEditPanel(false); e.preventDefault(); return; }
         if (showAuditPanel) { setShowAuditPanel(false); e.preventDefault(); return; }
-        if (showMemberPanel) { setShowMemberPanel(false); e.preventDefault(); return; }
+        // 成員管理有「新增成員」與「行內改名」兩個輸入框 → 與其他表單型視窗一樣要走 closeGuard,
+        // 否則打到一半的姓名按 ESC 會直接消失(全站 16 個彈窗裡原本只有這個沒接上)
+        if (showMemberPanel) { closeGuard(() => setShowMemberPanel(false)); e.preventDefault(); return; }
         if (showAccessPanel) { setShowAccessPanel(false); e.preventDefault(); return; }
         if (showUsagePanel) { setShowUsagePanel(false); e.preventDefault(); return; }
         if (showDeadlinePanel) { setShowDeadlinePanel(false); e.preventDefault(); return; }
@@ -1510,6 +1558,22 @@ function App() {
     });
   };
 
+  // 目前生效中的篩選條件 — 供空狀態「講出是什麼把清單清空的」並就地給出口(見 EmptyFilterState)。
+  // ⚠ 成員下拉比對的是 defaultOwnerFilter 而非 'all':成員的預設本來就是「只看自己」,
+  //   把它列成「生效中的篩選」並叫人清掉,只會讓成員看到別人的專案,不是他要的。
+  const ownerDefault = defaultOwnerFilter(role, currentUser);
+  const activeFilters = useMemo(() => {
+    const list = [];
+    if (searchText.trim()) list.push({ key: 'search', label: `搜尋「${searchText.trim()}」`, clearLabel: '清除搜尋', clear: () => setSearchText('') });
+    if (typeFilter.size > 0) list.push({ key: 'type', label: `類型 ${[...typeFilter].map(k => String(k).toUpperCase()).join('、')}`, clearLabel: '清除類型', clear: () => setTypeFilter(new Set()) });
+    if (ownerFilter !== ownerDefault) list.push({ key: 'owner', label: `成員「${ownerFilter === 'all' ? '全部成員' : ownerFilter}」`, clearLabel: '清除成員', clear: () => setOwnerFilter(ownerDefault) });
+    if (pendingOnly) list.push({ key: 'pending', label: '只看未回報', clearLabel: '清除「只看未回報」', clear: () => setPendingOnly(false) });
+    return list;
+  }, [searchText, typeFilter, ownerFilter, ownerDefault, pendingOnly]);
+  const clearAllFilters = () => {
+    setSearchText(''); setTypeFilter(new Set()); setOwnerFilter(ownerDefault); setPendingOnly(false);
+  };
+
   // --- 篩選 ---
   const filteredProjects = useMemo(() => {
     const kw = searchText.trim().toLowerCase();
@@ -1696,18 +1760,19 @@ function App() {
               <span className="text-white/85 mr-2 text-xs font-medium">系統週數</span>
               {role === 'manager' ? (
                 <div className="flex items-center space-x-1.5">
-                  {/* 切週後同步捲動置中該週(scrollTargetWeek 機制),避免「週切了但畫面停在原地」 */}
-                  <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); setScrollTargetWeek(w); }} className="w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" aria-label="上一週" title="上一週">‹</button>
+                  {/* 切週後同步捲動置中該週(scrollTargetWeek 機制),避免「週切了但畫面停在原地」
+                      w-6 h-6=24px:WCAG 2.5.8(AA)的最小點擊區,且這是全站最高頻的兩顆鈕(原本 20×20) */}
+                  <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); setScrollTargetWeek(w); }} className="w-6 h-6 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" aria-label="上一週" title="上一週">‹</button>
                   <span className="inline-flex items-baseline" style={{ minWidth: 100 }}>
                     <WeekNumberInput week={currentWeek} max={weeksTotal} label={`跳至指定週次（1–${weeksTotal}）`}
                       onCommit={w => { setCurrentWeek(w); setScrollTargetWeek(w); }} />
                     <span className="text-white/75 font-normal text-[10px] ml-1">{weekToMonth(currentWeek, months)}</span>
                   </span>
-                  <button onClick={() => { const w = Math.min(weeksTotal, currentWeek + 1); setCurrentWeek(w); setScrollTargetWeek(w); }} className="w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" aria-label="下一週" title="下一週">›</button>
+                  <button onClick={() => { const w = Math.min(weeksTotal, currentWeek + 1); setCurrentWeek(w); setScrollTargetWeek(w); }} className="w-6 h-6 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" aria-label="下一週" title="下一週">›</button>
                 </div>
               ) : (
                 <div className="flex items-center space-x-1.5">
-                  <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); setScrollTargetWeek(w); }} className="w-5 h-5 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" aria-label="檢視前一週(唯讀)" title="檢視前一週(唯讀)">‹</button>
+                  <button onClick={() => { const w = Math.max(1, currentWeek - 1); setCurrentWeek(w); setScrollTargetWeek(w); }} className="w-6 h-6 flex items-center justify-center bg-white/10 hover:bg-white/30 rounded-full text-xs font-bold transition" aria-label="檢視前一週(唯讀)" title="檢視前一週(唯讀)">‹</button>
                   {/* 成員的上限是 todayWeek(不能看未來週),打超過會自動夾回本週——與 › 鈕 disabled 的規則一致 */}
                   <span className="inline-flex items-baseline" style={{ minWidth: 100 }}>
                     <WeekNumberInput week={currentWeek} max={todayWeek} label={`跳至指定週次（1–${todayWeek}，僅能檢視本週以前）`}
@@ -1715,7 +1780,7 @@ function App() {
                     <span className="text-white/75 font-normal text-[10px] ml-1">{weekToMonth(currentWeek, months)}</span>
                   </span>
                   <button onClick={() => { const w = Math.min(todayWeek, currentWeek + 1); setCurrentWeek(w); setScrollTargetWeek(w); }} disabled={currentWeek >= todayWeek}
-                    className={`w-5 h-5 flex items-center justify-center rounded-full text-xs font-bold transition ${currentWeek >= todayWeek ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-white/10 hover:bg-white/30'}`} aria-label="檢視後一週" title="檢視後一週">›</button>
+                    className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold transition ${currentWeek >= todayWeek ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-white/10 hover:bg-white/30'}`} aria-label="檢視後一週" title="檢視後一週">›</button>
                 </div>
               )}
               {role === 'member' && isViewingPast && (
@@ -1792,7 +1857,10 @@ function App() {
               {/* 低頻管理入口收納為「⚙️ 管理」下拉選單,置於右側帳號區(網頁慣例:設定/管理在右上角,與登出同群組) */}
               {role === 'manager' && (
                 <div className="relative">
+                  {/* aria-expanded/haspopup 不可省:視覺上有 ▾/▴ 可以判斷開合,讀螢幕器只念得到「管理 按鈕」,
+                      不知道這顆會展開選單、也不知道現在是開是關(全站折疊類元素都由 clickable 的 opts.expanded 補這個) */}
                   <button onClick={() => setShowAdminMenu(v => !v)}
+                    aria-expanded={showAdminMenu} aria-haspopup="true"
                     className={`px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20 text-white ${showAdminMenu ? 'bg-white/25' : 'bg-white/10 hover:bg-white/20'}`}
                     title="管理功能：成員管理、瀏覽權限、使用統計、異動紀錄">
                     ⚙️ 管理 {showAdminMenu ? '▴' : '▾'}
@@ -1869,7 +1937,7 @@ function App() {
               </div>
             </div>
           ) : (
-            <div className="px-4 py-2 border-b border-slate-300 bg-gradient-to-r from-slate-50 to-white flex items-center gap-3 text-xs overflow-x-auto">
+            <div className={`py-2 border-b border-slate-300 bg-gradient-to-r from-slate-50 to-white flex items-center text-xs overflow-x-auto ${ultraTightStatsBar ? 'px-2 gap-2 gap-y-1 flex-wrap' : 'px-4 gap-3'}`}>
               {/* 統計範圍要寫出來:這排數字現在跟著成員下拉走,標題不講清楚就會變成「同一個字看到兩組數字」 */}
               <div className="flex items-center flex-shrink-0">
                 <span className="font-black text-slate-900 text-sm">W{String(currentWeek).padStart(2, '0')}</span>
@@ -1877,7 +1945,7 @@ function App() {
                 <span className="ml-1 text-[10px] font-bold text-slate-700">{ownerFilter === 'all' ? '全隊' : ownerFilter}概況</span>
               </div>
               {/* 回報率進度條 */}
-              <div className="flex items-center flex-shrink-0 min-w-[150px]">
+              <div className={`flex items-center flex-shrink-0 ${ultraTightStatsBar ? 'min-w-[120px]' : 'min-w-[150px]'}`}>
                 <div className="flex-1 h-2 bg-slate-300 rounded-full overflow-hidden">
                   <div className={`h-full rounded-full transition-all duration-500 ${weekStats.active > 0 && weekStats.reported === weekStats.active ? 'bg-green-600' : 'bg-indigo-600'}`}
                     style={{ width: `${weekStats.active > 0 ? (weekStats.reported / weekStats.active) * 100 : 0}%` }}></div>
@@ -2054,9 +2122,11 @@ function App() {
             {!isResults && (
               <>
                 <div className="h-5 w-px bg-slate-300/80 mx-1 flex-shrink-0"></div>
-                <button onClick={() => setCollapsedOwners(new Set())} title="展開全部成員群組" className="text-blue-600 hover:text-blue-800 font-medium">展開</button>
+                {/* px-1.5 py-1 是為了把 22×17 的文字鈕撐到 ≥24×24(WCAG 2.5.8);
+                    工具列本來就有更高的元件(緊湊模式 27px),所以這排不會因此變高 */}
+                <button onClick={() => setCollapsedOwners(new Set())} title="展開全部成員群組" className="text-blue-600 hover:text-blue-800 font-medium px-1.5 py-1 rounded">展開</button>
                 <span className="text-slate-500" aria-hidden="true">|</span>
-                <button onClick={() => setCollapsedOwners(new Set(users))} title="收合全部成員群組" className="text-blue-600 hover:text-blue-800 font-medium">收合</button>
+                <button onClick={() => setCollapsedOwners(new Set(users))} title="收合全部成員群組" className="text-blue-600 hover:text-blue-800 font-medium px-1.5 py-1 rounded">收合</button>
               </>
             )}
           </div>
@@ -2089,6 +2159,8 @@ function App() {
                 year={scheduleYear}
                 starredIds={starredIds}
                 toggleStar={toggleStar}
+                activeFilters={activeFilters}
+                onClearAllFilters={clearAllFilters}
               />
             ) : (
               <>
@@ -2149,10 +2221,10 @@ function App() {
               <tbody className="text-xs">
                 {groupedProjects.length === 0 ? (
                   <tr><td colSpan={weeksTotal + 3} className="p-10 text-center text-slate-500">
-                    <div className="text-3xl mb-2">{pendingOnly && weekStats.pending === 0 ? '🎉' : '🔍'}</div>
                     {/* 「未回報」篩選開著而結果為 0,其實是好消息(全部都交了),不要當成「找不到資料」報給使用者 */}
                     {pendingOnly && weekStats.pending === 0 ? (
                       <div className="space-y-2">
+                        <div className="text-3xl mb-2" aria-hidden="true">🎉</div>
                         <div className="font-bold text-slate-700">
                           W{String(currentWeek).padStart(2, '0')} {ownerFilter === 'all' ? '全隊' : ownerFilter}已全數回報，沒有待追蹤的項目。
                         </div>
@@ -2161,7 +2233,9 @@ function App() {
                           顯示全部專案
                         </button>
                       </div>
-                    ) : '找不到符合條件的專案。調整搜尋關鍵字或清除篩選後再試一次。'}
+                    ) : (
+                      <EmptyFilterState filters={activeFilters} onClearAll={clearAllFilters} />
+                    )}
                   </td></tr>
                 ) : groupedProjects.map((group) => {
                   const isCollapsed = collapsedOwners.has(group.owner);
@@ -2243,9 +2317,12 @@ function App() {
                               {/* 範本 B:專案名稱近全黑+加粗,寬鬆模式 15px(預設)/緊湊 13px/總覽 12.5px */}
                               <span className={`flex-1 min-w-0 truncate font-semibold text-slate-900 ${isOverview ? 'text-[12.5px]' : isCompact ? 'text-[13px]' : 'text-[15px]'}`} title={proj.nid ? `${proj.name}\nNID：${proj.nid}` : proj.name}>{proj.name}</span>
                               {/* 具體產出項目(專案執行完畢後的成果)入口:已填=實色,未填=淡色;負責人與主管可編輯,其他人唯讀 */}
+                              {/* 熱區:原本只有 16×12(WCAG 2.5.8 要 24×24)。垂直用 -my-1.5/py-1.5 撐開並抵銷,
+                                  列高完全不變;水平改用 px-1 取代原本的 ml-1(左內距同時當作與名稱的間隔),
+                                  名稱欄只讓出 4px。 */}
                               <button
                                 onClick={(e) => { e.stopPropagation(); setDeliverableProj(proj); }}
-                                className={`flex-shrink-0 ml-1 text-[12px] leading-none transition hover:scale-125 ${proj.deliverable ? 'opacity-90' : 'opacity-25 hover:opacity-70'}`}
+                                className={`flex-shrink-0 px-1 py-1.5 -my-1.5 text-[12px] leading-none transition hover:scale-125 ${proj.deliverable ? 'opacity-90' : 'opacity-25 hover:opacity-70'}`}
                                 title={proj.deliverable || proj.mpSaving
                                   ? `具體產出項目：${proj.deliverable || '（未填寫）'}${proj.mpSaving ? `\n💡 MP Saving：${proj.mpSaving}` : ''}`
                                   : '具體產出項目（尚未填寫，點擊檢視/填寫）'}>🎯</button>
@@ -2622,6 +2699,41 @@ function StatChip({ label, value, className, onToggle, active = false, title }) 
   );
 }
 
+// 「條件篩到 0 筆」的共用空狀態(週檢視/年度總覽/成果清單)。
+// ⚠ 空狀態要做兩件事,少一件都不算數:
+//   ①**講出是什麼把清單清空的** —— 造成 0 筆的條件散在三處(工具列的搜尋框與 a~e 晶片、
+//     header 右側的成員下拉、成果清單自己的 KPI 卡片),使用者看不到「現在同時生效了哪些」。
+//   ②**就地給出口** —— 原本週檢視只寫「調整搜尋關鍵字或清除篩選後再試一次」,
+//     清除鈕卻遠在工具列;成果清單更只有一句「符合篩選條件的專案項目為空」,連該做什麼都沒說。
+// 每個條件各給一顆清除鈕(使用者通常只想拿掉其中一個,不是全部重來),兩個以上才多給「清除全部」。
+function EmptyFilterState({ filters = [], onClearAll, emptyNote = '這個年度目前沒有專案。' }) {
+  const btn = 'px-2.5 py-1 rounded-lg bg-white border border-slate-400 text-[11px] font-bold text-slate-700 hover:bg-slate-100 hover:border-blue-500 transition';
+  return (
+    <div className="py-10 text-center">
+      <div className="text-3xl mb-2" aria-hidden="true">🔍</div>
+      <div className="font-bold text-slate-700">找不到符合條件的專案</div>
+      {filters.length === 0 ? (
+        <div className="mt-1 text-xs text-slate-600">{emptyNote}</div>
+      ) : (
+        <>
+          <div className="mt-1 text-xs text-slate-600">
+            目前生效的篩選：{filters.map(f => f.label).join('、')}
+          </div>
+          <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
+            {/* 按鈕文字由各條件自帶(clearLabel):中英混排的空格位置寫死在這裡會變成「清除KPI 篩選」 */}
+            {filters.map(f => (
+              <button key={f.key} onClick={f.clear} className={btn}>✕ {f.clearLabel}</button>
+            ))}
+            {filters.length > 1 && (
+              <button onClick={onClearAll} className={`${btn} text-blue-700 border-blue-400`}>清除全部條件</button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function LoadingScreen() {
   return (
     <div className="flex-1 flex justify-center items-center bg-slate-100 app-bg p-4">
@@ -2733,7 +2845,10 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
   useModalDirtyReset();
   const [scheduleError, setScheduleError] = useState('');
   const [noteError, setNoteError] = useState('');
-  const [showAllHistory, setShowAllHistory] = useState(false);
+  // 前幾週回報:**預設收合**。它是「參考資料」不是「要填的東西」,展開時會佔掉彈窗一大塊,
+  // 把真正要操作的「本週實際執行回報」推到畫面外。需要對照時才展開。
+  // ⚠ 收合不影響最高頻的動作:「↩ 沿用上次回報」是獨立主按鈕(在狀態選擇區上方),不在這一區裡。
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // 此計畫區間「本週之前」的歷次回報,新到舊。
   // 寫本週回報時最需要的參考就是「上週寫到哪、狀態是什麼」,原本只有甘特條 hover tooltip 看得到 →
@@ -2744,8 +2859,9 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
       .filter(h => h.week < currentWeek && h.log)
       .sort((a, b) => b.week - a.week)
   , [logs, currentWeek]);
-  const HISTORY_PREVIEW = 3;                                   // 預設只展開最近 3 週,其餘收起來(避免長區間洗版)
-  const shownHistory = showAllHistory ? history : history.slice(0, HISTORY_PREVIEW);
+  // 展開後直接列出全部:原本還有一層「先 3 週、再顯示全部」的中間狀態,改成預設收合之後
+  // 會變成「展開 → 再按顯示全部」兩次點擊才看得到完整歷史。清單本身有 max-h-56 內部捲動撐著,
+  // 一次全列不會把版面推爆,所以收掉那層中間狀態,只留「收合 ⇄ 展開」兩態。
 
   // 沿用某一週的回報當本週草稿:狀態與內容一起帶入,使用者可再修改後送出。
   // 例行性/持續性的工作每週內容差異不大,重打一次是純粹的重工;帶入後文字就攤在 textarea 裡,
@@ -2833,19 +2949,27 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
               沒有歷史就整塊不渲染(不留空殼),避免新區間第一次打卡時多一塊沒內容的區域。 */}
           {history.length > 0 && (
             <div className="border border-slate-300 rounded-xl overflow-hidden">
-              <div className="bg-slate-100 px-4 py-2 flex items-center justify-between gap-2">
-                <span className="text-sm font-bold text-slate-800">前幾週回報（{history.length} 週）</span>
-                {history.length > HISTORY_PREVIEW && (
-                  <button onClick={() => setShowAllHistory(v => !v)}
-                    className="flex-shrink-0 text-xs font-bold text-blue-700 hover:text-blue-900 hover:underline"
-                    aria-expanded={showAllHistory}>
-                    {showAllHistory ? '只看最近 3 週' : `顯示全部 ${history.length} 週`}
-                  </button>
-                )}
-              </div>
+              {/* 整條標題列都是展開/收合的觸發區(不是只有右邊那幾個字),點擊目標大、也容易瞄準 */}
+              <button onClick={() => setHistoryOpen(v => !v)}
+                className="w-full bg-slate-100 hover:bg-slate-200 px-4 py-2 flex items-center justify-between gap-2 text-left transition"
+                aria-expanded={historyOpen} aria-controls="task-history-list">
+                <span className="flex items-center gap-2 min-w-0">
+                  <span aria-hidden="true" className="flex-shrink-0 text-[10px] text-slate-600">{historyOpen ? '▼' : '▶'}</span>
+                  <span className="flex-shrink-0 text-sm font-bold text-slate-800">前幾週回報（{history.length} 週）</span>
+                  {/* 收合時把「最近一週的狀態」提到標題上:不展開也能回答「上一次到底做了沒」,
+                      使用者才不必為了確認這件事而每次都展開。展開後第一列就是同一筆,再顯示一次是重複資訊。 */}
+                  {!historyOpen && (
+                    <span className={`flex-shrink-0 px-2 py-0.5 rounded text-[11px] font-bold ${STATUS_META[history[0].log.status]?.tag}`}>
+                      最近 W{String(history[0].week).padStart(2, '0')} {STATUS_META[history[0].log.status]?.icon} {STATUS_META[history[0].log.status]?.label}
+                    </span>
+                  )}
+                </span>
+                <span className="flex-shrink-0 text-xs font-bold text-blue-700">{historyOpen ? '收合' : '展開'}</span>
+              </button>
               {/* 上限高度 + 內部捲動:長區間(如 W14–W40)展開後不會把「本週回報」推到畫面外 */}
-              <div className="max-h-56 overflow-y-auto divide-y divide-slate-200">
-                {shownHistory.map(h => (
+              {historyOpen && (
+              <div id="task-history-list" className="max-h-56 overflow-y-auto divide-y divide-slate-200">
+                {history.map(h => (
                   <div key={h.week} className="px-4 py-2.5 bg-white">
                     <div className="flex items-center flex-wrap gap-1.5">
                       <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-bold text-[11px] font-mono">
@@ -2876,6 +3000,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                   </div>
                 ))}
               </div>
+              )}
             </div>
           )}
 
@@ -3518,8 +3643,11 @@ function ManagerWeekPanel({ week, todayWeek, users = [], projects, taskLogs, ext
               className="flex-1 border border-white/30 bg-white text-slate-800 rounded-lg px-2 py-1.5 text-sm font-bold outline-none">
               {users.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
+            {/* ⚠ 文字用 text-amber-950 而非 -900:這顆晶片坐在行內色的深琥珀標題列上,底色亮黃在深淺兩色
+                都維持不變(見 input.css「主題不變的亮琥珀晶片」),而 -900 那階會被映射成亮黃 —— 與底色同值、
+                對比 1.00,整個字消失。與 header 的「⚠ 連線中斷」晶片同一組寫法。 */}
             {week !== todayWeek && (
-              <span className="text-[10px] font-bold bg-amber-300 text-amber-900 px-2 py-1 rounded-full whitespace-nowrap">歷史週次</span>
+              <span className="text-[10px] font-bold bg-amber-300 text-amber-950 px-2 py-1 rounded-full whitespace-nowrap">歷史週次</span>
             )}
           </div>
         </div>
@@ -3897,12 +4025,12 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
         </div>
         <div className="flex items-center space-x-2 flex-shrink-0">
           <button onClick={exportExcel} disabled={exporting}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border text-white disabled:opacity-70 whitespace-nowrap ${exportFailed ? 'bg-red-600 hover:bg-red-500 border-red-400/60' : 'bg-green-600 hover:bg-green-500 border-green-400/60'}`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border text-white disabled:opacity-70 whitespace-nowrap ${exportFailed ? 'bg-red-700 hover:bg-red-600 border-red-400/60' : 'bg-green-700 hover:bg-green-600 border-green-400/60'}`}
             title="下載 Excel 週報(.xlsx)">
             {exporting ? '⏳ 產生中…' : exportFailed ? (narrowPanel ? '❌ 重試' : '❌ 匯出失敗，點擊重試') : (narrowPanel ? '⬇️ Excel' : '⬇️ 匯出 Excel')}
           </button>
           <button onClick={copyReport}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border whitespace-nowrap ${copied ? 'bg-green-500 border-green-400 text-white' : 'bg-white/10 hover:bg-white/20 border-white/20 text-white'}`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border whitespace-nowrap ${copied ? 'bg-green-700 border-green-400 text-white' : 'bg-white/10 hover:bg-white/20 border-white/20 text-white'}`}
             title="複製整份團隊週報文字">
             {copied ? '✓ 已複製' : (narrowPanel ? '📋 複製全部' : '📋 複製週報文字')}
           </button>
@@ -3933,7 +4061,7 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
               <>
                 <span className="text-slate-400" aria-hidden="true">|</span>
                 <button onClick={copyPendingList}
-                  className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition ${copiedPending ? 'bg-green-600 border-green-700 text-white' : 'bg-amber-100 text-amber-900 border-amber-500 hover:bg-amber-200'}`}
+                  className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition ${copiedPending ? 'bg-green-700 border-green-800 text-white' : 'bg-amber-100 text-amber-900 border-amber-500 hover:bg-amber-200'}`}
                   title={`複製 ${pendingSummary.length} 位待回報成員的名單與缺漏項目，可直接貼到通訊軟體`}>
                   {copiedPending ? '✓ 已複製名單' : `複製待回報名單（${pendingSummary.length}）`}
                 </button>
@@ -4026,15 +4154,16 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
                     拿掉 emoji 省下的寬度剛好夠放完整的四字標籤(實測只差 5px),任何面板寬度都寫全名。
                     兩顆用不同色系區隔(中性=複製、紫=回覆,紫色是全站「主管回覆」的既有語彙),
                     避免並排兩顆灰鈕分不出誰是誰。 */}
+                {/* py-1(原 py-0.5):把 58×21 撐到 ≥24 高(WCAG 2.5.8);成員列其他元件更高,列高不受影響 */}
                 <button onClick={(e) => { e.stopPropagation(); copyUserReport(s); }}
-                  className={`ml-auto flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold transition border whitespace-nowrap ${isCopiedUser ? 'bg-green-600 border-green-700 text-white dark:bg-green-700 dark:border-green-600' : 'bg-white ctl-raised hover:bg-slate-200 border-slate-500 text-slate-700 dark:text-slate-200'}`}
+                  className={`ml-auto flex-shrink-0 px-2 py-1 rounded text-[10px] font-bold transition border whitespace-nowrap ${isCopiedUser ? 'bg-green-700 border-green-800 text-white dark:bg-green-700 dark:border-green-600' : 'bg-white ctl-raised hover:bg-slate-200 border-slate-500 text-slate-700 dark:text-slate-200'}`}
                   title={`複製 ${user} 的週報文字（可貼到郵件／通訊軟體）`}>
                   {isCopiedUser ? '✓ 已複製' : '複製週報'}
                 </button>
                 {/* 主管專屬：回覆本週週報（選填，全體成員可見）;已回覆=紫色實心,同時取代原本的 💬 晶片 */}
                 {isManager && onEditComment && (
                   <button onClick={(e) => { e.stopPropagation(); onEditComment(user); }}
-                    className={`flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-bold transition border whitespace-nowrap ${s.comment ? 'bg-violet-100 hover:bg-violet-200 border-violet-500 text-violet-800 dark:bg-violet-900/40 dark:hover:bg-violet-900/60 dark:border-violet-700/50 dark:text-violet-300' : 'bg-white ctl-raised hover:bg-violet-50 border-violet-500 text-violet-700 dark:text-violet-300'}`}
+                    className={`flex-shrink-0 px-2 py-1 rounded text-[10px] font-bold transition border whitespace-nowrap ${s.comment ? 'bg-violet-100 hover:bg-violet-200 border-violet-500 text-violet-800 dark:bg-violet-900/40 dark:hover:bg-violet-900/60 dark:border-violet-700/50 dark:text-violet-300' : 'bg-white ctl-raised hover:bg-violet-50 border-violet-500 text-violet-700 dark:text-violet-300'}`}
                     title={s.comment ? `編輯對 ${user} 的本週回覆` : `回覆 ${user} 的本週週報（選填）`}>
                     {s.comment ? '✓ 已回覆' : '主管回覆'}
                   </button>
@@ -4663,6 +4792,7 @@ function AccessPanel({ currentUser, role, empId, showToast, onClose }) {
 // 主管:成員管理面板(新增/移除成員;移除為軟刪除 IsActive=0,名下仍有專案時後端會擋下)
 function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose }) {
   const focus = useModalFocus();   // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
+  useModalDirtyReset();            // 16 個彈窗裡原本只有這個沒掛:打到一半的成員姓名按 ESC 會直接消失,與其他表單不一致
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -4676,18 +4806,18 @@ function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose
     setSaving(true);
     const ok = await onAdd(n);
     setSaving(false);
-    if (ok) { setName(''); setError(''); }
+    if (ok) { setName(''); setError(''); clearModalDirty(); }   // 面板不關閉,旗標要自己清,否則關窗時會誤跳「放棄未儲存」
   };
 
   const submitRename = async () => {
     const n = (editing?.value || '').trim();
     if (!n) { setEditing(prev => ({ ...prev, error: '成員名稱不可空白' })); return; }
-    if (n === editing.old) { setEditing(null); return; }   // 沒改,直接關閉
+    if (n === editing.old) { setEditing(null); clearModalDirty(); return; }   // 沒改,直接關閉
     if (users.includes(n)) { setEditing(prev => ({ ...prev, error: `成員「${n}」已存在` })); return; }
     setRenaming(true);
     const ok = await onRename(editing.old, n);
     setRenaming(false);
-    if (ok) setEditing(null);
+    if (ok) { setEditing(null); clearModalDirty(); }
   };
 
   return (
@@ -4705,7 +4835,7 @@ function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose
           <label className="text-xs font-bold text-slate-500">新增成員</label>
           <div className="mt-1 flex gap-2">
             {/* onEnterSubmit 內含 isComposing 判斷:原本直接 if(key==='Enter') 會在輸入中文姓名選字時誤送出 */}
-            <input value={name} onChange={e => { setName(e.target.value); setError(''); }}
+            <input value={name} onChange={e => { setName(e.target.value); setError(''); markModalDirty(); }}
               onKeyDown={onEnterSubmit(submit)}
               placeholder="輸入新成員顯示名稱…" autoFocus
               className={`flex-1 border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 ${error ? 'border-red-400' : 'border-slate-300'}`} />
@@ -4733,8 +4863,8 @@ function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <input value={editing.value} autoFocus
-                        onChange={e => setEditing(prev => ({ ...prev, value: e.target.value, error: '' }))}
-                        onKeyDown={e => { if (isComposingEvent(e)) return; if (e.key === 'Enter') submitRename(); if (e.key === 'Escape') setEditing(null); }}
+                        onChange={e => { setEditing(prev => ({ ...prev, value: e.target.value, error: '' })); markModalDirty(); }}
+                        onKeyDown={e => { if (isComposingEvent(e)) return; if (e.key === 'Enter') submitRename(); if (e.key === 'Escape') { setEditing(null); clearModalDirty(); } }}
                         className={`flex-1 min-w-0 border rounded-lg px-2 py-1 text-sm outline-none focus:border-blue-500 ${editing.error ? 'border-red-400' : 'border-slate-300'}`} />
                       <button onClick={submitRename} disabled={renaming}
                         className="flex-shrink-0 px-2 py-1 rounded-lg text-xs font-bold text-white transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: BRAND_BTN }}>
