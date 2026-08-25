@@ -7,9 +7,9 @@
 
 | 環境 | 說明 | 已執行 |
 |------|------|--------|
-| 遠端正式主機 | 線上正式資料，只能跑增量遷移 | `old.sql` → `new.sql`（=01~09 基準）；**10~13 需依編號順序執行（若尚未）** |
-| 本機開發 `Sariel\Gantt` | 開發／驗證用 | 全部（old+new+10+11+12+13） |
-| 本機測試 `Sariel\Gantt2` | 切換連線字串測試用 | old+new+10（2026-07-16 補跑）；11~13 未套用 |
+| 遠端正式主機 | 線上正式資料，只能跑增量遷移 | `old.sql` → `new.sql`（=01~09 基準）；**10~16 需依編號順序執行（若尚未）** |
+| 本機開發 `Sariel\Gantt` | 開發／驗證用 | 全部（old+new+10~16） |
+| 本機測試 `Sariel\Gantt2` | 切換連線字串測試用 | old+new+10（2026-07-16 補跑）；11~16 未套用 |
 
 - **`old.sql`＋`new.sql` 不可修改**：兩檔＝遠端已執行完畢的架構基準（2026-07-12 以臨時 DB 逐項指紋驗證與正式架構一致）。
 - `backup_sql/` 內 01~09 逐檔僅供參考，勿執行勿修改。
@@ -27,7 +27,7 @@
 | ScheduleWeeks | 年度週→月對照 | (ScheduleYear,WeekNo) PK、MonthName、MonthLabel；CHECK 週 1..53 |
 | Projects | 專案主檔 | TypeCode、Category、OwnerUserId、Name、ScheduleYear、SortOrder、IsDeleted、Deliverable、MpSaving、IsStarred、NID |
 | Tasks | 計畫區間 | TaskCode(`t{ProjectId}-{seq}`)、StartWeek/EndWeek(CHECK 1..53)、SortOrder、IsDeleted、NID |
-| WeeklyLogs | 每週打卡 | TaskId×Year×Week 唯一、Status、Note、Score DECIMAL(2,1) DEFAULT 1、ReportedByUserId、UpdatedAt |
+| WeeklyLogs | 每週打卡 | TaskId×Year×Week 唯一、Status、Note、**DocUrl**(文件連結,選填)、Score DECIMAL(2,1) DEFAULT 1、ReportedByUserId、UpdatedAt |
 | ExtraNotes | 非專案事項 | UserId×Year×Week 唯一、Note、UpdatedByUserId、UpdatedAt |
 | WeeklyPlans | 下週預計工作 | 同 ExtraNotes 結構 |
 | WeeklyComments | 主管週報回覆 | UserId×Year×Week 唯一、Comment(空字串=已清空)、UpdatedByUserId、UpdatedAt |
@@ -160,5 +160,24 @@ usp_ToggleProjectStar、usp_EnsureScheduleYear、usp_SetAppSetting、usp_AddAcce
   向下相容 14 之前的短格式歷史列。
 - 已套用本機 Gantt（驗證：只改 NID 的專案／區間、以及名稱+排程+NID 同改，皆正確顯示「NID『舊』→『新』」）。
   **遠端需執行（順序 …→14→15）**；Gantt2 未套用。
+
+## 2026-08-25 — 遷移 16：打卡回報加「文件連結」（16_add_weeklylog_docurl.sql）
+- 需求：主管讀週報時最常做的下一個動作就是「把那份文件打開」，原本得自己去信件／檔案總管翻。
+  回報時順手貼上連結，看板與打卡彈窗就能直接點開。
+- `WeeklyLogs.DocUrl NVARCHAR(500) NULL`（選填）。長度取 500：SharePoint／Teams 網址常帶一長串查詢字串，
+  200 會被截斷；UNC 路徑（`\\server\share\…`）也可能很長。
+- `CREATE OR ALTER usp_UpsertWeeklyLog`：加**選填** `@DocUrl NVARCHAR(500)=NULL`（放參數清單最後，
+  舊呼叫端未傳時行為完全不變），`NULLIF(LTRIM(RTRIM(@DocUrl)),N'')` 空白存 NULL；MERGE 的 UPDATE/INSERT 都寫入。
+  ⚠ `usp_UpdateLogScore` 只動 Score，不會洗掉 DocUrl（沿用既有行為，無需修改）。
+- 稽核 Detail 格式：`note舊=… | note新=…` → **`doc舊=… | doc新=… | note舊=… | note新=…`**。
+  ⚠ **doc 段落必須排在 note 之前**：後端 `Summarize()` 是用 `LastIndexOf('note新=')` 之後「整段到結尾」
+  當工作說明（因為說明本身可能含 `|` 或換行），doc 放後面會被一起吃進工作說明裡。
+  後端解析對**遷移 16 前的舊格式**（只有 note 兩段）相容，歷史紀錄不需回頭改寫。
+- `CREATE OR ALTER vw_WeeklyReport` 補 `DocUrl` 欄（其餘定義與 `old.sql` 完全相同；此 View 應用程式未使用，
+  僅供人工／報表查詢）。
+- 冪等（`COL_LENGTH` 檢查欄位、`CREATE OR ALTER`）；SP／View 以 `QUOTED_IDENTIFIER ON` 建立。
+- 已套用本機 Gantt（驗證：https 網址與 UNC 路徑存取皆正確、清空欄位存回 NULL、
+  稽核白話顯示「…，文件連結：…」、週報 Excel 多一欄「文件連結」且 UNC 產生真正可點的外部超連結）。
+  **遠端需執行（順序 …→15→16）**；Gantt2 未套用。
 
 <!-- 新的 DB 變更請從此行下方繼續追加，勿修改上方任何段落 -->

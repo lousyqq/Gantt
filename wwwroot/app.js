@@ -375,6 +375,114 @@ const CloseButton = ({
   d: "M6 18L18 6M6 6l12 12"
 })));
 
+// ── 打卡回報的「文件連結」(選填) ────────────────────────────────────────────
+// 主管讀週報時最常做的下一個動作就是「去把那份文件打開」,原本得自己去信件/檔案總管翻;
+// 回報時順手貼上連結,看板與彈窗就能直接點開。
+const DOC_URL_MAX = 500; // 與 WeeklyLogs.DocUrl NVARCHAR(500) 一致
+// 🚨 這個值會被放進 <a href>,而且是「主管一定會點」的連結——不擋等於一個儲存型 XSS。
+//    後端 /api/weekly-log 也擋一次(這裡擋不住直接打 API 的情況)。
+const isUnsafeUrl = u => /^\s*(javascript|data|vbscript)\s*:/i.test(u || '');
+const isHttpUrl = u => /^https?:\/\//i.test((u || '').trim());
+// 使用者常直接貼「portal.company.com/doc/1」這種沒有 scheme 的網址。原樣放進 href 會被當成
+// **相對路徑** → 點下去跳到本站的 /portal.company.com/doc/1(404),而且看起來像系統壞了。
+// 看起來像網域就補上 https://;UNC(\\server\share)與磁碟路徑(C:\…)原樣保留。
+const normalizeDocUrl = raw => {
+  const s = (raw || '').trim();
+  if (!s) return '';
+  if (/^[a-z][\w+.-]*:/i.test(s) || s.startsWith('\\\\') || s.startsWith('/')) return s;
+  return /^[\w-]+(\.[\w-]+)+([/?#]|$)/.test(s) ? `https://${s}` : s;
+};
+
+// 複製到剪貼簿。navigator.clipboard 只在 secure context(https / localhost)提供,
+// 內網是純 http → 直接用會 throw,所以一定要保留 execCommand 的退路。回傳是否成功。
+const copyToClipboard = async text => {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {}
+    document.body.removeChild(ta);
+    return ok;
+  }
+};
+
+// 打卡內容裡的文件連結圖示(看板卡片、打卡彈窗、歷史回報列共用)。
+// **一律 <a target="_blank">:點一下就開新分頁**,不分來源(2026-08-25 依使用者指示改;
+// 原本 UNC/本機路徑走「複製路徑」鈕,兩種來源兩種行為,同一顆圖示點下去結果不一樣)。
+//
+// ⚠ 非 http 的路徑**一定要先轉成合法的 file: URL**(toDocHref):`\\server\share\a.xlsx` 原樣放進 href
+//   會被當成**相對路徑** → 點下去跳到本站的 /\\server\share\a.xlsx(404),那是保證失敗。
+//   轉成 `file://server/share/a.xlsx` 之後,只要瀏覽器/IT 政策允許就會真的開起來。
+// ⚠ 已知限制:Chrome/Edge **預設封鎖**從 http 頁面開啟 file://(點了沒反應也不報錯),
+//   要靠網域政策(URLAllowlist / LocalLinksAllowedInBrowser)放行。若內網未放行,
+//   使用者可改從匯出的週報 Excel 開——那裡是真正可點的超連結(Excel 沒有這個限制),
+//   或 hover 看 title 取得完整路徑自行貼到檔案總管。
+// ⚠ stopPropagation:看板卡片整張是 clickable(點了會去高亮甘特),不擋的話點連結會順便觸發高亮。
+//
+// 🚨 純圖示,**不可以用 emoji**:初版是「📎 開啟文件」整串文字,在看板卡片裡太吵;
+//    但縮成 emoji 也不行——10px 的 📎 只是一團彩色色塊,認不出是什麼(與工具列不用 emoji 同一條理由)。
+//    改用 SVG:單色、吃 currentColor(深淺模式自動跟著走)、縮到 14px 仍然看得出是「文件」。
+// ⚠ 沒有文字 → **aria-label 是唯一的可及名稱**,讀螢幕器只念得出「連結」的話這個功能等於不存在。
+//    title 另外帶完整網址,滑鼠使用者 hover 就知道會去哪,不必先點下去試。
+const toDocHref = raw => {
+  const s = (raw || '').trim();
+  if (!s) return '';
+  const enc = p => p.replace(/\\/g, '/').replace(/ /g, '%20'); // 反斜線轉正斜線、空白轉義
+  // ⚠ 磁碟機代號要**排在 scheme 判斷之前**:`C:\Docs\a.docx` 的開頭 `C:` 會被當成合法 scheme,
+  //   放後面就永遠輪不到這一條(實測 href 直接留成 `C:\Docs\a.docx`)。
+  //   Chrome 的 URL parser 有「Windows 磁碟機」特例會幫忙補救,但那是瀏覽器實作細節,不能靠它。
+  if (/^[a-zA-Z]:[\\/]/.test(s)) return `file:///${enc(s)}`; // 本機 C:\… → file:///C:/…
+  if (s.startsWith('\\\\')) return `file://${enc(s.slice(2))}`; // UNC \\server\share\… → file://server/share/…
+  // scheme 至少兩個字元(單字元的都是磁碟機代號,真實 scheme 沒有一個是單字母)
+  if (/^[a-z][\w+.-]+:/i.test(s)) return s; // 已有 scheme(http/https/file/onenote…)
+  return s;
+};
+const DocIcon = () => /*#__PURE__*/React.createElement("svg", {
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: "2",
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  className: "w-3.5 h-3.5",
+  "aria-hidden": "true"
+}, /*#__PURE__*/React.createElement("path", {
+  d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M14 2v6h6"
+}));
+const DocLink = ({
+  url,
+  className = '',
+  stopPropagation = false
+}) => {
+  if (!url || isUnsafeUrl(url)) return null; // 不安全的舊資料一律不渲染成連結
+  const href = toDocHref(url);
+  if (!href) return null;
+  // 點擊區 24×24(WCAG 2.5.8):圖示 14 + p-1 的 8 + 外框 2
+  const cls = `inline-flex items-center justify-center p-1 rounded border transition ` + `border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100 ${className}`;
+  const guard = e => {
+    if (stopPropagation) e.stopPropagation();
+  };
+  return /*#__PURE__*/React.createElement("a", {
+    href: href,
+    target: "_blank",
+    rel: "noopener noreferrer",
+    onClick: guard,
+    onKeyDown: guard,
+    className: cls,
+    "aria-label": `開啟文件（另開新分頁）：${url}`,
+    title: `開啟文件：${url}`
+  }, /*#__PURE__*/React.createElement(DocIcon, null));
+};
+
 // 讓非 <button> 的互動元素(表格的 th/tr、絕對定位的甘特條、看板卡片)也能用鍵盤操作。
 // 用法:<div {...clickable(() => open(), '開啟 XXX')}>。
 // 為什麼不直接改寫成 <button>:th/tr 換掉會破壞 table 結構(sticky 表頭、欄寬、斑馬紋全靠它),
@@ -1334,7 +1442,7 @@ function App() {
       p = n => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   };
-  const handleSaveLog = async (taskId, status, note) => {
+  const handleSaveLog = async (taskId, status, note, docUrl = '') => {
     try {
       await apiPost('/api/weekly-log', {
         taskCode: taskId,
@@ -1342,6 +1450,7 @@ function App() {
         week: currentWeek,
         status,
         note,
+        docUrl,
         actor: currentUser,
         actorRole: role
       });
@@ -1351,9 +1460,12 @@ function App() {
           ...prev[taskId],
           [currentWeek]: {
             ...(prev[taskId]?.[currentWeek] || {}),
+            // docUrl 一律覆寫(含空字串):清空欄位再送出就是「把連結拿掉」,
+            // 用 `|| 舊值` 之類的寫法會讓畫面上連結消不掉,與 DB 不一致
             isExecuting: status !== 'not_executed',
             status,
             note,
+            docUrl: docUrl || null,
             reporter: currentUser,
             reporterRole: role,
             updatedAt: nowStamp()
@@ -3224,7 +3336,9 @@ function App() {
       className: "ml-1 text-yellow-300 text-[11px]"
     }, "\u270F\uFE0F(\u4E3B\u7BA1\u88DC\u767B)")), tooltip.weekLog.note && /*#__PURE__*/React.createElement("div", {
       className: "text-slate-400 whitespace-pre-wrap"
-    }, tooltip.weekLog.note)), tooltip.history.length > 0 && /*#__PURE__*/React.createElement("div", {
+    }, tooltip.weekLog.note), tooltip.weekLog.docUrl && /*#__PURE__*/React.createElement("div", {
+      className: "text-sky-300 mt-0.5"
+    }, "\uD83D\uDCCE \u5DF2\u9644\u6587\u4EF6\u9023\u7D50")), tooltip.history.length > 0 && /*#__PURE__*/React.createElement("div", {
       className: "mt-2 pt-2 border-t border-slate-700 text-slate-500"
     }, "\u6B77\u53F2\u56DE\u5831\uFF1A", tooltip.history.map(([w, l]) => `W${w}${STATUS_META[l.status]?.icon || ''}`).join('　')), /*#__PURE__*/React.createElement("div", {
       className: "mt-1.5 text-[10px] text-slate-500"
@@ -3676,6 +3790,7 @@ function TaskModal({
   const score = weekLog ? Number(weekLog.score ?? 1) : 0;
   const [status, setStatus] = useState(weekLog?.status || null);
   const [note, setNote] = useState(weekLog?.note || '');
+  const [docUrl, setDocUrl] = useState(weekLog?.docUrl || ''); // 本週回報對應的文件連結(選填)
   const [taskName, setTaskName] = useState(task.name);
   const [startWeek, setStartWeek] = useState(task.start);
   const [endWeek, setEndWeek] = useState(task.end);
@@ -3684,6 +3799,7 @@ function TaskModal({
   useModalDirtyReset();
   const [scheduleError, setScheduleError] = useState('');
   const [noteError, setNoteError] = useState('');
+  const [docError, setDocError] = useState('');
   // 前幾週回報:**預設收合**。它是「參考資料」不是「要填的東西」,展開時會佔掉彈窗一大塊,
   // 把真正要操作的「本週實際執行回報」推到畫面外。需要對照時才展開。
   // ⚠ 收合不影響最高頻的動作:「↩ 沿用上次回報」是獨立主按鈕(在狀態選擇區上方),不在這一區裡。
@@ -3703,10 +3819,13 @@ function TaskModal({
   // 沿用某一週的回報當本週草稿:狀態與內容一起帶入,使用者可再修改後送出。
   // 例行性/持續性的工作每週內容差異不大,重打一次是純粹的重工;帶入後文字就攤在 textarea 裡,
   // 使用者看得到自己送出的是什麼,不會有「以為填了新內容」的錯覺。
+  // 文件連結一起帶:同一份文件通常會延續好幾週(進度報告、追蹤表),重貼一次也是重工。
   const reuseLog = h => {
     setStatus(h.log.status);
     setNote(h.log.note || '');
+    setDocUrl(h.log.docUrl || '');
     setNoteError('');
+    setDocError('');
     markModalDirty();
   };
   const submitLog = async () => {
@@ -3719,9 +3838,20 @@ function TaskModal({
       setNoteError('請填寫實際工作內容，才能讓團隊了解進度');
       return;
     }
+    // 沒有 scheme 的網址補 https://(否則進 href 會被當相對路徑,點下去是本站 404)
+    const doc = normalizeDocUrl(docUrl);
+    if (isUnsafeUrl(doc)) {
+      setDocError('文件連結格式不正確，請貼上網址（http/https）或檔案路徑');
+      return;
+    }
+    if (doc.length > DOC_URL_MAX) {
+      setDocError(`文件連結請勿超過 ${DOC_URL_MAX} 個字元（目前 ${doc.length} 個）`);
+      return;
+    }
+    if (doc !== docUrl) setDocUrl(doc); // 補過 scheme 的話同步回欄位,使用者看得到送出的是什麼
     setSaving(true);
     try {
-      await onSaveLog(task.id, status, note.trim());
+      await onSaveLog(task.id, status, note.trim(), doc);
     } finally {
       setSaving(false);
     }
@@ -3895,7 +4025,11 @@ function TaskModal({
     className: "mt-1 text-xs text-slate-700 whitespace-pre-wrap break-words leading-relaxed"
   }, h.log.note || /*#__PURE__*/React.createElement("span", {
     className: "text-slate-500 italic"
-  }, "\uFF08\u672A\u586B\u5BEB\u8AAA\u660E\uFF09")), h.log.updatedAt && /*#__PURE__*/React.createElement("div", {
+  }, "\uFF08\u672A\u586B\u5BEB\u8AAA\u660E\uFF09")), h.log.docUrl && /*#__PURE__*/React.createElement("div", {
+    className: "mt-1.5"
+  }, /*#__PURE__*/React.createElement(DocLink, {
+    url: h.log.docUrl
+  })), h.log.updatedAt && /*#__PURE__*/React.createElement("div", {
     className: "text-[10px] text-slate-500 mt-1"
   }, "\uD83D\uDD58 \u6700\u5F8C\u7DE8\u8F2F ", h.log.updatedAt, h.log.reporter ? `（${h.log.reporter}）` : ''))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h4", {
     className: "text-sm font-bold text-slate-800 mb-3 flex items-center"
@@ -3952,7 +4086,33 @@ function TaskModal({
     className: `w-full border rounded-lg p-3 text-sm h-24 outline-none resize-none focus:border-blue-500 ${noteError ? 'border-red-400' : 'border-slate-300'}`
   }), noteError && /*#__PURE__*/React.createElement("div", {
     className: "text-xs text-red-600 font-bold"
-  }, noteError)), /*#__PURE__*/React.createElement("div", {
+  }, noteError), status && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    htmlFor: "log-doc-url",
+    className: "text-[11px] font-bold text-slate-600"
+  }, "\uD83D\uDCCE \u6587\u4EF6\u9023\u7D50\uFF08\u9078\u586B\uFF09"), /*#__PURE__*/React.createElement("input", {
+    id: "log-doc-url",
+    type: "text",
+    value: docUrl,
+    maxLength: DOC_URL_MAX,
+    onChange: e => {
+      setDocUrl(e.target.value);
+      setDocError('');
+      markModalDirty();
+    },
+    onBlur: e => {
+      const n = normalizeDocUrl(e.target.value);
+      if (n !== e.target.value) setDocUrl(n);
+    },
+    onKeyDown: onEnterSubmit(submitLog),
+    placeholder: "https://\u2026 \u6216 \\\\\u4F3A\u670D\u5668\\\u5171\u7528\u8CC7\u6599\u593E\\\u6A94\u6848.xlsx",
+    className: `w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 mt-1 ${docError ? 'border-red-400' : 'border-slate-300'}`
+  }), docError ? /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-red-600 font-bold mt-1"
+  }, docError) : /*#__PURE__*/React.createElement("div", {
+    className: "text-[10px] text-slate-500 mt-1"
+  }, "\u586B\u4E86\u4E4B\u5F8C\uFF0C\u4E3B\u7BA1\u5728\u5718\u968A\u7E3D\u7D50\u770B\u677F\u9EDE\u4E00\u4E0B\u5716\u793A\u5C31\u6703\u53E6\u958B\u5206\u9801\u958B\u555F\uFF0C\u4E0D\u5FC5\u53E6\u5916\u627E\u6A94\u6848\u3002", docUrl.trim() && !isHttpUrl(normalizeDocUrl(docUrl)) && /*#__PURE__*/React.createElement("span", {
+    className: "text-slate-600"
+  }, "\uFF08\u7DB2\u8DEF\u78C1\u789F\uFF0F\u672C\u6A5F\u8DEF\u5F91\u8981\u700F\u89BD\u5668\u653F\u7B56\u5141\u8A31\u624D\u958B\u5F97\u8D77\u4F86\uFF0C\u5EFA\u8B70\u512A\u5148\u8CBC http/https \u7DB2\u5740\uFF09")))), /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end space-x-3 pt-4"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
@@ -3994,7 +4154,11 @@ function TaskModal({
     className: "font-bold mb-1"
   }, "\u5DE5\u4F5C\u8AAA\u660E\uFF1A"), /*#__PURE__*/React.createElement("div", {
     className: "bg-white p-3 rounded border border-slate-300 text-slate-700 whitespace-pre-wrap"
-  }, weekLog.note || '（未填寫備註）'), isManager && /*#__PURE__*/React.createElement("div", {
+  }, weekLog.note || '（未填寫備註）'), weekLog.docUrl && /*#__PURE__*/React.createElement("div", {
+    className: "mt-2"
+  }, /*#__PURE__*/React.createElement(DocLink, {
+    url: weekLog.docUrl
+  })), isManager && /*#__PURE__*/React.createElement("div", {
     className: "mt-3 pt-3 border-t border-slate-300"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-bold text-slate-500 mb-2"
@@ -4989,7 +5153,7 @@ function WeeklyReportDashboard({
       task,
       log
     }) => {
-      lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}`);
+      lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}${log.docUrl ? `\n      📎 ${log.docUrl}` : ''}`);
     });
     if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
     if (s.weekPlan) lines.push(`  (下週預計) ${s.weekPlan.replace(/\n/g, ' / ')}`);
@@ -5009,7 +5173,7 @@ function WeeklyReportDashboard({
         task,
         log
       }) => {
-        lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}`);
+        lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}${log.docUrl ? `\n      📎 ${log.docUrl}` : ''}`);
       });
       if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
       if (s.weekPlan) lines.push(`  (下週預計) ${s.weekPlan.replace(/\n/g, ' / ')}`);
@@ -5019,22 +5183,9 @@ function WeeklyReportDashboard({
     return lines.join('\n');
   };
 
-  // 通用複製函式
+  // 通用複製函式(實作在頂層的 copyToClipboard,與文件連結的「複製路徑」鈕共用同一份退路處理)
   const doCopy = async (text, onDone) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      onDone();
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand('copy');
-        onDone();
-      } catch {}
-      document.body.removeChild(ta);
-    }
+    if (await copyToClipboard(text)) onDone();
   };
   const copyReport = () => doCopy(buildReportText(), () => {
     setCopied(true);
@@ -5118,7 +5269,10 @@ function WeeklyReportDashboard({
   }, Number(log.score ?? 1), "\u5206"), log.reporterRole === 'manager' && /*#__PURE__*/React.createElement("span", {
     className: "px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300",
     title: "\u6B64\u7B46\u7531\u4E3B\u7BA1\u4EE3\u70BA\u4FEE\u6B63/\u88DC\u767B"
-  }, "\u270F\uFE0F\u4E3B\u7BA1")), /*#__PURE__*/React.createElement("div", {
+  }, "\u270F\uFE0F\u4E3B\u7BA1"), log.docUrl && /*#__PURE__*/React.createElement(DocLink, {
+    url: log.docUrl,
+    stopPropagation: true
+  })), /*#__PURE__*/React.createElement("div", {
     className: "text-slate-600 my-1 font-medium text-xs"
   }, task.name), log.note && /*#__PURE__*/React.createElement("div", {
     className: "text-slate-700 text-xs bg-white p-1.5 rounded border border-slate-200 whitespace-pre-wrap"
@@ -5161,8 +5315,12 @@ function WeeklyReportDashboard({
     // 從視窗最頂端貼到最底端的右側欄位(fixed):連 header 那一列(管理／登出／深色切換)一起蓋住,
     // 視覺上是一整條完整的欄位;要用那些按鈕時先關掉看板即可。
     // 左側主內容區另以 marginRight 內縮同樣寬度,所以工具列與甘特不會被蓋到。
+    // ⚠ z-[90]:看板是「唯讀側邊面板」,必須壓在所有彈窗/面板(z-[100] 起跳)之下。
+    //   原本是 z-[120],夾在彈窗層中間 → 看板開著時點甘特條開啟的打卡彈窗(z-[100])會被看板蓋住右半邊,
+    //   連右上角的 ✕ 都按不到,使用者得先關看板才關得掉彈窗。90 仍高於 header(z-50)與甘特凍結欄(z-50),
+    //   「整條蓋住 header」的原始設計不受影響。
     React.createElement("div", {
-      className: "fixed top-0 right-0 bottom-0 z-[120] bg-slate-100 shadow-[-4px_0_12px_rgba(0,0,0,0.18)] flex flex-col border-l border-slate-300",
+      className: "fixed top-0 right-0 bottom-0 z-[90] bg-slate-100 shadow-[-4px_0_12px_rgba(0,0,0,0.18)] flex flex-col border-l border-slate-300",
       style: {
         width: panelWidth,
         maxWidth: '100%'

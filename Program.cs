@@ -55,6 +55,21 @@ IResult? ValidateWeekRange(int start, int end)
     return null;
 }
 
+// 打卡回報的「文件連結」驗證(選填)。長度與 WeeklyLogs.DocUrl NVARCHAR(500) 一致。
+// 🚨 `javascript:`／`data:`／`vbscript:` 一律擋掉:這個值會被前端放進 <a href>,
+//    存進去等於一個「主管一定會點」的儲存型 XSS。前端也擋一次,但前端擋不住直接打 API,
+//    所以真正的防線在這裡。允許的形式=http/https 網址、UNC 路徑(\\server\share)、本機路徑。
+const int DocUrlMax = 500;
+IResult? ValidateDocUrl(string? url)
+{
+    var s = (url ?? "").Trim();
+    if (s.Length == 0) return null;
+    if (s.Length > DocUrlMax) return Bad($"文件連結請勿超過 {DocUrlMax} 個字元（目前 {s.Length} 個）。");
+    if (System.Text.RegularExpressions.Regex.IsMatch(s, @"^\s*(javascript|data|vbscript)\s*:", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        return Bad("文件連結格式不正確，請貼上網址（http/https）或檔案路徑。");
+    return null;
+}
+
 // 0) 取得桌機目前 Windows 登入者的工號(參考 EQDashboard AuthController.WhoAmI)。
 //    未帶 Windows 認證票證的請求會收到 401 + WWW-Authenticate: Negotiate,網域內瀏覽器會自動補上;
 //    非網域環境前端 catch 掉即可(empId 視為 null,寫入動作照常、AuditLog 的工號欄留空)。
@@ -159,10 +174,10 @@ app.MapGet("/api/bootstrap", async (int? year) =>
         }
         var projects = projOrder.Select(id => projMap[id]).ToList();
 
-        // taskLogs[taskCode][week] = { status, note, isExecuting, score, reporter, reporterRole, updatedAt }
+        // taskLogs[taskCode][week] = { status, note, docUrl, isExecuting, score, reporter, reporterRole, updatedAt }
         var taskLogs = new Dictionary<string, Dictionary<int, object>>();
         using (var cmd = new SqlCommand(@"
-            SELECT t.TaskCode, w.WeekNo, w.Status, w.Note, w.Score, u.UserName, u.Role, w.UpdatedAt
+            SELECT t.TaskCode, w.WeekNo, w.Status, w.Note, w.Score, u.UserName, u.Role, w.UpdatedAt, w.DocUrl
             FROM dbo.WeeklyLogs w
             JOIN dbo.Tasks t ON t.TaskId = w.TaskId
             LEFT JOIN dbo.Users u ON u.UserId = w.ReportedByUserId
@@ -180,8 +195,9 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                 string? reporter = r.IsDBNull(5) ? null : r.GetString(5);
                 string? reporterRole = r.IsDBNull(6) ? null : r.GetString(6);
                 string updatedAt = r.GetDateTime(7).ToString("yyyy-MM-dd HH:mm");
+                string? docUrl = r.IsDBNull(8) ? null : r.GetString(8);
                 if (!taskLogs.TryGetValue(code, out var m)) { m = new(); taskLogs[code] = m; }
-                m[wk] = new { status, note, isExecuting = status != "not_executed", score, reporter, reporterRole, updatedAt };
+                m[wk] = new { status, note, docUrl, isExecuting = status != "not_executed", score, reporter, reporterRole, updatedAt };
             }
         }
 
@@ -293,6 +309,8 @@ app.MapPost("/api/weekly-log", async (WeeklyLogReq req) =>
     // 狀態只有這三種(對應甘特條的綠/藍/灰);其他值寫進去會讓前端查不到對應的顏色與標籤
     if (req.Status is not ("executed" or "monitor" or "not_executed"))
         return Bad("回報狀態不正確（僅接受 有執行／Monitor／未執行）。");
+    var docErr = ValidateDocUrl(req.DocUrl);
+    if (docErr is not null) return docErr;
     try
     {
         using var conn = new SqlConnection(ConnStr());
@@ -306,6 +324,8 @@ app.MapPost("/api/weekly-log", async (WeeklyLogReq req) =>
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        // 空字串照樣送:SP 內 NULLIF 會轉成 NULL,使用者才能把已填的連結清空
+        cmd.Parameters.AddWithValue("@DocUrl", (object?)req.DocUrl?.Trim() ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -712,12 +732,23 @@ app.MapGet("/api/audit-log", async (int? top, string? from, string? to, string? 
                             return $"評分 {where} {y} 年第 {w} 週回報：{oldV} 分 → {newV} 分{(label != "" ? $"（{label}）" : "")}";
                         }
                         var s = $"回報 {where} {y} 年第 {w} 週進度：{statusLabel.GetValueOrDefault(newV ?? "", newV ?? "")}";
-                        // Detail 格式:note舊=... | note新=...,取出新說明附在後面
+                        // Detail 格式(遷移 16 起):doc舊=… | doc新=… | note舊=… | note新=…
+                        //   遷移 16 之前只有 note 兩段,兩種格式都要能解析(歷史紀錄不會回頭改寫)。
+                        // ⚠ note 一定放在最後、且用 LastIndexOf 取「到結尾」:工作說明本身可能含 | 或換行。
+                        //   doc 段落因此**必須排在 note 之前**,否則會被當成工作說明的一部分。
                         var idx = (detail ?? "").LastIndexOf("note新=", StringComparison.Ordinal);
                         if (idx >= 0)
                         {
                             var note = detail![(idx + 6)..].Trim();
                             if (note != "") s += $"，工作說明：{note}";
+                        }
+                        var dIdx = (detail ?? "").IndexOf("doc新=", StringComparison.Ordinal);
+                        if (dIdx >= 0)
+                        {
+                            var rest = detail![(dIdx + 5)..];
+                            var end = rest.IndexOf(" | note舊=", StringComparison.Ordinal);
+                            var doc = (end >= 0 ? rest[..end] : rest).Trim();
+                            if (doc != "") s += $"，文件連結：{doc}";
                         }
                         return s;
                     }
@@ -936,7 +967,7 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
     try
     {
         // --- 撈本週排定任務(含未回報)、非專案事項、下週預計工作 ---
-        var rows = new List<(string Owner, string Category, string Type, string Project, string Task, int Start, int End, string? Status, string? Note)>();
+        var rows = new List<(string Owner, string Category, string Type, string Project, string Task, int Start, int End, string? Status, string? Note, string? DocUrl)>();
         var userOrder = new List<string>();
         var extraD = new Dictionary<string, string>();
         var planD = new Dictionary<string, string>();
@@ -944,7 +975,7 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
         {
             await conn.OpenAsync();
             using (var cmd = new SqlCommand(@"
-                SELECT u.UserName, p.Category, p.TypeCode, p.Name, t.TaskName, t.StartWeek, t.EndWeek, w.Status, w.Note
+                SELECT u.UserName, p.Category, p.TypeCode, p.Name, t.TaskName, t.StartWeek, t.EndWeek, w.Status, w.Note, w.DocUrl
                 FROM dbo.Tasks t
                 JOIN dbo.Projects p ON p.ProjectId = t.ProjectId AND p.IsDeleted = 0 AND p.ScheduleYear = @y
                 JOIN dbo.Users u    ON u.UserId = p.OwnerUserId
@@ -959,7 +990,8 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
                     rows.Add((r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4),
                               r.GetInt32(5), r.GetInt32(6),
                               r.IsDBNull(7) ? null : r.GetString(7),
-                              r.IsDBNull(8) ? null : r.GetString(8)));
+                              r.IsDBNull(8) ? null : r.GetString(8),
+                              r.IsDBNull(9) ? null : r.GetString(9)));
             }
             using (var cmd = new SqlCommand(
                 "SELECT UserName FROM dbo.Users WHERE IsActive = 1 AND Role = 'member' ORDER BY SortOrder", conn))
@@ -998,7 +1030,7 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
 
         // --- Sheet 1:專案執行 ---
         var ws = wb.Worksheets.Add($"W{w:00} 專案執行");
-        string[] headers = { "成員", "分類", "類型", "專案名稱", "計畫任務", "排程", "本週狀態", "工作說明" };
+        string[] headers = { "成員", "分類", "類型", "專案名稱", "計畫任務", "排程", "本週狀態", "工作說明", "文件連結" };
         for (int i = 0; i < headers.Length; i++) ws.Cell(1, i + 1).Value = headers[i];
         var head = ws.Range(1, 1, 1, headers.Length);
         head.Style.Font.Bold = true;
@@ -1017,6 +1049,15 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
             ws.Cell(row, 6).Value = $"W{t.Start}–W{t.End}";
             ws.Cell(row, 7).Value = t.Status is null ? "未回報" : (statusLabel.GetValueOrDefault(t.Status, t.Status));
             ws.Cell(row, 8).Value = t.Note ?? "";
+            // 文件連結:Excel 對 UNC 路徑(\\server\share\…)的超連結是可以直接開的——
+            // 瀏覽器反而不行(見前端 DocLink 的說明),所以匯出檔在內網其實是最順的開啟路徑。
+            // 個別網址格式無法建立超連結時只留純文字,不要讓整份匯出失敗。
+            if (!string.IsNullOrWhiteSpace(t.DocUrl))
+            {
+                var linkCell = ws.Cell(row, 9);
+                linkCell.Value = t.DocUrl;
+                try { linkCell.SetHyperlink(new ClosedXML.Excel.XLHyperlink(t.DocUrl!)); } catch { }
+            }
             var st = ws.Cell(row, 7).Style;
             st.Font.Bold = true;
             st.Fill.BackgroundColor = t.Status switch
@@ -1032,7 +1073,7 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
         used.Style.Border.InsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
         used.Style.Border.OutsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
         ws.SheetView.FreezeRows(1);
-        ws.Column(4).Width = 45; ws.Column(5).Width = 30; ws.Column(8).Width = 50;
+        ws.Column(4).Width = 45; ws.Column(5).Width = 30; ws.Column(8).Width = 50; ws.Column(9).Width = 40;
         ws.Columns(1, 3).AdjustToContents(); ws.Column(6).AdjustToContents(); ws.Column(7).AdjustToContents();
         ws.Column(8).Style.Alignment.WrapText = true;
 
@@ -1550,7 +1591,7 @@ class TaskItemDto
 }
 
 // ActorEmpId = 前端 /api/whoami 偵測到的 Windows 工號(如 00058897);非網域環境為 null,由 apiPost 自動附帶
-record WeeklyLogReq(string TaskCode, int Year, int Week, string Status, string? Note, string Actor, string? ActorRole, string? ActorEmpId);
+record WeeklyLogReq(string TaskCode, int Year, int Week, string Status, string? Note, string Actor, string? ActorRole, string? ActorEmpId, string? DocUrl = null);
 record ExtraNoteReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole, string? ActorEmpId);
 record TaskScheduleReq(string TaskCode, string Name, int Start, int End, string Actor, string? ActorRole, string? ActorEmpId, string? Nid);
 record ProjectCreateReq(string Type, string Category, string Owner, string Name, int Year, string Actor, string? ActorRole, string? ActorEmpId, string? Nid);

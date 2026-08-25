@@ -108,6 +108,9 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
 
 **回報**
 - `POST /api/weekly-log`／`/api/extra-note`／`/api/weekly-plan`（下週預計＝**強制項**，計入待回報徽章）
+  - `weekly-log` 另收選填 `docUrl`（文件連結，`WeeklyLogs.DocUrl NVARCHAR(500)`；空字串＝清空，SP 內 NULLIF 轉 NULL）。
+    🚨 **`javascript:`／`data:`／`vbscript:` 一律 400 擋掉**（`ValidateDocUrl`）：這個值前端會放進 `<a href>`，
+    而且是「主管一定會點」的連結，不擋等於一個儲存型 XSS。前端也擋一次，但擋不住直接打 API，真正的防線在後端。
 - `POST /api/weekly-log/score` — 主管評分（0.3/0.5/0.8/0.9/1，SP 檢查權限）
 - `POST /api/weekly-comment` — 主管週報回覆（每人每週一筆，空字串=清空；看板紫色區塊全員可見）
 
@@ -125,6 +128,9 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   `{logs, actors, matched, truncated}`——`actors` 取自 AuditLog 而非 Users（才含已移除／已改名者），
   `matched` 是**不受 TOP 限制**的符合筆數，供前端提示「符合 N 筆、僅顯示最近 300 筆」。
   ⚠ `Summarize()` 每個 `entityType` 都要有 case，**漏掉就會掉到 fallback＝裸的 NewValue**。
+  ⚠ `WeeklyLog` 的 Detail 是 `doc舊=… | doc新=… | note舊=… | note新=…`（遷移 16 起；之前只有 note 兩段，
+  兩種格式都要能解析）。**note 一定排在最後**——工作說明本身可能含 `|` 或換行，所以是用
+  `LastIndexOf("note新=")` 之後「整段到結尾」當說明；**新欄位一律往前面加，加在 note 後面會被吃進工作說明裡**。
   `AppSettings` 原本就漏了，面板上只顯示孤零零的「false」／「true」——同一份清單裡專案類都是完整句子，
   唯獨影響全體權限的設定看不懂改了什麼（已補：「開啟/關閉歷史補登…」「開啟/關閉頁面瀏覽權限卡控…」，
   未知 key 也至少回「變更系統設定「X」：…」不再掉回裸值）。
@@ -208,9 +214,16 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
 - **版面寬度一律用 `viewportW` 推導，勿再寫死 490／420**（app.jsx 頂部 `nameColWidth`／`reportPanelWidth`／
   `STICKY_LEAD_W`；`frozenW = STICKY_LEAD_W + nameW`）。投影機／筆電（1366）下寫死的「凍結欄 490＋看板 672」
   會吃掉 85% 畫面寬，中間甘特只剩 6 欄。1920 時公式算出來仍是原本的 420/672，桌機畫面不變。
-- **團隊總結看板＝右側整條欄位**：看板本身 `fixed top-0 right-0 bottom-0 z-[120]`（從視窗最頂端蓋到最底端，
+- **團隊總結看板＝右側整條欄位**：看板本身 `fixed top-0 right-0 bottom-0 z-[90]`（從視窗最頂端蓋到最底端，
   連 header 的管理／登出一起蓋住——要用那些按鈕先關看板即可，這是刻意的視覺取捨），
   **主內容區同步 `marginRight: reportPanelW` 內縮**，所以工具列與甘特完全不會被蓋到。
+  ⚠ **看板的 z 必須低於整個彈窗層**（2026-08-25 修）：它原本是 `z-[120]`，**夾在彈窗層中間**——
+  看板開著時點甘特條開啟的打卡彈窗（`z-[100]`）右半邊被看板蓋住，**連右上角的 ✕ 都按不到**
+  （實測 1280 寬：✕ 在 x=848、看板從 x=832 起，`elementFromPoint` 命中的是看板），
+  使用者得先關看板才關得掉彈窗。看板是**唯讀側邊面板不是視窗**，一律排在最底層：
+  `90`＝看板 → `100~150`＝彈窗／面板 → `200`＝甘特 tooltip → `300`＝toast。
+  90 仍高於 header（`z-50`）與甘特凍結欄（`z-50`），「整條蓋住 header」的原始設計不受影響。
+  ⚠ 新增彈窗**不要挑 `z-[90]` 以下**，也不要為了蓋過看板而往 150 以上加碼——照上面的層級表選號即可。
   ⚠ 關鍵是「fixed 疊層」與「內容內縮」**必須成對**，只做其中一邊就是下面列的那些坑：
   ①純 `fixed` 疊上去 → 甘特容器維持整個視窗寬，`scrollLeft` 上限只夠把最後一週推到**視窗**右緣
   （正好被面板蓋住），年底區間永遠捲不出來，「置中」也中到面板底下。
@@ -428,6 +441,34 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   每列都有「沿用」鈕，把該週的**狀態＋內容一起**帶入本週草稿（`markModalDirty()`，ESC 會跳未儲存確認）。
   ⚠ 沿用鈕只在 `canClockIn` 時顯示——唯讀情境下 textarea 根本不存在，按了不會有任何作用。
   ⚠ 逐列都放沿用鈕（**歷史區逐列保留**）：可以挑任一週，行為一致。
+- **打卡回報的「📎 文件連結」（選填，2026-08-25）**：回報時貼上文件網址／路徑，主管在**團隊總結看板**的卡片上
+  直接點開，不必另外開頁面或翻檔案總管。顯示位置＝看板卡片（併在「狀態／分數／✏️主管」那排徽章裡，
+  不自己佔一整列）、打卡彈窗（可編輯與唯讀兩種版面）、
+  歷史回報逐列、甘特 tooltip（只標「📎 已附文件連結」，tooltip 是 `pointer-events-none` 點不到）、
+  週報 Excel（多一欄，UNC 產生真正可點的超連結）、複製週報文字。「沿用」會連同連結一起帶入（同一份文件常延續數週）。
+  一律用共用元件 **`<DocLink url={} stopPropagation={} />`**，**不分來源一律 `<a target="_blank">`，
+  點一下就開新分頁**（使用者指示；曾短暫做成「http 開新分頁／路徑類改複製路徑鈕」，
+  同一顆圖示點下去兩種結果，使用者預期不到）。
+  ⚠ **顯示成 24×24 的純圖示，不放文字**（使用者回饋：初版「📎 開啟文件」整串字在卡片裡太吵）。
+  ⚠ **圖示用 SVG 不用 emoji**（與工具列同一條規則）：10px 的 📎 只是一團彩色色塊，認不出是什麼；
+    SVG 是單色、吃 `currentColor`（深淺模式自動跟著走）、縮到 14px 仍看得出是「文件」。
+  ⚠ **沒有文字 → `aria-label` 是唯一的可及名稱**，不寫的話讀螢幕器只念得出「連結」＝這個功能不存在。
+    `title` 另外帶**原始**路徑（不是轉換後的 href），滑鼠 hover 就知道會去哪、也方便自行複製。
+  ⚠ ① **非 http 的路徑一定要先轉成合法的 `file:` URL**（`toDocHref`）：`\\server\share\a.xlsx` 原樣放進
+    `href` 會被當成**相對路徑** → 點下去跳到本站的 `/\\server\...`（404），那是保證失敗。
+    轉成 `file://server/share/a.xlsx`（UNC）／`file:///C:/…`（本機）之後才有機會開起來。
+    ⚠ **磁碟機代號的判斷要排在 scheme 判斷之前**：`C:\Docs\a.docx` 的開頭 `C:` 會被 `^[a-z][\w+.-]*:` 當成
+      合法 scheme 而原樣放行（實測 href 真的留成 `C:\Docs\a.docx`）。真實 scheme 沒有單字母的，故 scheme
+      規則要求 ≥2 字元。Chrome 的 URL parser 有 Windows 磁碟機特例會幫忙補救，但那是實作細節不能靠它。
+    ⚠ **已知限制**：Chrome/Edge 預設封鎖從 http 頁面開 `file://`（點了沒反應也不報錯），要靠網域政策
+      （`URLAllowlist`／`LocalLinksAllowedInBrowser`）放行。填寫欄位下方對路徑類連結會提示這件事，
+      建議優先貼 http/https。內網若未放行，替代路徑＝匯出的週報 Excel（那裡是真正可點的超連結，
+      Excel 沒有這個限制）或 hover `title` 自行複製。
+  ⚠ ② **沒有 scheme 的網址要補 `https://`**（`normalizeDocUrl`，在 blur 與送出時各做一次）：使用者常直接貼
+    `portal.company.com/doc/1`，原樣進 `href` 同樣會被當成相對路徑。
+  ⚠ ③ **`javascript:`／`data:`／`vbscript:` 前後端都要擋**（見「回報」端點那條）。`DocLink` 收到這類值直接不渲染。
+  ⚠ 看板卡片整張是 `clickable`（點了會去高亮甘特），卡片裡的 `DocLink` 一定要帶 `stopPropagation`，
+    否則點連結會順便觸發高亮（`guard` 只做 `stopPropagation`，**不可以 `preventDefault`**，那會擋掉開新分頁）。
 - **另有一顆「↩ 沿用上次回報（W..・狀態）」主按鈕**（2026-08-10，在狀態選擇區上方）：最高頻的動作就是
   「照抄上一次」，走歷史區要「往上捲 → 找到最上面那列 → 點沿用」三步，這裡一步到位（`history[0]` 已是最新一週）。
   ⚠ **只在 `!status`（還沒選狀態）時顯示**：已經在編輯了才跳出來，按下去會把使用者剛打的內容覆寫掉。

@@ -246,6 +246,94 @@ const CloseButton = ({ onClick, className = 'text-white/70 hover:text-white p-1'
   </button>
 );
 
+// ── 打卡回報的「文件連結」(選填) ────────────────────────────────────────────
+// 主管讀週報時最常做的下一個動作就是「去把那份文件打開」,原本得自己去信件/檔案總管翻;
+// 回報時順手貼上連結,看板與彈窗就能直接點開。
+const DOC_URL_MAX = 500;   // 與 WeeklyLogs.DocUrl NVARCHAR(500) 一致
+// 🚨 這個值會被放進 <a href>,而且是「主管一定會點」的連結——不擋等於一個儲存型 XSS。
+//    後端 /api/weekly-log 也擋一次(這裡擋不住直接打 API 的情況)。
+const isUnsafeUrl = (u) => /^\s*(javascript|data|vbscript)\s*:/i.test(u || '');
+const isHttpUrl = (u) => /^https?:\/\//i.test((u || '').trim());
+// 使用者常直接貼「portal.company.com/doc/1」這種沒有 scheme 的網址。原樣放進 href 會被當成
+// **相對路徑** → 點下去跳到本站的 /portal.company.com/doc/1(404),而且看起來像系統壞了。
+// 看起來像網域就補上 https://;UNC(\\server\share)與磁碟路徑(C:\…)原樣保留。
+const normalizeDocUrl = (raw) => {
+  const s = (raw || '').trim();
+  if (!s) return '';
+  if (/^[a-z][\w+.-]*:/i.test(s) || s.startsWith('\\\\') || s.startsWith('/')) return s;
+  return /^[\w-]+(\.[\w-]+)+([/?#]|$)/.test(s) ? `https://${s}` : s;
+};
+
+// 複製到剪貼簿。navigator.clipboard 只在 secure context(https / localhost)提供,
+// 內網是純 http → 直接用會 throw,所以一定要保留 execCommand 的退路。回傳是否成功。
+const copyToClipboard = async (text) => {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch {}
+    document.body.removeChild(ta);
+    return ok;
+  }
+};
+
+// 打卡內容裡的文件連結圖示(看板卡片、打卡彈窗、歷史回報列共用)。
+// **一律 <a target="_blank">:點一下就開新分頁**,不分來源(2026-08-25 依使用者指示改;
+// 原本 UNC/本機路徑走「複製路徑」鈕,兩種來源兩種行為,同一顆圖示點下去結果不一樣)。
+//
+// ⚠ 非 http 的路徑**一定要先轉成合法的 file: URL**(toDocHref):`\\server\share\a.xlsx` 原樣放進 href
+//   會被當成**相對路徑** → 點下去跳到本站的 /\\server\share\a.xlsx(404),那是保證失敗。
+//   轉成 `file://server/share/a.xlsx` 之後,只要瀏覽器/IT 政策允許就會真的開起來。
+// ⚠ 已知限制:Chrome/Edge **預設封鎖**從 http 頁面開啟 file://(點了沒反應也不報錯),
+//   要靠網域政策(URLAllowlist / LocalLinksAllowedInBrowser)放行。若內網未放行,
+//   使用者可改從匯出的週報 Excel 開——那裡是真正可點的超連結(Excel 沒有這個限制),
+//   或 hover 看 title 取得完整路徑自行貼到檔案總管。
+// ⚠ stopPropagation:看板卡片整張是 clickable(點了會去高亮甘特),不擋的話點連結會順便觸發高亮。
+//
+// 🚨 純圖示,**不可以用 emoji**:初版是「📎 開啟文件」整串文字,在看板卡片裡太吵;
+//    但縮成 emoji 也不行——10px 的 📎 只是一團彩色色塊,認不出是什麼(與工具列不用 emoji 同一條理由)。
+//    改用 SVG:單色、吃 currentColor(深淺模式自動跟著走)、縮到 14px 仍然看得出是「文件」。
+// ⚠ 沒有文字 → **aria-label 是唯一的可及名稱**,讀螢幕器只念得出「連結」的話這個功能等於不存在。
+//    title 另外帶完整網址,滑鼠使用者 hover 就知道會去哪,不必先點下去試。
+const toDocHref = (raw) => {
+  const s = (raw || '').trim();
+  if (!s) return '';
+  const enc = (p) => p.replace(/\\/g, '/').replace(/ /g, '%20');               // 反斜線轉正斜線、空白轉義
+  // ⚠ 磁碟機代號要**排在 scheme 判斷之前**:`C:\Docs\a.docx` 的開頭 `C:` 會被當成合法 scheme,
+  //   放後面就永遠輪不到這一條(實測 href 直接留成 `C:\Docs\a.docx`)。
+  //   Chrome 的 URL parser 有「Windows 磁碟機」特例會幫忙補救,但那是瀏覽器實作細節,不能靠它。
+  if (/^[a-zA-Z]:[\\/]/.test(s)) return `file:///${enc(s)}`;                   // 本機 C:\… → file:///C:/…
+  if (s.startsWith('\\\\')) return `file://${enc(s.slice(2))}`;                // UNC \\server\share\… → file://server/share/…
+  // scheme 至少兩個字元(單字元的都是磁碟機代號,真實 scheme 沒有一個是單字母)
+  if (/^[a-z][\w+.-]+:/i.test(s)) return s;                                    // 已有 scheme(http/https/file/onenote…)
+  return s;
+};
+const DocIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5" aria-hidden="true">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <path d="M14 2v6h6" />
+  </svg>
+);
+const DocLink = ({ url, className = '', stopPropagation = false }) => {
+  if (!url || isUnsafeUrl(url)) return null;   // 不安全的舊資料一律不渲染成連結
+  const href = toDocHref(url);
+  if (!href) return null;
+  // 點擊區 24×24(WCAG 2.5.8):圖示 14 + p-1 的 8 + 外框 2
+  const cls = `inline-flex items-center justify-center p-1 rounded border transition ` +
+    `border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100 ${className}`;
+  const guard = (e) => { if (stopPropagation) e.stopPropagation(); };
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" onClick={guard} onKeyDown={guard}
+      className={cls} aria-label={`開啟文件（另開新分頁）：${url}`} title={`開啟文件：${url}`}>
+      <DocIcon />
+    </a>
+  );
+};
+
 // 讓非 <button> 的互動元素(表格的 th/tr、絕對定位的甘特條、看板卡片)也能用鍵盤操作。
 // 用法:<div {...clickable(() => open(), '開啟 XXX')}>。
 // 為什麼不直接改寫成 <button>:th/tr 換掉會破壞 table 結構(sticky 表頭、欄寬、斑馬紋全靠它),
@@ -1102,11 +1190,11 @@ function App() {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   };
 
-  const handleSaveLog = async (taskId, status, note) => {
+  const handleSaveLog = async (taskId, status, note, docUrl = '') => {
     try {
       await apiPost('/api/weekly-log', {
         taskCode: taskId, year: scheduleYear, week: currentWeek,
-        status, note, actor: currentUser, actorRole: role
+        status, note, docUrl, actor: currentUser, actorRole: role
       });
       setTaskLogs(prev => ({
         ...prev,
@@ -1114,7 +1202,9 @@ function App() {
           ...prev[taskId],
           [currentWeek]: {
             ...(prev[taskId]?.[currentWeek] || {}),
-            isExecuting: status !== 'not_executed', status, note,
+            // docUrl 一律覆寫(含空字串):清空欄位再送出就是「把連結拿掉」,
+            // 用 `|| 舊值` 之類的寫法會讓畫面上連結消不掉,與 DB 不一致
+            isExecuting: status !== 'not_executed', status, note, docUrl: docUrl || null,
             reporter: currentUser, reporterRole: role, updatedAt: nowStamp()
           }
         }
@@ -2482,6 +2572,9 @@ function App() {
                   {tooltip.weekLog.reporterRole === 'manager' && <span className="ml-1 text-yellow-300 text-[11px]">✏️(主管補登)</span>}
                 </div>
                 {tooltip.weekLog.note && <div className="text-slate-400 whitespace-pre-wrap">{tooltip.weekLog.note}</div>}
+                {/* tooltip 是 pointer-events-none,連結在這裡點不到,所以只標示「有附文件」,
+                    真正的開啟入口在打卡彈窗與團隊總結看板 */}
+                {tooltip.weekLog.docUrl && <div className="text-sky-300 mt-0.5">📎 已附文件連結</div>}
               </div>
             )}
             {tooltip.history.length > 0 && (
@@ -2837,6 +2930,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
 
   const [status, setStatus] = useState(weekLog?.status || null);
   const [note, setNote] = useState(weekLog?.note || '');
+  const [docUrl, setDocUrl] = useState(weekLog?.docUrl || '');   // 本週回報對應的文件連結(選填)
   const [taskName, setTaskName] = useState(task.name);
   const [startWeek, setStartWeek] = useState(task.start);
   const [endWeek, setEndWeek] = useState(task.end);
@@ -2845,6 +2939,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
   useModalDirtyReset();
   const [scheduleError, setScheduleError] = useState('');
   const [noteError, setNoteError] = useState('');
+  const [docError, setDocError] = useState('');
   // 前幾週回報:**預設收合**。它是「參考資料」不是「要填的東西」,展開時會佔掉彈窗一大塊,
   // 把真正要操作的「本週實際執行回報」推到畫面外。需要對照時才展開。
   // ⚠ 收合不影響最高頻的動作:「↩ 沿用上次回報」是獨立主按鈕(在狀態選擇區上方),不在這一區裡。
@@ -2866,10 +2961,13 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
   // 沿用某一週的回報當本週草稿:狀態與內容一起帶入,使用者可再修改後送出。
   // 例行性/持續性的工作每週內容差異不大,重打一次是純粹的重工;帶入後文字就攤在 textarea 裡,
   // 使用者看得到自己送出的是什麼,不會有「以為填了新內容」的錯覺。
+  // 文件連結一起帶:同一份文件通常會延續好幾週(進度報告、追蹤表),重貼一次也是重工。
   const reuseLog = (h) => {
     setStatus(h.log.status);
     setNote(h.log.note || '');
+    setDocUrl(h.log.docUrl || '');
     setNoteError('');
+    setDocError('');
     markModalDirty();
   };
 
@@ -2877,8 +2975,13 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
     if (saving) return;
     if (!status) { setNoteError('請先選擇本週狀態'); return; }
     if (status === 'executed' && !note.trim()) { setNoteError('請填寫實際工作內容，才能讓團隊了解進度'); return; }
+    // 沒有 scheme 的網址補 https://(否則進 href 會被當相對路徑,點下去是本站 404)
+    const doc = normalizeDocUrl(docUrl);
+    if (isUnsafeUrl(doc)) { setDocError('文件連結格式不正確，請貼上網址（http/https）或檔案路徑'); return; }
+    if (doc.length > DOC_URL_MAX) { setDocError(`文件連結請勿超過 ${DOC_URL_MAX} 個字元（目前 ${doc.length} 個）`); return; }
+    if (doc !== docUrl) setDocUrl(doc);   // 補過 scheme 的話同步回欄位,使用者看得到送出的是什麼
     setSaving(true);
-    try { await onSaveLog(task.id, status, note.trim()); } finally { setSaving(false); }
+    try { await onSaveLog(task.id, status, note.trim(), doc); } finally { setSaving(false); }
   };
 
   const submitSchedule = async () => {
@@ -2994,6 +3097,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                     <div className="mt-1 text-xs text-slate-700 whitespace-pre-wrap break-words leading-relaxed">
                       {h.log.note || <span className="text-slate-500 italic">（未填寫說明）</span>}
                     </div>
+                    {h.log.docUrl && <div className="mt-1.5"><DocLink url={h.log.docUrl} /></div>}
                     {h.log.updatedAt && (
                       <div className="text-[10px] text-slate-500 mt-1">🕘 最後編輯 {h.log.updatedAt}{h.log.reporter ? `（${h.log.reporter}）` : ''}</div>
                     )}
@@ -3063,6 +3167,28 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                       className={`w-full border rounded-lg p-3 text-sm h-24 outline-none resize-none focus:border-blue-500 ${noteError ? 'border-red-400' : 'border-slate-300'}`}></textarea>
                   )}
                   {noteError && <div className="text-xs text-red-600 font-bold">{noteError}</div>}
+                  {/* 文件連結(選填):選了狀態才出現,與工作說明同一組。
+                      單行 input 掛 onEnterSubmit(submitLog)——送出目標是打卡不是排程(排程在上面那張卡)。 */}
+                  {status && (
+                    <div>
+                      <label htmlFor="log-doc-url" className="text-[11px] font-bold text-slate-600">📎 文件連結（選填）</label>
+                      <input id="log-doc-url" type="text" value={docUrl} maxLength={DOC_URL_MAX}
+                        onChange={e => { setDocUrl(e.target.value); setDocError(''); markModalDirty(); }}
+                        onBlur={e => { const n = normalizeDocUrl(e.target.value); if (n !== e.target.value) setDocUrl(n); }}
+                        onKeyDown={onEnterSubmit(submitLog)}
+                        placeholder="https://… 或 \\伺服器\共用資料夾\檔案.xlsx"
+                        className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 mt-1 ${docError ? 'border-red-400' : 'border-slate-300'}`} />
+                      {docError
+                        ? <div className="text-xs text-red-600 font-bold mt-1">{docError}</div>
+                        : <div className="text-[10px] text-slate-500 mt-1">
+                            填了之後，主管在團隊總結看板點一下圖示就會另開分頁開啟，不必另外找檔案。
+                            {/* 路徑類連結先提醒:瀏覽器預設會擋 file://,填的人當下就該知道,
+                                而不是等主管點了沒反應才回頭問 */}
+                            {docUrl.trim() && !isHttpUrl(normalizeDocUrl(docUrl)) &&
+                              <span className="text-slate-600">（網路磁碟／本機路徑要瀏覽器政策允許才開得起來，建議優先貼 http/https 網址）</span>}
+                          </div>}
+                    </div>
+                  )}
                 </div>
                 <div className="flex justify-end space-x-3 pt-4">
                   <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 bg-white ctl-raised border border-slate-300 rounded-lg font-bold hover:bg-slate-50">取消</button>
@@ -3102,6 +3228,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                     </div>
                     <div className="font-bold mb-1">工作說明：</div>
                     <div className="bg-white p-3 rounded border border-slate-300 text-slate-700 whitespace-pre-wrap">{weekLog.note || '（未填寫備註）'}</div>
+                    {weekLog.docUrl && <div className="mt-2"><DocLink url={weekLog.docUrl} /></div>}
                     {isManager && (
                       <div className="mt-3 pt-3 border-t border-slate-300">
                         <div className="text-xs font-bold text-slate-500 mb-2">主管評分（點擊即修改此週分數）</div>
@@ -3866,7 +3993,7 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
     const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} 週報 — ${s.user}】`, ''];
     lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}・得分 ${s.weekScore}/${s.total}）`);
     s.activeTasks.forEach(({ proj, task, log }) => {
-      lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}`);
+      lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}${log.docUrl ? `\n      📎 ${log.docUrl}` : ''}`);
     });
     if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
     if (s.weekPlan) lines.push(`  (下週預計) ${s.weekPlan.replace(/\n/g, ' / ')}`);
@@ -3882,7 +4009,7 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
       if (s.activeTasks.length === 0 && !s.extraNote && !s.weekPlan) return;
       lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}・得分 ${s.weekScore}/${s.total}）`);
       s.activeTasks.forEach(({ proj, task, log }) => {
-        lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}`);
+        lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}${log.docUrl ? `\n      📎 ${log.docUrl}` : ''}`);
       });
       if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
       if (s.weekPlan) lines.push(`  (下週預計) ${s.weekPlan.replace(/\n/g, ' / ')}`);
@@ -3892,20 +4019,8 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
     return lines.join('\n');
   };
 
-  // 通用複製函式
-  const doCopy = async (text, onDone) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      onDone();
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); onDone(); } catch {}
-      document.body.removeChild(ta);
-    }
-  };
+  // 通用複製函式(實作在頂層的 copyToClipboard,與文件連結的「複製路徑」鈕共用同一份退路處理)
+  const doCopy = async (text, onDone) => { if (await copyToClipboard(text)) onDone(); };
 
   const copyReport = () => doCopy(buildReportText(), () => {
     setCopied(true); setTimeout(() => setCopied(false), 2000);
@@ -3969,6 +4084,10 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
               {log.reporterRole === 'manager' && (
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300" title="此筆由主管代為修正/補登">✏️主管</span>
               )}
+              {/* 文件連結:主管在這裡就能把文件打開,不用另外開頁面翻檔案。
+                  縮成純圖示後併進這排徽章(不再自己佔一整列)——這排本來就是「這筆回報的屬性」。
+                  stopPropagation——整張卡片是 clickable(點了會去高亮甘特),不擋會兩件事一起發生。 */}
+              {log.docUrl && <DocLink url={log.docUrl} stopPropagation />}
             </div>
             <div className="text-slate-600 my-1 font-medium text-xs">{task.name}</div>
             {log.note && <div className="text-slate-700 text-xs bg-white p-1.5 rounded border border-slate-200 whitespace-pre-wrap">{log.note}</div>}
@@ -4012,7 +4131,11 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
     // 從視窗最頂端貼到最底端的右側欄位(fixed):連 header 那一列(管理／登出／深色切換)一起蓋住,
     // 視覺上是一整條完整的欄位;要用那些按鈕時先關掉看板即可。
     // 左側主內容區另以 marginRight 內縮同樣寬度,所以工具列與甘特不會被蓋到。
-    <div className="fixed top-0 right-0 bottom-0 z-[120] bg-slate-100 shadow-[-4px_0_12px_rgba(0,0,0,0.18)] flex flex-col border-l border-slate-300"
+    // ⚠ z-[90]:看板是「唯讀側邊面板」,必須壓在所有彈窗/面板(z-[100] 起跳)之下。
+    //   原本是 z-[120],夾在彈窗層中間 → 看板開著時點甘特條開啟的打卡彈窗(z-[100])會被看板蓋住右半邊,
+    //   連右上角的 ✕ 都按不到,使用者得先關看板才關得掉彈窗。90 仍高於 header(z-50)與甘特凍結欄(z-50),
+    //   「整條蓋住 header」的原始設計不受影響。
+    <div className="fixed top-0 right-0 bottom-0 z-[90] bg-slate-100 shadow-[-4px_0_12px_rgba(0,0,0,0.18)] flex flex-col border-l border-slate-300"
       style={{ width: panelWidth, maxWidth: '100%' }}>
       {/* 窄面板(投影機/筆電)時標題縮排縮字、副標省略,確保三顆功能鈕不被擠出畫面 */}
       <div className={`text-white flex justify-between items-center shadow-md gap-2 ${narrowPanel ? 'px-3 py-2.5' : 'px-6 py-4'}`} style={{ backgroundColor: '#001F5B' }}>

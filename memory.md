@@ -20,7 +20,66 @@ MSD 專案追蹤總表：ASP.NET Core 9 Minimal API＋React SPA＋SQL Server。
   現行實測基準：**淺色 螢幕 0／投影50 0／投影30 1；深色 螢幕 0／投影50 0／投影30 47**
   （深色 30:1 那批全是 4.41 的 `text-slate-600`，要清掉得動全站色階，已評估後不做）。
 
-## 最近一次變更（2026-08-10：全功能檢查＋UI/UX 修正 24 項）
+## 最近一次變更（2026-08-25：打卡回報加「📎 文件連結」）
+
+**需求**：主管讀週報時最常做的下一個動作就是「把那份文件打開」，原本得自己去信件／檔案總管翻。
+回報時順手貼上連結，看板與打卡彈窗直接點開。
+
+**DB（遷移 16，本機已套用；遠端待執行）**：`WeeklyLogs.DocUrl NVARCHAR(500) NULL`＋
+`usp_UpsertWeeklyLog` 加選填 `@DocUrl`＋`vw_WeeklyReport` 補欄。稽核 Detail 改
+`doc舊=…|doc新=…|note舊=…|note新=…`（**doc 必須排在 note 之前**，理由見 `DB_table.md`）。
+
+**後端**：`/api/weekly-log` 收選填 `docUrl`；`bootstrap` 的 `taskLogs[*][week]` 多回 `docUrl`；
+`Summarize()` 附「，文件連結：…」；週報 Excel 多一欄「文件連結」（UNC 產生真正可點的外部超連結）。
+🚨 `ValidateDocUrl` 擋 `javascript:`／`data:`／`vbscript:`＋長度 500 —— 這個值會進 `<a href>` 且主管一定會點。
+
+**前端**：共用元件 `<DocLink>`，顯示為 **24×24 純圖示（SVG，非 emoji）**——初版帶「📎 開啟文件」整串字，
+使用者回饋在卡片裡太吵；縮成 emoji 也不行（10px 的 📎 只是彩色色塊）。看板裡併進「狀態／分數／✏️主管」
+那排徽章不自己佔一列；`aria-label` 是唯一可及名稱、`title` 帶原始路徑。
+**一律 `<a target="_blank">`，點一下就開新分頁**（使用者指示）——中間曾做成「http 開新分頁／路徑類改複製路徑鈕」，
+同一顆圖示兩種結果，使用者預期不到，已收斂成單一行為。
+非 http 的路徑先轉成合法 `file:` URL（`toDocHref`：UNC→`file://server/share/…`、`C:\`→`file:///C:/…`），
+原樣放進 href 會被當相對路徑跳到本站 404。⚠ 磁碟機代號要**排在 scheme 判斷之前**（`C:` 會被當成 scheme），
+scheme 規則同時改成要求 ≥2 字元。⚠ 已知限制：Chrome/Edge 預設封鎖從 http 開 `file://`，
+要靠網域政策放行；填寫欄位下方對路徑類連結會提示，替代路徑是匯出的 Excel（那裡是真的可點）。
+沒有 scheme 的網址在 blur／送出時補 `https://`。
+顯示於：看板卡片、打卡彈窗（可編輯＋唯讀）、歷史回報逐列、甘特 tooltip（只標示有附件）、複製週報文字。
+「沿用」連同連結一起帶入。看板卡片內的 `DocLink` 帶 `stopPropagation`（卡片本身點了會高亮甘特），
+⚠ 該 guard **只能 `stopPropagation` 不能 `preventDefault`**，後者會擋掉開新分頁。
+
+**實測**（本機 Sariel\Gantt）：https／UNC 兩種存取正確、清空存回 NULL、`javascript:` 前端擋下不發請求＋
+後端 400、超長 400、`portal.example.com/x` → 補成 `https://…`、三種來源都渲染成 `<a target="_blank"
+rel="noopener noreferrer">` 且**恰好 24×24 無文字**（href 實測：https 原樣／UNC→`file://fileserver/MSD/…`／
+`C:\Docs\plan.docx`→`file:///C:/Docs/plan.docx`）、點擊後目前分頁不會被導走、看板卡片不會被誤觸高亮、
+唯讀檢視與歷史列都顯示連結、Excel `sheet1.xml.rels` 產出 UNC 外部超連結、
+圖示對比 淺 8.01（投影 6.95）／深 6.82（投影 5.65），`check-dark-coverage.js` 通過。
+⚠ **「有沒有真的跳出新分頁」在這個環境驗不到**：內嵌 Browser pane 封鎖開新視窗（`window.open` 回 null），
+不是程式問題；DOM 就是標準的 `<a target="_blank">`，真實 Chrome 會正常開。
+⚠ **驗證用的 WeeklyLogs 全數刪除還原**（t109-1 W34/W35、t110-1 W35；都確認是本次新建、非覆寫既有資料）；
+對應的 AuditLog 保留未動（稽核表不自行刪除，如需清可手動處理）。
+⚠ 量測踩到一次假象:**Browser pane 沒有顯示時 CSS transition 不會推進**，`getComputedStyle` 會永遠停在
+切換主題前的舊色（誤判成「深色映射失效」）。判讀前要先 `style.transitionProperty='none'` 取終值。
+（`CLAUDE.md` 早就有「寬度變化不要加 transition」那條，同一個坑的另一面。）
+
+## 上一次變更（2026-08-25：修正看板與彈窗的疊層順序）
+
+**使用者回報**：開著「團隊總結看板」時再點甘特條開啟專案排程／打卡彈窗，彈窗被壓在看板下方，
+右上角 ✕ 按不到 → 得先關看板才關得掉彈窗。
+
+**成因**：看板是 `z-[120]`，**夾在彈窗層（100~150）中間**。實測 1280 寬：彈窗 ✕ 在 x=848、
+看板從 x=832 起，`document.elementFromPoint` 命中的是看板而非 ✕。
+受影響的不只打卡彈窗，`z-[105]`／`z-[110]`／`z-[115]` 那批（即將到期、回報中心、主管代修、
+成員管理、異動紀錄…）同樣會被蓋住。
+
+**修正**：看板改為 `z-[90]`——它是唯讀側邊面板不是視窗，排在整個彈窗層之下。
+層級表定為 `90`看板 →`100~150`彈窗／面板 →`200`甘特 tooltip →`300`toast（已寫入 `CLAUDE.md`）。
+90 仍高於 header／甘特凍結欄（皆 `z-50`），「整條蓋住 header」的原始設計不變。
+ESC 優先序原本就正確（`selectedTaskInfo` 排在 `showWeeklyReport` 之前），無須調整。
+
+**實測**（主管登入 → 開看板 → 點甘特條）：彈窗 z=100／看板 z=90、`elementFromPoint` 命中 ✕ 鈕、
+按下即關閉；關閉後看板仍蓋住 header 右上角。console 無錯誤，`check-dark-coverage.js` 通過。
+
+## 更早一次變更（2026-08-10：全功能檢查＋UI/UX 修正 24 項）
 
 先做全專案功能檢查（建置、API、三檢視、15 個彈窗、權限、匯出、對比），再依檢查結果修正。
 **檢查與修正全程未寫入任何業務資料**（以攔截 fetch 進行；事後確認 AuditLog 筆數未變、69 專案未變、
@@ -80,7 +139,8 @@ MSD 專案追蹤總表：ASP.NET Core 9 Minimal API＋React SPA＋SQL Server。
 
 ## 目前待辦事項
 
-1. **遠端 DB 遷移**：確認遠端是否已依序執行 `10→11→12→13→14→15`（未執行則需執行）；Gantt2 測試庫缺 11~15。
+1. **遠端 DB 遷移**：確認遠端是否已依序執行 `10→11→12→13→14→15→16`（未執行則需執行）；Gantt2 測試庫缺 11~16。
+   ⚠ **遷移 16 是本次新增功能的前提**：沒跑的話 `/api/bootstrap` 會因為 `WeeklyLogs.DocUrl` 不存在而整包失敗。
 2. **安全性——連線字串明碼密碼**：`appsettings.json` 含 SQL 明碼密碼且存在於 GitHub（lousyqq/Gantt）歷史；
    應改環境變數／IIS 組態覆蓋，必要時更改 SQL 密碼並將 repo 設為 private（或 git filter-repo 清歷史）。
    ⚠ 2026-08-10 稽核時未動此項——它屬於部署組態，改動會影響開發機連線。
