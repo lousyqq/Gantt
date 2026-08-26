@@ -334,6 +334,43 @@ const DocLink = ({ url, className = '', stopPropagation = false }) => {
   );
 };
 
+// 文件連結的送出前驗證(打卡／非專案／下週預計三個表單共用,規則只有一份)。
+// 回傳 { doc, error }:doc 已補過 scheme,可直接送出。
+const validateDocInput = (raw) => {
+  const doc = normalizeDocUrl(raw);
+  if (isUnsafeUrl(doc)) return { doc, error: '文件連結格式不正確，請貼上網址（http/https）或檔案路徑' };
+  if (doc.length > DOC_URL_MAX) return { doc, error: `文件連結請勿超過 ${DOC_URL_MAX} 個字元（目前 ${doc.length} 個）` };
+  return { doc, error: '' };
+};
+
+// 文件連結輸入欄(同上三個表單共用;三處長得一模一樣,抽出來才不會下次只改到其中一個)。
+// ⚠ 單行 input 依全站慣例掛 onEnterSubmit(對應該表單的送出目標)。
+// ⚠ blur 時補 scheme:使用者看得到實際會送出的值,而不是存完才發現變了。
+const DocUrlField = ({ id, value, onChange, onSubmit, error }) => (
+  <div>
+    <div className="flex items-center gap-2">
+      <label htmlFor={id} className="text-[11px] font-bold text-slate-600">📎 文件連結（選填）</label>
+      {/* 就地試開:填完馬上驗證貼對了沒有,不必存檔 → 回看板 → 再點一次才發現連錯 */}
+      {value.trim() && !error && <DocLink url={normalizeDocUrl(value)} />}
+    </div>
+    <input id={id} type="text" value={value} maxLength={DOC_URL_MAX}
+      onChange={e => { onChange(e.target.value); markModalDirty(); }}
+      onBlur={e => { const n = normalizeDocUrl(e.target.value); if (n !== e.target.value) onChange(n); }}
+      onKeyDown={onEnterSubmit(onSubmit)}
+      placeholder="https://… 或 \\伺服器\共用資料夾\檔案.xlsx"
+      className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 mt-1 ${error ? 'border-red-400' : 'border-slate-300'}`} />
+    {error
+      ? <div className="text-xs text-red-600 font-bold mt-1">{error}</div>
+      : <div className="text-[10px] text-slate-500 mt-1">
+          填了之後，主管在團隊總結看板點一下圖示就會另開分頁開啟，不必另外找檔案。
+          {/* 路徑類連結先提醒:瀏覽器預設會擋 file://,填的人當下就該知道,
+              而不是等主管點了沒反應才回頭問 */}
+          {value.trim() && !isHttpUrl(normalizeDocUrl(value)) &&
+            <span className="text-slate-600">（網路磁碟／本機路徑要瀏覽器政策允許才開得起來，建議優先貼 http/https 網址）</span>}
+        </div>}
+  </div>
+);
+
 // 讓非 <button> 的互動元素(表格的 th/tr、絕對定位的甘特條、看板卡片)也能用鍵盤操作。
 // 用法:<div {...clickable(() => open(), '開啟 XXX')}>。
 // 為什麼不直接改寫成 <button>:th/tr 換掉會破壞 table 結構(sticky 表頭、欄寬、斑馬紋全靠它),
@@ -1223,20 +1260,21 @@ function App() {
     }
   };
 
-  const handleSaveExtraNote = async (note) => {
+  const handleSaveExtraNote = async (note, docUrl = '') => {
     const target = noteTargetUser || currentUser;   // 主管可代成員修正(noteTargetUser 由週次編輯面板設定)
     try {
       await apiPost('/api/extra-note', {
         userName: target, year: scheduleYear, week: currentWeek,
-        note, actor: currentUser, actorRole: role
+        note, docUrl, actor: currentUser, actorRole: role
       });
       setExtraNotes(prev => ({
         ...prev,
         [target]: { ...prev[target], [currentWeek]: note }
       }));
+      // docUrl 一律覆寫(含空字串→null):清空欄位再送出就是「把連結拿掉」,畫面要跟著消失
       setExtraNoteMeta(prev => ({
         ...prev,
-        [target]: { ...prev[target], [currentWeek]: { by: currentUser, byRole: role, at: nowStamp() } }
+        [target]: { ...prev[target], [currentWeek]: { by: currentUser, byRole: role, at: nowStamp(), docUrl: docUrl || null } }
       }));
       setShowExtraNoteModal(false);
       setNoteTargetUser(null);
@@ -1274,12 +1312,12 @@ function App() {
     }
   };
 
-  const handleSaveWeeklyPlan = async (note) => {
+  const handleSaveWeeklyPlan = async (note, docUrl = '') => {
     const target = noteTargetUser || currentUser;   // 主管可代成員修正(noteTargetUser 由週次編輯面板設定)
     try {
       await apiPost('/api/weekly-plan', {
         userName: target, year: scheduleYear, week: currentWeek,
-        note, actor: currentUser, actorRole: role
+        note, docUrl, actor: currentUser, actorRole: role
       });
       setWeeklyPlans(prev => ({
         ...prev,
@@ -1287,7 +1325,7 @@ function App() {
       }));
       setWeeklyPlanMeta(prev => ({
         ...prev,
-        [target]: { ...prev[target], [currentWeek]: { by: currentUser, byRole: role, at: nowStamp() } }
+        [target]: { ...prev[target], [currentWeek]: { by: currentUser, byRole: role, at: nowStamp(), docUrl: docUrl || null } }
       }));
       setShowWeeklyPlanModal(false);
       setNoteTargetUser(null);
@@ -2976,9 +3014,8 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
     if (!status) { setNoteError('請先選擇本週狀態'); return; }
     if (status === 'executed' && !note.trim()) { setNoteError('請填寫實際工作內容，才能讓團隊了解進度'); return; }
     // 沒有 scheme 的網址補 https://(否則進 href 會被當相對路徑,點下去是本站 404)
-    const doc = normalizeDocUrl(docUrl);
-    if (isUnsafeUrl(doc)) { setDocError('文件連結格式不正確，請貼上網址（http/https）或檔案路徑'); return; }
-    if (doc.length > DOC_URL_MAX) { setDocError(`文件連結請勿超過 ${DOC_URL_MAX} 個字元（目前 ${doc.length} 個）`); return; }
+    const { doc, error: dErr } = validateDocInput(docUrl);
+    if (dErr) { setDocError(dErr); return; }
     if (doc !== docUrl) setDocUrl(doc);   // 補過 scheme 的話同步回欄位,使用者看得到送出的是什麼
     setSaving(true);
     try { await onSaveLog(task.id, status, note.trim(), doc); } finally { setSaving(false); }
@@ -3168,26 +3205,10 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                   )}
                   {noteError && <div className="text-xs text-red-600 font-bold">{noteError}</div>}
                   {/* 文件連結(選填):選了狀態才出現,與工作說明同一組。
-                      單行 input 掛 onEnterSubmit(submitLog)——送出目標是打卡不是排程(排程在上面那張卡)。 */}
+                      送出目標是打卡不是排程(排程在上面那張卡有自己的送出鈕)。 */}
                   {status && (
-                    <div>
-                      <label htmlFor="log-doc-url" className="text-[11px] font-bold text-slate-600">📎 文件連結（選填）</label>
-                      <input id="log-doc-url" type="text" value={docUrl} maxLength={DOC_URL_MAX}
-                        onChange={e => { setDocUrl(e.target.value); setDocError(''); markModalDirty(); }}
-                        onBlur={e => { const n = normalizeDocUrl(e.target.value); if (n !== e.target.value) setDocUrl(n); }}
-                        onKeyDown={onEnterSubmit(submitLog)}
-                        placeholder="https://… 或 \\伺服器\共用資料夾\檔案.xlsx"
-                        className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 mt-1 ${docError ? 'border-red-400' : 'border-slate-300'}`} />
-                      {docError
-                        ? <div className="text-xs text-red-600 font-bold mt-1">{docError}</div>
-                        : <div className="text-[10px] text-slate-500 mt-1">
-                            填了之後，主管在團隊總結看板點一下圖示就會另開分頁開啟，不必另外找檔案。
-                            {/* 路徑類連結先提醒:瀏覽器預設會擋 file://,填的人當下就該知道,
-                                而不是等主管點了沒反應才回頭問 */}
-                            {docUrl.trim() && !isHttpUrl(normalizeDocUrl(docUrl)) &&
-                              <span className="text-slate-600">（網路磁碟／本機路徑要瀏覽器政策允許才開得起來，建議優先貼 http/https 網址）</span>}
-                          </div>}
-                    </div>
+                    <DocUrlField id="log-doc-url" value={docUrl} onSubmit={submitLog} error={docError}
+                      onChange={v => { setDocUrl(v); setDocError(''); }} />
                   )}
                 </div>
                 <div className="flex justify-end space-x-3 pt-4">
@@ -3257,15 +3278,23 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
 function ExtraNoteModal({ currentWeek, initialNote, readOnly, targetUser, meta, onClose, onSave }) {
   const focus = useModalFocus();   // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [note, setNote] = useState(initialNote);
+  // 文件連結存在 meta 裡(見 Program.cs bootstrap 的說明:內容本身是純字串,
+  // 改成物件會動到十幾個取值點;meta 本來就一路傳到每個顯示/編輯的地方)
+  const [docUrl, setDocUrl] = useState(meta?.docUrl || '');
   const [error, setError] = useState('');
+  const [docError, setDocError] = useState('');
   const [saving, setSaving] = useState(false);
   useModalDirtyReset();
-  // 非專案事項為「選填」:允許空白儲存(=清空本週內容),不強迫填字
-  const isClearing = !note.trim() && !!initialNote;
+  // 非專案事項為「選填」:允許空白儲存(=清空本週內容),不強迫填字。
+  // ⚠ 只留文件連結不算「清空」——那時按鈕仍該是「送出回報」,否則使用者會以為連結也會被丟掉
+  const isClearing = !note.trim() && !docUrl.trim() && !!initialNote;
   const submit = async () => {
     if (saving) return;
+    const { doc, error: dErr } = validateDocInput(docUrl);
+    if (dErr) { setDocError(dErr); return; }
+    if (doc !== docUrl) setDocUrl(doc);
     setSaving(true);
-    try { await onSave(note.trim()); } finally { setSaving(false); }
+    try { await onSave(note.trim(), doc); } finally { setSaving(false); }
   };
   if (readOnly) {
     return (
@@ -3280,6 +3309,7 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, targetUser, meta, 
             {initialNote ? (
               <div>
                 <div className="text-sm text-slate-700 bg-slate-100 border border-slate-300 rounded-lg p-4 whitespace-pre-wrap">{initialNote}</div>
+                {meta?.docUrl && <div className="mt-2"><DocLink url={meta.docUrl} /></div>}
                 <MetaLine meta={meta} />
               </div>
             ) : (
@@ -3326,6 +3356,10 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, targetUser, meta, 
             placeholder={"例如：\n1. 協助 OOO 機台異常處理 (1天)\n2. 參加跨部門會議…"}
             className={`w-full border rounded-lg p-3 text-sm h-40 outline-none focus:ring-2 focus:ring-orange-400 resize-none ${error ? 'border-red-400' : 'border-slate-300'}`}></textarea>
           {error && <div className="text-xs text-red-600 font-bold mt-1">{error}</div>}
+          <div className="mt-3">
+            <DocUrlField id="extra-doc-url" value={docUrl} onSubmit={submit} error={docError}
+              onChange={v => { setDocUrl(v); setDocError(''); }} />
+          </div>
           <div className="flex justify-end space-x-3 pt-4">
             <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
             <button onClick={submit} disabled={saving}
@@ -3417,15 +3451,21 @@ function DeliverableModal({ proj, role, currentUser, onClose, onSave }) {
 function WeeklyPlanModal({ currentWeek, initialNote, readOnly, targetUser, meta, onClose, onSave }) {
   const focus = useModalFocus();   // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [note, setNote] = useState(initialNote);
+  const [docUrl, setDocUrl] = useState(meta?.docUrl || '');   // 文件連結存在 meta 裡(同 ExtraNoteModal)
   const [error, setError] = useState('');
+  const [docError, setDocError] = useState('');
   const [saving, setSaving] = useState(false);
   useModalDirtyReset();
   // 允許清空:清空後系統將其復原為「必填尚未填寫」(扣回打卡 1 分)，待重新填寫送出後再計分
-  const isClearing = !note.trim() && !!initialNote;
+  // ⚠ 只留文件連結不算「清空」(同 ExtraNoteModal)
+  const isClearing = !note.trim() && !docUrl.trim() && !!initialNote;
   const submit = async () => {
     if (saving) return;
+    const { doc, error: dErr } = validateDocInput(docUrl);
+    if (dErr) { setDocError(dErr); return; }
+    if (doc !== docUrl) setDocUrl(doc);
     setSaving(true);
-    try { await onSave(note.trim()); } finally { setSaving(false); }
+    try { await onSave(note.trim(), doc); } finally { setSaving(false); }
   };
   if (readOnly) {
     return (
@@ -3440,6 +3480,7 @@ function WeeklyPlanModal({ currentWeek, initialNote, readOnly, targetUser, meta,
             {initialNote ? (
               <div>
                 <div className="text-sm text-slate-700 bg-slate-100 border border-slate-300 rounded-lg p-4 whitespace-pre-wrap">{initialNote}</div>
+                {meta?.docUrl && <div className="mt-2"><DocLink url={meta.docUrl} /></div>}
                 <MetaLine meta={meta} />
               </div>
             ) : (
@@ -3486,6 +3527,10 @@ function WeeklyPlanModal({ currentWeek, initialNote, readOnly, targetUser, meta,
             placeholder={"例如：\n1. OOO 專案進入測試階段，預計完成驗證報告\n2. 準備季度檢討資料…"}
             className={`w-full border rounded-lg p-3 text-sm h-40 outline-none focus:ring-2 focus:ring-indigo-400 resize-none ${error ? 'border-red-400' : 'border-slate-300'}`}></textarea>
           {error && <div className="text-xs text-red-600 font-bold mt-1">{error}</div>}
+          <div className="mt-3">
+            <DocUrlField id="plan-doc-url" value={docUrl} onSubmit={submit} error={docError}
+              onChange={v => { setDocUrl(v); setDocError(''); }} />
+          </div>
           <div className="flex justify-end space-x-3 pt-4">
             <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 bg-slate-100 rounded-lg font-bold hover:bg-slate-200">取消</button>
             <button onClick={submit} disabled={saving}
@@ -3744,7 +3789,15 @@ function ManagerWeekPanel({ week, todayWeek, users = [], projects, taskLogs, ext
           {value
             ? <div className="text-xs text-slate-600 mt-1 whitespace-pre-wrap" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{value}</div>
             : <div className="text-xs text-slate-500 italic mt-1">{emptyText}</div>}
-          {value && <MetaLine meta={meta} showManagerTag={showManagerTag} className="text-[10px] text-slate-500 mt-0.5" />}
+          {/* 附件標記:這一列整個是 <button>,不能再塞可點的 <a>(巢狀互動元素是無效 HTML,
+              而且點連結會順便觸發「編輯」)。所以這裡只標示有附件,真正的開啟入口在編輯視窗與看板。 */}
+          {meta?.docUrl && (
+            <span className="inline-flex items-center gap-1 mt-1 px-2 py-1 rounded border border-blue-300 bg-blue-50 text-blue-800 text-[10px] font-bold"
+              title={`已附文件連結：${meta.docUrl}（點「編輯」進去即可開啟）`}>
+              <DocIcon />已附文件
+            </span>
+          )}
+          {(value || meta?.docUrl) && <MetaLine meta={meta} showManagerTag={showManagerTag} className="text-[10px] text-slate-500 mt-0.5" />}
         </div>
         <div className="flex-shrink-0 text-slate-600 font-bold text-xs bg-white border border-slate-300 rounded-full px-3 py-1.5 group-hover:bg-slate-700 group-hover:text-white transition">
           編輯 ›
@@ -3996,7 +4049,9 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
       lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}${log.docUrl ? `\n      📎 ${log.docUrl}` : ''}`);
     });
     if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
+    if (s.extraMeta?.docUrl) lines.push(`      📎 ${s.extraMeta.docUrl}`);
     if (s.weekPlan) lines.push(`  (下週預計) ${s.weekPlan.replace(/\n/g, ' / ')}`);
+    if (s.planMeta?.docUrl) lines.push(`      📎 ${s.planMeta.docUrl}`);
     if (s.comment) lines.push(`  (主管回覆) ${s.comment.replace(/\n/g, ' / ')}`);
     lines.push('');
     return lines.join('\n');
@@ -4006,13 +4061,16 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
   const buildReportText = () => {
     const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} ${showTeamView ? '團隊週報' : '週報 — ' + currentUser}】`, ''];
     visibleSummary.forEach(s => {
-      if (s.activeTasks.length === 0 && !s.extraNote && !s.weekPlan) return;
+      // 只附了文件、沒打字的人也要出現(否則他的連結不會進週報文字)
+      if (s.activeTasks.length === 0 && !s.extraNote && !s.weekPlan && !s.extraMeta?.docUrl && !s.planMeta?.docUrl) return;
       lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}・得分 ${s.weekScore}/${s.total}）`);
       s.activeTasks.forEach(({ proj, task, log }) => {
         lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}${log.docUrl ? `\n      📎 ${log.docUrl}` : ''}`);
       });
       if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
+      if (s.extraMeta?.docUrl) lines.push(`      📎 ${s.extraMeta.docUrl}`);
       if (s.weekPlan) lines.push(`  (下週預計) ${s.weekPlan.replace(/\n/g, ' / ')}`);
+      if (s.planMeta?.docUrl) lines.push(`      📎 ${s.planMeta.docUrl}`);
       if (s.comment) lines.push(`  (主管回覆) ${s.comment.replace(/\n/g, ' / ')}`);
       lines.push('');
     });
@@ -4102,16 +4160,23 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
       </div>
       <div className={`space-y-2.5 ${narrowPanel ? 'border-t border-slate-200 pt-2' : 'md:border-l md:border-slate-100 md:pl-4'}`}>
         <div className="text-xs font-bold text-slate-500 border-b border-slate-200 pb-1">📝 日常營運 / 臨時交辦（非專案）</div>
-        {extraNote ? (
+        {/* 內容清空但連結還在時,這一區仍要出現(否則連結會憑空消失) */}
+        {(extraNote || extraMeta?.docUrl) ? (
           <div>
-            <div className="text-sm text-slate-700 bg-orange-50 p-3 rounded-lg border border-orange-200 whitespace-pre-wrap">{extraNote}</div>
+            {extraNote
+              ? <div className="text-sm text-slate-700 bg-orange-50 p-3 rounded-lg border border-orange-200 whitespace-pre-wrap">{extraNote}</div>
+              : <div className="text-sm text-slate-500 italic py-1">（未填寫文字，僅附文件）</div>}
+            {extraMeta?.docUrl && <div className="mt-1.5"><DocLink url={extraMeta.docUrl} /></div>}
             <MetaLine meta={extraMeta} />
           </div>
         ) : <div className="text-sm text-slate-500 italic py-2">無填寫其他項目</div>}
         <div className="text-xs font-bold text-slate-500 border-b border-slate-200 pb-1 pt-1">📅 下週預計執行工作</div>
-        {weekPlan ? (
+        {(weekPlan || planMeta?.docUrl) ? (
           <div>
-            <div className="text-sm text-slate-700 bg-indigo-50 p-3 rounded-lg border border-indigo-200 whitespace-pre-wrap">{weekPlan}</div>
+            {weekPlan
+              ? <div className="text-sm text-slate-700 bg-indigo-50 p-3 rounded-lg border border-indigo-200 whitespace-pre-wrap">{weekPlan}</div>
+              : <div className="text-sm text-slate-500 italic py-1">（未填寫文字，僅附文件）</div>}
+            {planMeta?.docUrl && <div className="mt-1.5"><DocLink url={planMeta.docUrl} /></div>}
             <MetaLine meta={planMeta} />
           </div>
         ) : <div className="text-sm text-slate-500 italic py-2">未填寫</div>}
@@ -4210,7 +4275,9 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
       <div className={`flex-1 overflow-y-auto space-y-5 ${narrowPanel ? 'p-3' : 'p-6'}`}>
         {visibleSummary.map((s) => {
           const { user, activeTasks, pendingTasks, extraNote, weekPlan, total } = s;
-          if (activeTasks.length === 0 && !extraNote && !weekPlan && pendingTasks.length === 0) return null;
+          // 只附了文件、沒打字的人也要有卡片(否則他的連結整個看不到)
+          if (activeTasks.length === 0 && !extraNote && !weekPlan && pendingTasks.length === 0
+              && !s.extraMeta?.docUrl && !s.planMeta?.docUrl) return null;
           const isExpanded = showTeamView ? expandedUsers.has(user) : true;   // 個人模式固定展開
           const isCopiedUser = copiedUser === user;
           // 進度條改「分段組成」:一條就同時表達回報率與狀態分佈,取代原本 ✅/👁️/❗ 三顆晶片。

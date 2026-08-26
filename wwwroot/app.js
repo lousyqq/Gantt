@@ -483,6 +483,64 @@ const DocLink = ({
   }, /*#__PURE__*/React.createElement(DocIcon, null));
 };
 
+// 文件連結的送出前驗證(打卡／非專案／下週預計三個表單共用,規則只有一份)。
+// 回傳 { doc, error }:doc 已補過 scheme,可直接送出。
+const validateDocInput = raw => {
+  const doc = normalizeDocUrl(raw);
+  if (isUnsafeUrl(doc)) return {
+    doc,
+    error: '文件連結格式不正確，請貼上網址（http/https）或檔案路徑'
+  };
+  if (doc.length > DOC_URL_MAX) return {
+    doc,
+    error: `文件連結請勿超過 ${DOC_URL_MAX} 個字元（目前 ${doc.length} 個）`
+  };
+  return {
+    doc,
+    error: ''
+  };
+};
+
+// 文件連結輸入欄(同上三個表單共用;三處長得一模一樣,抽出來才不會下次只改到其中一個)。
+// ⚠ 單行 input 依全站慣例掛 onEnterSubmit(對應該表單的送出目標)。
+// ⚠ blur 時補 scheme:使用者看得到實際會送出的值,而不是存完才發現變了。
+const DocUrlField = ({
+  id,
+  value,
+  onChange,
+  onSubmit,
+  error
+}) => /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  className: "flex items-center gap-2"
+}, /*#__PURE__*/React.createElement("label", {
+  htmlFor: id,
+  className: "text-[11px] font-bold text-slate-600"
+}, "\uD83D\uDCCE \u6587\u4EF6\u9023\u7D50\uFF08\u9078\u586B\uFF09"), value.trim() && !error && /*#__PURE__*/React.createElement(DocLink, {
+  url: normalizeDocUrl(value)
+})), /*#__PURE__*/React.createElement("input", {
+  id: id,
+  type: "text",
+  value: value,
+  maxLength: DOC_URL_MAX,
+  onChange: e => {
+    onChange(e.target.value);
+    markModalDirty();
+  },
+  onBlur: e => {
+    const n = normalizeDocUrl(e.target.value);
+    if (n !== e.target.value) onChange(n);
+  },
+  onKeyDown: onEnterSubmit(onSubmit),
+  placeholder: "https://\u2026 \u6216 \\\\\u4F3A\u670D\u5668\\\u5171\u7528\u8CC7\u6599\u593E\\\u6A94\u6848.xlsx",
+  className: `w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 mt-1 ${error ? 'border-red-400' : 'border-slate-300'}`
+}), error ? /*#__PURE__*/React.createElement("div", {
+  className: "text-xs text-red-600 font-bold mt-1"
+}, error) : /*#__PURE__*/React.createElement("div", {
+  className: "text-[10px] text-slate-500 mt-1"
+}, "\u586B\u4E86\u4E4B\u5F8C\uFF0C\u4E3B\u7BA1\u5728\u5718\u968A\u7E3D\u7D50\u770B\u677F\u9EDE\u4E00\u4E0B\u5716\u793A\u5C31\u6703\u53E6\u958B\u5206\u9801\u958B\u555F\uFF0C\u4E0D\u5FC5\u53E6\u5916\u627E\u6A94\u6848\u3002", value.trim() && !isHttpUrl(normalizeDocUrl(value)) && /*#__PURE__*/React.createElement("span", {
+  className: "text-slate-600"
+}, "\uFF08\u7DB2\u8DEF\u78C1\u789F\uFF0F\u672C\u6A5F\u8DEF\u5F91\u8981\u700F\u89BD\u5668\u653F\u7B56\u5141\u8A31\u624D\u958B\u5F97\u8D77\u4F86\uFF0C\u5EFA\u8B70\u512A\u5148\u8CBC http/https \u7DB2\u5740\uFF09")));
+
 // 讓非 <button> 的互動元素(表格的 th/tr、絕對定位的甘特條、看板卡片)也能用鍵盤操作。
 // 用法:<div {...clickable(() => open(), '開啟 XXX')}>。
 // 為什麼不直接改寫成 <button>:th/tr 換掉會破壞 table 結構(sticky 表頭、欄寬、斑馬紋全靠它),
@@ -1485,7 +1543,7 @@ function App() {
       showToast('❌ 儲存失敗：' + (e.message || '無法連線資料庫'));
     }
   };
-  const handleSaveExtraNote = async note => {
+  const handleSaveExtraNote = async (note, docUrl = '') => {
     const target = noteTargetUser || currentUser; // 主管可代成員修正(noteTargetUser 由週次編輯面板設定)
     try {
       await apiPost('/api/extra-note', {
@@ -1493,6 +1551,7 @@ function App() {
         year: scheduleYear,
         week: currentWeek,
         note,
+        docUrl,
         actor: currentUser,
         actorRole: role
       });
@@ -1503,6 +1562,7 @@ function App() {
           [currentWeek]: note
         }
       }));
+      // docUrl 一律覆寫(含空字串→null):清空欄位再送出就是「把連結拿掉」,畫面要跟著消失
       setExtraNoteMeta(prev => ({
         ...prev,
         [target]: {
@@ -1510,7 +1570,8 @@ function App() {
           [currentWeek]: {
             by: currentUser,
             byRole: role,
-            at: nowStamp()
+            at: nowStamp(),
+            docUrl: docUrl || null
           }
         }
       }));
@@ -1565,7 +1626,7 @@ function App() {
       showToast('❌ 儲存失敗：' + (e.message || '無法連線資料庫'));
     }
   };
-  const handleSaveWeeklyPlan = async note => {
+  const handleSaveWeeklyPlan = async (note, docUrl = '') => {
     const target = noteTargetUser || currentUser; // 主管可代成員修正(noteTargetUser 由週次編輯面板設定)
     try {
       await apiPost('/api/weekly-plan', {
@@ -1573,6 +1634,7 @@ function App() {
         year: scheduleYear,
         week: currentWeek,
         note,
+        docUrl,
         actor: currentUser,
         actorRole: role
       });
@@ -1590,7 +1652,8 @@ function App() {
           [currentWeek]: {
             by: currentUser,
             byRole: role,
-            at: nowStamp()
+            at: nowStamp(),
+            docUrl: docUrl || null
           }
         }
       }));
@@ -3839,13 +3902,12 @@ function TaskModal({
       return;
     }
     // 沒有 scheme 的網址補 https://(否則進 href 會被當相對路徑,點下去是本站 404)
-    const doc = normalizeDocUrl(docUrl);
-    if (isUnsafeUrl(doc)) {
-      setDocError('文件連結格式不正確，請貼上網址（http/https）或檔案路徑');
-      return;
-    }
-    if (doc.length > DOC_URL_MAX) {
-      setDocError(`文件連結請勿超過 ${DOC_URL_MAX} 個字元（目前 ${doc.length} 個）`);
+    const {
+      doc,
+      error: dErr
+    } = validateDocInput(docUrl);
+    if (dErr) {
+      setDocError(dErr);
       return;
     }
     if (doc !== docUrl) setDocUrl(doc); // 補過 scheme 的話同步回欄位,使用者看得到送出的是什麼
@@ -4086,33 +4148,16 @@ function TaskModal({
     className: `w-full border rounded-lg p-3 text-sm h-24 outline-none resize-none focus:border-blue-500 ${noteError ? 'border-red-400' : 'border-slate-300'}`
   }), noteError && /*#__PURE__*/React.createElement("div", {
     className: "text-xs text-red-600 font-bold"
-  }, noteError), status && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
-    htmlFor: "log-doc-url",
-    className: "text-[11px] font-bold text-slate-600"
-  }, "\uD83D\uDCCE \u6587\u4EF6\u9023\u7D50\uFF08\u9078\u586B\uFF09"), /*#__PURE__*/React.createElement("input", {
+  }, noteError), status && /*#__PURE__*/React.createElement(DocUrlField, {
     id: "log-doc-url",
-    type: "text",
     value: docUrl,
-    maxLength: DOC_URL_MAX,
-    onChange: e => {
-      setDocUrl(e.target.value);
+    onSubmit: submitLog,
+    error: docError,
+    onChange: v => {
+      setDocUrl(v);
       setDocError('');
-      markModalDirty();
-    },
-    onBlur: e => {
-      const n = normalizeDocUrl(e.target.value);
-      if (n !== e.target.value) setDocUrl(n);
-    },
-    onKeyDown: onEnterSubmit(submitLog),
-    placeholder: "https://\u2026 \u6216 \\\\\u4F3A\u670D\u5668\\\u5171\u7528\u8CC7\u6599\u593E\\\u6A94\u6848.xlsx",
-    className: `w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 mt-1 ${docError ? 'border-red-400' : 'border-slate-300'}`
-  }), docError ? /*#__PURE__*/React.createElement("div", {
-    className: "text-xs text-red-600 font-bold mt-1"
-  }, docError) : /*#__PURE__*/React.createElement("div", {
-    className: "text-[10px] text-slate-500 mt-1"
-  }, "\u586B\u4E86\u4E4B\u5F8C\uFF0C\u4E3B\u7BA1\u5728\u5718\u968A\u7E3D\u7D50\u770B\u677F\u9EDE\u4E00\u4E0B\u5716\u793A\u5C31\u6703\u53E6\u958B\u5206\u9801\u958B\u555F\uFF0C\u4E0D\u5FC5\u53E6\u5916\u627E\u6A94\u6848\u3002", docUrl.trim() && !isHttpUrl(normalizeDocUrl(docUrl)) && /*#__PURE__*/React.createElement("span", {
-    className: "text-slate-600"
-  }, "\uFF08\u7DB2\u8DEF\u78C1\u789F\uFF0F\u672C\u6A5F\u8DEF\u5F91\u8981\u700F\u89BD\u5668\u653F\u7B56\u5141\u8A31\u624D\u958B\u5F97\u8D77\u4F86\uFF0C\u5EFA\u8B70\u512A\u5148\u8CBC http/https \u7DB2\u5740\uFF09")))), /*#__PURE__*/React.createElement("div", {
+    }
+  })), /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end space-x-3 pt-4"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
@@ -4187,16 +4232,30 @@ function ExtraNoteModal({
 }) {
   const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [note, setNote] = useState(initialNote);
+  // 文件連結存在 meta 裡(見 Program.cs bootstrap 的說明:內容本身是純字串,
+  // 改成物件會動到十幾個取值點;meta 本來就一路傳到每個顯示/編輯的地方)
+  const [docUrl, setDocUrl] = useState(meta?.docUrl || '');
   const [error, setError] = useState('');
+  const [docError, setDocError] = useState('');
   const [saving, setSaving] = useState(false);
   useModalDirtyReset();
-  // 非專案事項為「選填」:允許空白儲存(=清空本週內容),不強迫填字
-  const isClearing = !note.trim() && !!initialNote;
+  // 非專案事項為「選填」:允許空白儲存(=清空本週內容),不強迫填字。
+  // ⚠ 只留文件連結不算「清空」——那時按鈕仍該是「送出回報」,否則使用者會以為連結也會被丟掉
+  const isClearing = !note.trim() && !docUrl.trim() && !!initialNote;
   const submit = async () => {
     if (saving) return;
+    const {
+      doc,
+      error: dErr
+    } = validateDocInput(docUrl);
+    if (dErr) {
+      setDocError(dErr);
+      return;
+    }
+    if (doc !== docUrl) setDocUrl(doc);
     setSaving(true);
     try {
-      await onSave(note.trim());
+      await onSave(note.trim(), doc);
     } finally {
       setSaving(false);
     }
@@ -4226,7 +4285,11 @@ function ExtraNoteModal({
       className: "text-xs text-slate-500 mb-3"
     }, "\u6B77\u53F2\u9031\u6B21\u50C5\u4F9B\u700F\u89BD\uFF0C\u7121\u6CD5\u4FEE\u6539\u3002"), initialNote ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
       className: "text-sm text-slate-700 bg-slate-100 border border-slate-300 rounded-lg p-4 whitespace-pre-wrap"
-    }, initialNote), /*#__PURE__*/React.createElement(MetaLine, {
+    }, initialNote), meta?.docUrl && /*#__PURE__*/React.createElement("div", {
+      className: "mt-2"
+    }, /*#__PURE__*/React.createElement(DocLink, {
+      url: meta.docUrl
+    })), /*#__PURE__*/React.createElement(MetaLine, {
       meta: meta
     })) : /*#__PURE__*/React.createElement("div", {
       className: "text-sm text-slate-500 italic text-center py-6"
@@ -4293,6 +4356,17 @@ function ExtraNoteModal({
     }), error && /*#__PURE__*/React.createElement("div", {
       className: "text-xs text-red-600 font-bold mt-1"
     }, error), /*#__PURE__*/React.createElement("div", {
+      className: "mt-3"
+    }, /*#__PURE__*/React.createElement(DocUrlField, {
+      id: "extra-doc-url",
+      value: docUrl,
+      onSubmit: submit,
+      error: docError,
+      onChange: v => {
+        setDocUrl(v);
+        setDocError('');
+      }
+    })), /*#__PURE__*/React.createElement("div", {
       className: "flex justify-end space-x-3 pt-4"
     }, /*#__PURE__*/React.createElement("button", {
       onClick: onClose,
@@ -4428,16 +4502,28 @@ function WeeklyPlanModal({
 }) {
   const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [note, setNote] = useState(initialNote);
+  const [docUrl, setDocUrl] = useState(meta?.docUrl || ''); // 文件連結存在 meta 裡(同 ExtraNoteModal)
   const [error, setError] = useState('');
+  const [docError, setDocError] = useState('');
   const [saving, setSaving] = useState(false);
   useModalDirtyReset();
   // 允許清空:清空後系統將其復原為「必填尚未填寫」(扣回打卡 1 分)，待重新填寫送出後再計分
-  const isClearing = !note.trim() && !!initialNote;
+  // ⚠ 只留文件連結不算「清空」(同 ExtraNoteModal)
+  const isClearing = !note.trim() && !docUrl.trim() && !!initialNote;
   const submit = async () => {
     if (saving) return;
+    const {
+      doc,
+      error: dErr
+    } = validateDocInput(docUrl);
+    if (dErr) {
+      setDocError(dErr);
+      return;
+    }
+    if (doc !== docUrl) setDocUrl(doc);
     setSaving(true);
     try {
-      await onSave(note.trim());
+      await onSave(note.trim(), doc);
     } finally {
       setSaving(false);
     }
@@ -4467,7 +4553,11 @@ function WeeklyPlanModal({
       className: "text-xs text-slate-500 mb-3"
     }, "\u6B77\u53F2\u9031\u6B21\u50C5\u4F9B\u700F\u89BD\uFF0C\u7121\u6CD5\u4FEE\u6539\u3002"), initialNote ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
       className: "text-sm text-slate-700 bg-slate-100 border border-slate-300 rounded-lg p-4 whitespace-pre-wrap"
-    }, initialNote), /*#__PURE__*/React.createElement(MetaLine, {
+    }, initialNote), meta?.docUrl && /*#__PURE__*/React.createElement("div", {
+      className: "mt-2"
+    }, /*#__PURE__*/React.createElement(DocLink, {
+      url: meta.docUrl
+    })), /*#__PURE__*/React.createElement(MetaLine, {
       meta: meta
     })) : /*#__PURE__*/React.createElement("div", {
       className: "text-sm text-slate-500 italic text-center py-6"
@@ -4529,6 +4619,17 @@ function WeeklyPlanModal({
   }), error && /*#__PURE__*/React.createElement("div", {
     className: "text-xs text-red-600 font-bold mt-1"
   }, error), /*#__PURE__*/React.createElement("div", {
+    className: "mt-3"
+  }, /*#__PURE__*/React.createElement(DocUrlField, {
+    id: "plan-doc-url",
+    value: docUrl,
+    onSubmit: submit,
+    error: docError,
+    onChange: v => {
+      setDocUrl(v);
+      setDocError('');
+    }
+  })), /*#__PURE__*/React.createElement("div", {
     className: "flex justify-end space-x-3 pt-4"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
@@ -4850,7 +4951,10 @@ function ManagerWeekPanel({
     }
   }, value) : /*#__PURE__*/React.createElement("div", {
     className: "text-xs text-slate-500 italic mt-1"
-  }, emptyText), value && /*#__PURE__*/React.createElement(MetaLine, {
+  }, emptyText), meta?.docUrl && /*#__PURE__*/React.createElement("span", {
+    className: "inline-flex items-center gap-1 mt-1 px-2 py-1 rounded border border-blue-300 bg-blue-50 text-blue-800 text-[10px] font-bold",
+    title: `已附文件連結：${meta.docUrl}（點「編輯」進去即可開啟）`
+  }, /*#__PURE__*/React.createElement(DocIcon, null), "\u5DF2\u9644\u6587\u4EF6"), (value || meta?.docUrl) && /*#__PURE__*/React.createElement(MetaLine, {
     meta: meta,
     showManagerTag: showManagerTag,
     className: "text-[10px] text-slate-500 mt-0.5"
@@ -5156,7 +5260,9 @@ function WeeklyReportDashboard({
       lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}${log.docUrl ? `\n      📎 ${log.docUrl}` : ''}`);
     });
     if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
+    if (s.extraMeta?.docUrl) lines.push(`      📎 ${s.extraMeta.docUrl}`);
     if (s.weekPlan) lines.push(`  (下週預計) ${s.weekPlan.replace(/\n/g, ' / ')}`);
+    if (s.planMeta?.docUrl) lines.push(`      📎 ${s.planMeta.docUrl}`);
     if (s.comment) lines.push(`  (主管回覆) ${s.comment.replace(/\n/g, ' / ')}`);
     lines.push('');
     return lines.join('\n');
@@ -5166,7 +5272,8 @@ function WeeklyReportDashboard({
   const buildReportText = () => {
     const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} ${showTeamView ? '團隊週報' : '週報 — ' + currentUser}】`, ''];
     visibleSummary.forEach(s => {
-      if (s.activeTasks.length === 0 && !s.extraNote && !s.weekPlan) return;
+      // 只附了文件、沒打字的人也要出現(否則他的連結不會進週報文字)
+      if (s.activeTasks.length === 0 && !s.extraNote && !s.weekPlan && !s.extraMeta?.docUrl && !s.planMeta?.docUrl) return;
       lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}・得分 ${s.weekScore}/${s.total}）`);
       s.activeTasks.forEach(({
         proj,
@@ -5176,7 +5283,9 @@ function WeeklyReportDashboard({
         lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}${log.docUrl ? `\n      📎 ${log.docUrl}` : ''}`);
       });
       if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
+      if (s.extraMeta?.docUrl) lines.push(`      📎 ${s.extraMeta.docUrl}`);
       if (s.weekPlan) lines.push(`  (下週預計) ${s.weekPlan.replace(/\n/g, ' / ')}`);
+      if (s.planMeta?.docUrl) lines.push(`      📎 ${s.planMeta.docUrl}`);
       if (s.comment) lines.push(`  (主管回覆) ${s.comment.replace(/\n/g, ' / ')}`);
       lines.push('');
     });
@@ -5286,17 +5395,29 @@ function WeeklyReportDashboard({
     className: `space-y-2.5 ${narrowPanel ? 'border-t border-slate-200 pt-2' : 'md:border-l md:border-slate-100 md:pl-4'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-bold text-slate-500 border-b border-slate-200 pb-1"
-  }, "\uD83D\uDCDD \u65E5\u5E38\u71DF\u904B / \u81E8\u6642\u4EA4\u8FA6\uFF08\u975E\u5C08\u6848\uFF09"), extraNote ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCDD \u65E5\u5E38\u71DF\u904B / \u81E8\u6642\u4EA4\u8FA6\uFF08\u975E\u5C08\u6848\uFF09"), extraNote || extraMeta?.docUrl ? /*#__PURE__*/React.createElement("div", null, extraNote ? /*#__PURE__*/React.createElement("div", {
     className: "text-sm text-slate-700 bg-orange-50 p-3 rounded-lg border border-orange-200 whitespace-pre-wrap"
-  }, extraNote), /*#__PURE__*/React.createElement(MetaLine, {
+  }, extraNote) : /*#__PURE__*/React.createElement("div", {
+    className: "text-sm text-slate-500 italic py-1"
+  }, "\uFF08\u672A\u586B\u5BEB\u6587\u5B57\uFF0C\u50C5\u9644\u6587\u4EF6\uFF09"), extraMeta?.docUrl && /*#__PURE__*/React.createElement("div", {
+    className: "mt-1.5"
+  }, /*#__PURE__*/React.createElement(DocLink, {
+    url: extraMeta.docUrl
+  })), /*#__PURE__*/React.createElement(MetaLine, {
     meta: extraMeta
   })) : /*#__PURE__*/React.createElement("div", {
     className: "text-sm text-slate-500 italic py-2"
   }, "\u7121\u586B\u5BEB\u5176\u4ED6\u9805\u76EE"), /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-bold text-slate-500 border-b border-slate-200 pb-1 pt-1"
-  }, "\uD83D\uDCC5 \u4E0B\u9031\u9810\u8A08\u57F7\u884C\u5DE5\u4F5C"), weekPlan ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCC5 \u4E0B\u9031\u9810\u8A08\u57F7\u884C\u5DE5\u4F5C"), weekPlan || planMeta?.docUrl ? /*#__PURE__*/React.createElement("div", null, weekPlan ? /*#__PURE__*/React.createElement("div", {
     className: "text-sm text-slate-700 bg-indigo-50 p-3 rounded-lg border border-indigo-200 whitespace-pre-wrap"
-  }, weekPlan), /*#__PURE__*/React.createElement(MetaLine, {
+  }, weekPlan) : /*#__PURE__*/React.createElement("div", {
+    className: "text-sm text-slate-500 italic py-1"
+  }, "\uFF08\u672A\u586B\u5BEB\u6587\u5B57\uFF0C\u50C5\u9644\u6587\u4EF6\uFF09"), planMeta?.docUrl && /*#__PURE__*/React.createElement("div", {
+    className: "mt-1.5"
+  }, /*#__PURE__*/React.createElement(DocLink, {
+    url: planMeta.docUrl
+  })), /*#__PURE__*/React.createElement(MetaLine, {
     meta: planMeta
   })) : /*#__PURE__*/React.createElement("div", {
     className: "text-sm text-slate-500 italic py-2"
@@ -5408,7 +5529,8 @@ function WeeklyReportDashboard({
         weekPlan,
         total
       } = s;
-      if (activeTasks.length === 0 && !extraNote && !weekPlan && pendingTasks.length === 0) return null;
+      // 只附了文件、沒打字的人也要有卡片(否則他的連結整個看不到)
+      if (activeTasks.length === 0 && !extraNote && !weekPlan && pendingTasks.length === 0 && !s.extraMeta?.docUrl && !s.planMeta?.docUrl) return null;
       const isExpanded = showTeamView ? expandedUsers.has(user) : true; // 個人模式固定展開
       const isCopiedUser = copiedUser === user;
       // 進度條改「分段組成」:一條就同時表達回報率與狀態分佈,取代原本 ✅/👁️/❗ 三顆晶片。

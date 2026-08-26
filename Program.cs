@@ -201,11 +201,15 @@ app.MapGet("/api/bootstrap", async (int? year) =>
             }
         }
 
-        // extraNotes[userName][week] = note；extraNoteMeta[userName][week] = { by, byRole, at }(最後編輯人/時間)
+        // extraNotes[userName][week] = note；extraNoteMeta[userName][week] = { by, byRole, at, docUrl }
+        // ⚠ docUrl 放在 *Meta 而不是另開一組 map:內容本身是純字串(前端到處都是 `extraNotes[u]?.[w] || ''`),
+        //   改成物件會動到十幾個取值點;而 meta 物件本來就跟著內容一路傳到每個顯示/編輯的地方
+        //   (彈窗的 meta prop、看板的 extraMeta/planMeta、代修面板),放這裡零新增 prop、也不會漏掉任何一處。
+        //   MetaLine 只讀 by/byRole/at,多一個欄位不影響。weeklyPlanMeta 同理。
         var extraNotes = new Dictionary<string, Dictionary<int, string>>();
         var extraNoteMeta = new Dictionary<string, Dictionary<int, object>>();
         using (var cmd = new SqlCommand(@"
-            SELECT u.UserName, e.WeekNo, e.Note, u2.UserName, u2.Role, e.UpdatedAt
+            SELECT u.UserName, e.WeekNo, e.Note, u2.UserName, u2.Role, e.UpdatedAt, e.DocUrl
             FROM dbo.ExtraNotes e
             JOIN dbo.Users u ON u.UserId = e.UserId
             LEFT JOIN dbo.Users u2 ON u2.UserId = e.UpdatedByUserId
@@ -225,7 +229,8 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                 {
                     by = r.IsDBNull(3) ? null : r.GetString(3),
                     byRole = r.IsDBNull(4) ? null : r.GetString(4),
-                    at = r.GetDateTime(5).ToString("yyyy-MM-dd HH:mm")
+                    at = r.GetDateTime(5).ToString("yyyy-MM-dd HH:mm"),
+                    docUrl = r.IsDBNull(6) ? null : r.GetString(6)
                 };
             }
         }
@@ -259,11 +264,11 @@ app.MapGet("/api/bootstrap", async (int? year) =>
             }
         }
 
-        // weeklyPlans[userName][week] = 下週預計執行工作(填寫於該週)；weeklyPlanMeta 同步帶最後編輯人/時間
+        // weeklyPlans[userName][week] = 下週預計執行工作(填寫於該週)；weeklyPlanMeta = { by, byRole, at, docUrl }
         var weeklyPlans = new Dictionary<string, Dictionary<int, string>>();
         var weeklyPlanMeta = new Dictionary<string, Dictionary<int, object>>();
         using (var cmd = new SqlCommand(@"
-            SELECT u.UserName, wp.WeekNo, wp.Note, u2.UserName, u2.Role, wp.UpdatedAt
+            SELECT u.UserName, wp.WeekNo, wp.Note, u2.UserName, u2.Role, wp.UpdatedAt, wp.DocUrl
             FROM dbo.WeeklyPlans wp
             JOIN dbo.Users u ON u.UserId = wp.UserId
             LEFT JOIN dbo.Users u2 ON u2.UserId = wp.UpdatedByUserId
@@ -283,7 +288,8 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                 {
                     by = r.IsDBNull(3) ? null : r.GetString(3),
                     byRole = r.IsDBNull(4) ? null : r.GetString(4),
-                    at = r.GetDateTime(5).ToString("yyyy-MM-dd HH:mm")
+                    at = r.GetDateTime(5).ToString("yyyy-MM-dd HH:mm"),
+                    docUrl = r.IsDBNull(6) ? null : r.GetString(6)
                 };
             }
         }
@@ -335,6 +341,8 @@ app.MapPost("/api/weekly-log", async (WeeklyLogReq req) =>
 // 3) 非專案事項 — usp_UpsertExtraNote
 app.MapPost("/api/extra-note", async (ExtraNoteReq req) =>
 {
+    var docErr = ValidateDocUrl(req.DocUrl);
+    if (docErr is not null) return docErr;
     try
     {
         using var conn = new SqlConnection(ConnStr());
@@ -347,6 +355,8 @@ app.MapPost("/api/extra-note", async (ExtraNoteReq req) =>
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        // 空字串照樣送:SP 內 NULLIF 會轉成 NULL,使用者才能把已填的連結清空
+        cmd.Parameters.AddWithValue("@DocUrl", (object?)req.DocUrl?.Trim() ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -356,6 +366,8 @@ app.MapPost("/api/extra-note", async (ExtraNoteReq req) =>
 // 3.1) 下週預計執行工作 — usp_UpsertWeeklyPlan
 app.MapPost("/api/weekly-plan", async (WeeklyPlanReq req) =>
 {
+    var docErr = ValidateDocUrl(req.DocUrl);
+    if (docErr is not null) return docErr;
     try
     {
         using var conn = new SqlConnection(ConnStr());
@@ -368,6 +380,7 @@ app.MapPost("/api/weekly-plan", async (WeeklyPlanReq req) =>
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@DocUrl", (object?)req.DocUrl?.Trim() ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -711,6 +724,20 @@ app.MapGet("/api/audit-log", async (int? top, string? from, string? to, string? 
             return i > 0 ? (s[..i], s[(i + 4)..].Insert(0, "W")) : (s, "");
         }
 
+        // 從 Detail 取出「新的文件連結」。兩種 Detail 格式共用同一個解析:
+        //   打卡      = doc舊=… | doc新=… | note舊=… | note新=…（doc 之後還有 note，要切掉）
+        //   非專案/下週預計 = doc舊=… | doc新=…（doc新 直接到結尾）
+        // 遷移 16/17 之前的舊紀錄沒有 doc 段落 → 回空字串,不影響既有白話翻譯。
+        static string ExtractNewDoc(string? detail)
+        {
+            var d = detail ?? "";
+            var i = d.IndexOf("doc新=", StringComparison.Ordinal);
+            if (i < 0) return "";
+            var rest = d[(i + 5)..];
+            var end = rest.IndexOf(" | note舊=", StringComparison.Ordinal);
+            return (end >= 0 ? rest[..end] : rest).Trim();
+        }
+
         string Summarize(string action, string entityType, string? entityId, string? oldV, string? newV, string? detail, string? fieldName = null)
         {
             try
@@ -742,14 +769,8 @@ app.MapGet("/api/audit-log", async (int? top, string? from, string? to, string? 
                             var note = detail![(idx + 6)..].Trim();
                             if (note != "") s += $"，工作說明：{note}";
                         }
-                        var dIdx = (detail ?? "").IndexOf("doc新=", StringComparison.Ordinal);
-                        if (dIdx >= 0)
-                        {
-                            var rest = detail![(dIdx + 5)..];
-                            var end = rest.IndexOf(" | note舊=", StringComparison.Ordinal);
-                            var doc = (end >= 0 ? rest[..end] : rest).Trim();
-                            if (doc != "") s += $"，文件連結：{doc}";
-                        }
+                        var doc = ExtractNewDoc(detail);
+                        if (doc != "") s += $"，文件連結：{doc}";
                         return s;
                     }
                     case "ExtraNote":     // entityId = 裕隆@2026W27,NewValue = 內容
@@ -766,6 +787,10 @@ app.MapGet("/api/audit-log", async (int? top, string? from, string? to, string? 
                         var what = entityType == "WeeklyPlan" ? "下週預計執行工作" : "非專案事項";
                         var s = $"填寫 {who} {y} 年第 {w} 週的{what}";
                         if (!string.IsNullOrWhiteSpace(newV)) s += $"：{newV}";
+                        // 遷移 17 起這兩類也有文件連結(放 Detail;OldValue/NewValue 維持只放內容,
+                        // 既有「內容未變更」的比對邏輯不受影響)
+                        var noteDoc = ExtractNewDoc(detail);
+                        if (noteDoc != "") s += $"，文件連結：{noteDoc}";
                         return s;
                     }
                     case "Project":
@@ -971,6 +996,8 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
         var userOrder = new List<string>();
         var extraD = new Dictionary<string, string>();
         var planD = new Dictionary<string, string>();
+        var extraDocD = new Dictionary<string, string>();   // 非專案事項的文件連結(選填)
+        var planDocD = new Dictionary<string, string>();    // 下週預計的文件連結(選填)
         using (var conn = new SqlConnection(ConnStr()))
         {
             await conn.OpenAsync();
@@ -998,7 +1025,7 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
             using (var r = await cmd.ExecuteReaderAsync())
                 while (await r.ReadAsync()) userOrder.Add(r.GetString(0));
             using (var cmd = new SqlCommand(@"
-                SELECT u.UserName, e.Note
+                SELECT u.UserName, e.Note, e.DocUrl
                 FROM dbo.ExtraNotes e
                 JOIN dbo.Users u ON u.UserId = e.UserId
                 WHERE e.ScheduleYear = @y AND e.WeekNo = @w", conn))
@@ -1007,10 +1034,13 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
                 cmd.Parameters.AddWithValue("@w", w);
                 using var r = await cmd.ExecuteReaderAsync();
                 while (await r.ReadAsync())
+                {
                     extraD[r.GetString(0)] = r.IsDBNull(1) ? "" : r.GetString(1);
+                    if (!r.IsDBNull(2)) extraDocD[r.GetString(0)] = r.GetString(2);
+                }
             }
             using (var cmd = new SqlCommand(@"
-                SELECT u.UserName, wp.Note
+                SELECT u.UserName, wp.Note, wp.DocUrl
                 FROM dbo.WeeklyPlans wp
                 JOIN dbo.Users u ON u.UserId = wp.UserId
                 WHERE wp.ScheduleYear = @y AND wp.WeekNo = @w", conn))
@@ -1019,7 +1049,10 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
                 cmd.Parameters.AddWithValue("@w", w);
                 using var r = await cmd.ExecuteReaderAsync();
                 while (await r.ReadAsync())
+                {
                     planD[r.GetString(0)] = r.IsDBNull(1) ? "" : r.GetString(1);
+                    if (!r.IsDBNull(2)) planDocD[r.GetString(0)] = r.GetString(2);
+                }
             }
         }
 
@@ -1050,14 +1083,8 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
             ws.Cell(row, 7).Value = t.Status is null ? "未回報" : (statusLabel.GetValueOrDefault(t.Status, t.Status));
             ws.Cell(row, 8).Value = t.Note ?? "";
             // 文件連結:Excel 對 UNC 路徑(\\server\share\…)的超連結是可以直接開的——
-            // 瀏覽器反而不行(見前端 DocLink 的說明),所以匯出檔在內網其實是最順的開啟路徑。
-            // 個別網址格式無法建立超連結時只留純文字,不要讓整份匯出失敗。
-            if (!string.IsNullOrWhiteSpace(t.DocUrl))
-            {
-                var linkCell = ws.Cell(row, 9);
-                linkCell.Value = t.DocUrl;
-                try { linkCell.SetHyperlink(new ClosedXML.Excel.XLHyperlink(t.DocUrl!)); } catch { }
-            }
+            // 瀏覽器則要靠網域政策放行(見前端 DocLink 的說明),所以匯出檔在內網常是最穩的開啟路徑。
+            PutLink(ws, row, 9, t.DocUrl);
             var st = ws.Cell(row, 7).Style;
             st.Font.Bold = true;
             st.Fill.BackgroundColor = t.Status switch
@@ -1079,30 +1106,47 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
 
         // --- Sheet 2:非專案事項 + 下週預計工作 ---
         var ws2 = wb.Worksheets.Add($"W{w:00} 非專案事項");
-        ws2.Cell(1, 1).Value = "成員"; ws2.Cell(1, 2).Value = "非專案工作內容"; ws2.Cell(1, 3).Value = "下週預計執行工作";
-        var head2 = ws2.Range(1, 1, 1, 3);
+        ws2.Cell(1, 1).Value = "成員"; ws2.Cell(1, 2).Value = "非專案工作內容"; ws2.Cell(1, 3).Value = "非專案文件連結";
+        ws2.Cell(1, 4).Value = "下週預計執行工作"; ws2.Cell(1, 5).Value = "下週預計文件連結";
+        var head2 = ws2.Range(1, 1, 1, 5);
         head2.Style.Font.Bold = true;
         head2.Style.Font.FontColor = ClosedXML.Excel.XLColor.White;
         head2.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromArgb(0xEA, 0x58, 0x0C);
         int row2 = 2;
+        // 連結欄與 Sheet1 一樣做成真正可點的超連結(Excel 對 UNC 沒有瀏覽器那層限制);
+        // 個別格式無法建立超連結時只留純文字,不要讓整份匯出失敗
+        void PutLink(ClosedXML.Excel.IXLWorksheet sheet, int r, int c, string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return;
+            var cell = sheet.Cell(r, c);
+            cell.Value = url;
+            try { cell.SetHyperlink(new ClosedXML.Excel.XLHyperlink(url)); } catch { }
+        }
         foreach (var u in userOrder)
         {
             var extra = extraD.GetValueOrDefault(u, "");
             var plan = planD.GetValueOrDefault(u, "");
-            if (extra == "" && plan == "") continue;
+            var extraDoc = extraDocD.GetValueOrDefault(u, "");
+            var planDoc = planDocD.GetValueOrDefault(u, "");
+            // 只有連結沒有內容也要出現(內容可清空、連結留著),否則那一列會整個消失
+            if (extra == "" && plan == "" && extraDoc == "" && planDoc == "") continue;
             ws2.Cell(row2, 1).Value = u;
             ws2.Cell(row2, 2).Value = extra;
-            ws2.Cell(row2, 3).Value = plan;
+            PutLink(ws2, row2, 3, extraDoc);
+            ws2.Cell(row2, 4).Value = plan;
+            PutLink(ws2, row2, 5, planDoc);
             row2++;
         }
-        var used2 = ws2.Range(1, 1, Math.Max(row2 - 1, 1), 3);
+        var used2 = ws2.Range(1, 1, Math.Max(row2 - 1, 1), 5);
         used2.Style.Border.InsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
         used2.Style.Border.OutsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
         ws2.Column(1).AdjustToContents();
         ws2.Column(2).Width = 55;
         ws2.Column(2).Style.Alignment.WrapText = true;
-        ws2.Column(3).Width = 45;
-        ws2.Column(3).Style.Alignment.WrapText = true;
+        ws2.Column(3).Width = 40;
+        ws2.Column(4).Width = 45;
+        ws2.Column(4).Style.Alignment.WrapText = true;
+        ws2.Column(5).Width = 40;
         ws2.SheetView.FreezeRows(1);
 
         using var ms = new MemoryStream();
@@ -1592,7 +1636,7 @@ class TaskItemDto
 
 // ActorEmpId = 前端 /api/whoami 偵測到的 Windows 工號(如 00058897);非網域環境為 null,由 apiPost 自動附帶
 record WeeklyLogReq(string TaskCode, int Year, int Week, string Status, string? Note, string Actor, string? ActorRole, string? ActorEmpId, string? DocUrl = null);
-record ExtraNoteReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole, string? ActorEmpId);
+record ExtraNoteReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole, string? ActorEmpId, string? DocUrl = null);
 record TaskScheduleReq(string TaskCode, string Name, int Start, int End, string Actor, string? ActorRole, string? ActorEmpId, string? Nid);
 record ProjectCreateReq(string Type, string Category, string Owner, string Name, int Year, string Actor, string? ActorRole, string? ActorEmpId, string? Nid);
 record ProjectUpdateReq(int ProjectId, string Type, string Category, string Owner, string Name, string Actor, string? ActorRole, string? ActorEmpId, string? Nid);
@@ -1603,7 +1647,7 @@ record TaskDeleteReq(string TaskCode, string Actor, string? ActorRole, string? A
 record UserCreateReq(string UserName, string Actor, string? ActorRole, string? ActorEmpId);
 record UserUpdateReq(string UserName, string NewName, string Actor, string? ActorRole, string? ActorEmpId);
 record UserDeleteReq(string UserName, string Actor, string? ActorRole, string? ActorEmpId);
-record WeeklyPlanReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole, string? ActorEmpId);
+record WeeklyPlanReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole, string? ActorEmpId, string? DocUrl = null);
 record WeeklyCommentReq(string UserName, int Year, int Week, string? Comment, string Actor, string? ActorRole, string? ActorEmpId);
 record DeliverableReq(int ProjectId, string? Deliverable, string? MpSaving, string Actor, string? ActorRole, string? ActorEmpId);
 record ScoreReq(string TaskCode, int Year, int Week, decimal Score, string Actor, string? ActorRole, string? ActorEmpId);

@@ -13,14 +13,44 @@ MSD 專案追蹤總表：ASP.NET Core 9 Minimal API＋React SPA＋SQL Server。
 
 - **使用者**：6 位成員＋管理部主管；登入畫面點選（身分持久化 localStorage），Windows 工號由 `/api/whoami` 自動偵測。
 - **年度**：2026（53 週）為主，2027（52 週）已建；開新年度 `EXEC dbo.usp_EnsureScheduleYear <年>;`。
-- **環境**：開發＝Sariel\Gantt（另有 Gantt2 測試庫）；遠端正式主機基準＝old.sql+new.sql，增量遷移 10~15。
+- **環境**：開發＝Sariel\Gantt（另有 Gantt2 測試庫）；遠端正式主機基準＝old.sql+new.sql，增量遷移 10~17。
 - **系統開關現況**：`AllowRetroCheckin=false`、`AccessControlEnabled=false`（本機留示範規則 DEPT_3=MSD 一條）。
 - **深色模式／版面自適應／無障礙**：已完成三輪稽核並定案，細節與所有「踩過的坑」全部寫在 `CLAUDE.md`
   （中性表面階梯、彩色亮度階梯、投影機對比模型、凍結欄與看板寬度公式、焦點管理與 `clickable`）。
   現行實測基準：**淺色 螢幕 0／投影50 0／投影30 1；深色 螢幕 0／投影50 0／投影30 47**
   （深色 30:1 那批全是 4.41 的 `text-slate-600`，要清掉得動全站色階，已評估後不做）。
 
-## 最近一次變更（2026-08-25：打卡回報加「📎 文件連結」）
+## 最近一次變更（2026-08-26：非專案事項／下週預計 也加文件連結）
+
+**需求**：遷移 16 只有打卡有文件連結，另外兩個回報項目沒有 —— 同一份週報三個欄位兩種能力，使用者要求一致。
+
+**DB（遷移 17，本機已套用；遠端待執行）**：`ExtraNotes.DocUrl`／`WeeklyPlans.DocUrl NVARCHAR(500) NULL`
+＋兩支 upsert SP 加選填 `@DocUrl`。
+⚠ **稽核寫法與打卡刻意不同**：這兩支的 OldValue/NewValue 本來就是「內容全文」、白話翻譯靠比對它們判斷
+「內容未變更」，所以文件連結放**沒被用到的 Detail** 欄（`doc舊=…|doc新=…`），不動 Old/NewValue。
+後端 `ExtractNewDoc()` 一個函式同時解析兩種 Detail 格式。
+
+**資料結構決策**：`extraNotes`／`weeklyPlans` 的內容是**純字串** map，所以 `docUrl` 放進
+`extraNoteMeta`／`weeklyPlanMeta`（＝`{by,byRole,at,docUrl}`）。理由：內容改成物件要動十幾個
+`?.[week] || ''` 取值點，而 meta 本來就一路傳到每個顯示／編輯的地方，放這裡零新增 prop、不會漏掉任何一處。
+
+**前端**：抽出共用的 `<DocUrlField>`（輸入欄）與 `validateDocInput()`（送出前驗證），三個表單共用同一份，
+TaskModal 也一併改用。編輯時欄位旁多一顆**就地試開**的圖示（不必存檔→回看板→再點一次才發現貼錯）。
+⚠ 主管代修面板那一列整個是 `<button>`，**不能再塞可點的 `<a>`**（巢狀互動元素是無效 HTML、
+且點連結會順便觸發「編輯」），只標示「已附文件」。
+⚠ 「內容清空但連結還在」的列要照樣顯示 —— 看板卡片、週報文字、Excel 的過濾條件都要把 docUrl 算進去；
+彈窗的「清空內容／清空重填」按鈕字樣同理。
+
+**實測**（本機 Sariel\Gantt）：兩支端點 `javascript:` 400／超長 400／https 與 UNC 存取皆正確；
+bootstrap 的 meta 帶出 `docUrl`；稽核白話兩類都顯示「，文件連結：…」；看板兩個區塊各出現 24×24 圖示連結
+（href 為 https 原樣／`file://fileserver/...`）；代修面板兩列都顯示「已附文件」徽章；
+兩個彈窗都帶出已存連結＋就地試開連結；`portal.example.com/x` 失焦補成 `https://`；
+前端 `javascript:` 擋下不發請求；清空連結存回 NULL 且內容保留、按鈕維持「送出」；
+Excel Sheet2 多兩欄且 `sheet2.xml.rels` 產出 https 與 UNC 兩個外部超連結；
+`check-dark-coverage.js` 通過、bootstrap 回歸 69 專案 7 成員、無新 console 錯誤。
+⚠ 驗證用的 ExtraNotes／WeeklyPlans 各 1 筆（裕隆 W35，事前確認全表該週 0 筆）已刪除還原；AuditLog 保留未動。
+
+## 上一次變更（2026-08-25：打卡回報加「📎 文件連結」）
 
 **需求**：主管讀週報時最常做的下一個動作就是「把那份文件打開」，原本得自己去信件／檔案總管翻。
 回報時順手貼上連結，看板與打卡彈窗直接點開。
@@ -61,7 +91,7 @@ rel="noopener noreferrer">` 且**恰好 24×24 無文字**（href 實測：https
 切換主題前的舊色（誤判成「深色映射失效」）。判讀前要先 `style.transitionProperty='none'` 取終值。
 （`CLAUDE.md` 早就有「寬度變化不要加 transition」那條，同一個坑的另一面。）
 
-## 上一次變更（2026-08-25：修正看板與彈窗的疊層順序）
+## 更早（2026-08-25：修正看板與彈窗的疊層順序）
 
 **使用者回報**：開著「團隊總結看板」時再點甘特條開啟專案排程／打卡彈窗，彈窗被壓在看板下方，
 右上角 ✕ 按不到 → 得先關看板才關得掉彈窗。
@@ -139,8 +169,9 @@ ESC 優先序原本就正確（`selectedTaskInfo` 排在 `showWeeklyReport` 之�
 
 ## 目前待辦事項
 
-1. **遠端 DB 遷移**：確認遠端是否已依序執行 `10→11→12→13→14→15→16`（未執行則需執行）；Gantt2 測試庫缺 11~16。
-   ⚠ **遷移 16 是本次新增功能的前提**：沒跑的話 `/api/bootstrap` 會因為 `WeeklyLogs.DocUrl` 不存在而整包失敗。
+1. **遠端 DB 遷移**：確認遠端是否已依序執行 `10→…→16→17`（未執行則需執行）；Gantt2 測試庫缺 11~17。
+   ⚠ **遷移 16／17 是文件連結功能的前提**：沒跑的話 `/api/bootstrap` 會因為 `DocUrl` 欄位不存在而**整包失敗**
+   （三張表都會查到，等於整個系統開不起來）。部署新版程式前務必先跑完這兩支。
 2. **安全性——連線字串明碼密碼**：`appsettings.json` 含 SQL 明碼密碼且存在於 GitHub（lousyqq/Gantt）歷史；
    應改環境變數／IIS 組態覆蓋，必要時更改 SQL 密碼並將 repo 設為 private（或 git filter-repo 清歷史）。
    ⚠ 2026-08-10 稽核時未動此項——它屬於部署組態，改動會影響開發機連線。

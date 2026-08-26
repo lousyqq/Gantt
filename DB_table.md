@@ -7,9 +7,9 @@
 
 | 環境 | 說明 | 已執行 |
 |------|------|--------|
-| 遠端正式主機 | 線上正式資料，只能跑增量遷移 | `old.sql` → `new.sql`（=01~09 基準）；**10~16 需依編號順序執行（若尚未）** |
-| 本機開發 `Sariel\Gantt` | 開發／驗證用 | 全部（old+new+10~16） |
-| 本機測試 `Sariel\Gantt2` | 切換連線字串測試用 | old+new+10（2026-07-16 補跑）；11~16 未套用 |
+| 遠端正式主機 | 線上正式資料，只能跑增量遷移 | `old.sql` → `new.sql`（=01~09 基準）；**10~17 需依編號順序執行（若尚未）** |
+| 本機開發 `Sariel\Gantt` | 開發／驗證用 | 全部（old+new+10~17） |
+| 本機測試 `Sariel\Gantt2` | 切換連線字串測試用 | old+new+10（2026-07-16 補跑）；11~17 未套用 |
 
 - **`old.sql`＋`new.sql` 不可修改**：兩檔＝遠端已執行完畢的架構基準（2026-07-12 以臨時 DB 逐項指紋驗證與正式架構一致）。
 - `backup_sql/` 內 01~09 逐檔僅供參考，勿執行勿修改。
@@ -28,8 +28,8 @@
 | Projects | 專案主檔 | TypeCode、Category、OwnerUserId、Name、ScheduleYear、SortOrder、IsDeleted、Deliverable、MpSaving、IsStarred、NID |
 | Tasks | 計畫區間 | TaskCode(`t{ProjectId}-{seq}`)、StartWeek/EndWeek(CHECK 1..53)、SortOrder、IsDeleted、NID |
 | WeeklyLogs | 每週打卡 | TaskId×Year×Week 唯一、Status、Note、**DocUrl**(文件連結,選填)、Score DECIMAL(2,1) DEFAULT 1、ReportedByUserId、UpdatedAt |
-| ExtraNotes | 非專案事項 | UserId×Year×Week 唯一、Note、UpdatedByUserId、UpdatedAt |
-| WeeklyPlans | 下週預計工作 | 同 ExtraNotes 結構 |
+| ExtraNotes | 非專案事項 | UserId×Year×Week 唯一、Note、**DocUrl**(文件連結,選填)、UpdatedByUserId、UpdatedAt |
+| WeeklyPlans | 下週預計工作 | 同 ExtraNotes 結構（含 DocUrl） |
 | WeeklyComments | 主管週報回覆 | UserId×Year×Week 唯一、Comment(空字串=已清空)、UpdatedByUserId、UpdatedAt |
 | AuditLog | 操作稽核 | ActorName、ActorRole、**ActorEmpId**(Windows 工號)、Action、EntityType、EntityId、Old/NewValue、Detail、CreatedAt |
 | AppSettings | 系統設定 KV | KeyName PK、Value；現有鍵：AllowRetroCheckin、AccessControlEnabled |
@@ -179,5 +179,22 @@ usp_ToggleProjectStar、usp_EnsureScheduleYear、usp_SetAppSetting、usp_AddAcce
 - 已套用本機 Gantt（驗證：https 網址與 UNC 路徑存取皆正確、清空欄位存回 NULL、
   稽核白話顯示「…，文件連結：…」、週報 Excel 多一欄「文件連結」且 UNC 產生真正可點的外部超連結）。
   **遠端需執行（順序 …→15→16）**；Gantt2 未套用。
+
+## 2026-08-26 — 遷移 17：非專案事項／下週預計 也加「文件連結」（17_add_note_docurl.sql）
+- 需求：遷移 16 只有打卡有文件連結，另外兩個回報項目沒有，同一份週報裡三個欄位兩種能力，使用者要求一致。
+- `ExtraNotes.DocUrl NVARCHAR(500) NULL`、`WeeklyPlans.DocUrl NVARCHAR(500) NULL`
+  （型別與 `WeeklyLogs.DocUrl` 完全一致——三處是同一種東西，不要各用各的長度）。
+- `CREATE OR ALTER usp_UpsertExtraNote`／`usp_UpsertWeeklyPlan`：加**選填** `@DocUrl NVARCHAR(500)=NULL`
+  （放參數清單最後，舊呼叫端未傳時行為完全不變），`NULLIF(LTRIM(RTRIM(@DocUrl)),N'')` 空白存 NULL。
+- ⚠ **稽核寫法與遷移 16 的打卡刻意不同**：這兩支 SP 的 OldValue/NewValue 本來就是「內容全文」、
+  且 Detail 欄一直沒用到，所以文件連結放 **Detail**＝`doc舊=… | doc新=…`，OldValue/NewValue 維持只放內容
+  → 既有「比對新舊值判斷內容未變更」的白話翻譯完全不受影響。
+  打卡那支則是 Detail 已被 note 佔用，才需要「doc 排在 note 之前」那條規則。
+  後端 `ExtractNewDoc()` 一個函式同時解析兩種格式（`doc新=` 之後，遇到 ` | note舊=` 就切掉）。
+- 兩者皆為 NULL 時 Detail 寫 NULL，不留 `doc舊= | doc新=` 這種空殼字串（既有紀錄的樣子不變）。
+- 冪等（`COL_LENGTH` 檢查欄位、`CREATE OR ALTER`）；SP 以 `QUOTED_IDENTIFIER ON` 建立。
+- 已套用本機 Gantt（驗證：https 與 UNC 皆正確存取、清空存回 NULL、稽核白話顯示「…，文件連結：…」、
+  週報 Excel 的 Sheet2 多「非專案文件連結」「下週預計文件連結」兩欄且產生真正可點的外部超連結）。
+  **遠端需執行（順序 …→16→17）**；Gantt2 未套用。
 
 <!-- 新的 DB 變更請從此行下方繼續追加，勿修改上方任何段落 -->

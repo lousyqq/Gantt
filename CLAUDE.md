@@ -108,9 +108,14 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
 
 **回報**
 - `POST /api/weekly-log`／`/api/extra-note`／`/api/weekly-plan`（下週預計＝**強制項**，計入待回報徽章）
-  - `weekly-log` 另收選填 `docUrl`（文件連結，`WeeklyLogs.DocUrl NVARCHAR(500)`；空字串＝清空，SP 內 NULLIF 轉 NULL）。
+  - **三支都收選填 `docUrl`**（文件連結，各自的 `DocUrl NVARCHAR(500)`；空字串＝清空，SP 內 NULLIF 轉 NULL）。
+    三處是同一種東西，**長度、驗證、前端元件都共用一份**，不要各做各的。
     🚨 **`javascript:`／`data:`／`vbscript:` 一律 400 擋掉**（`ValidateDocUrl`）：這個值前端會放進 `<a href>`，
     而且是「主管一定會點」的連結，不擋等於一個儲存型 XSS。前端也擋一次，但擋不住直接打 API，真正的防線在後端。
+    ⚠ `extraNotes`／`weeklyPlans` 的內容本身是**純字串** map，`docUrl` 因此放在 `extraNoteMeta`／`weeklyPlanMeta`
+    的物件裡（＝`{by, byRole, at, docUrl}`）。理由：內容改成物件要動十幾個 `?.[week] || ''` 取值點，
+    而 meta 本來就一路傳到每個顯示／編輯的地方（彈窗 `meta` prop、看板 `extraMeta`/`planMeta`、代修面板），
+    放這裡零新增 prop、也不會漏掉任何一處；`MetaLine` 只讀 by/byRole/at，多一個欄位不影響。
 - `POST /api/weekly-log/score` — 主管評分（0.3/0.5/0.8/0.9/1，SP 檢查權限）
 - `POST /api/weekly-comment` — 主管週報回覆（每人每週一筆，空字串=清空；看板紫色區塊全員可見）
 
@@ -131,6 +136,9 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   ⚠ `WeeklyLog` 的 Detail 是 `doc舊=… | doc新=… | note舊=… | note新=…`（遷移 16 起；之前只有 note 兩段，
   兩種格式都要能解析）。**note 一定排在最後**——工作說明本身可能含 `|` 或換行，所以是用
   `LastIndexOf("note新=")` 之後「整段到結尾」當說明；**新欄位一律往前面加，加在 note 後面會被吃進工作說明裡**。
+  ⚠ `ExtraNote`／`WeeklyPlan` 的文件連結**放 Detail、不動 Old/NewValue**（遷移 17）：這兩類的 Old/NewValue
+  本來就是「內容全文」，白話翻譯靠比對它們判斷「內容未變更」，塞別的東西進去會壞掉。
+  兩種 Detail 格式由同一個 `ExtractNewDoc()` 解析（`doc新=` 之後，遇到 ` | note舊=` 才切）。
   `AppSettings` 原本就漏了，面板上只顯示孤零零的「false」／「true」——同一份清單裡專案類都是完整句子，
   唯獨影響全體權限的設定看不懂改了什麼（已補：「開啟/關閉歷史補登…」「開啟/關閉頁面瀏覽權限卡控…」，
   未知 key 也至少回「變更系統設定「X」：…」不再掉回裸值）。
@@ -441,11 +449,18 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   每列都有「沿用」鈕，把該週的**狀態＋內容一起**帶入本週草稿（`markModalDirty()`，ESC 會跳未儲存確認）。
   ⚠ 沿用鈕只在 `canClockIn` 時顯示——唯讀情境下 textarea 根本不存在，按了不會有任何作用。
   ⚠ 逐列都放沿用鈕（**歷史區逐列保留**）：可以挑任一週，行為一致。
-- **打卡回報的「📎 文件連結」（選填，2026-08-25）**：回報時貼上文件網址／路徑，主管在**團隊總結看板**的卡片上
-  直接點開，不必另外開頁面或翻檔案總管。顯示位置＝看板卡片（併在「狀態／分數／✏️主管」那排徽章裡，
-  不自己佔一整列）、打卡彈窗（可編輯與唯讀兩種版面）、
-  歷史回報逐列、甘特 tooltip（只標「📎 已附文件連結」，tooltip 是 `pointer-events-none` 點不到）、
-  週報 Excel（多一欄，UNC 產生真正可點的超連結）、複製週報文字。「沿用」會連同連結一起帶入（同一份文件常延續數週）。
+- **回報內容的「📎 文件連結」（選填）**：回報時貼上文件網址／路徑，主管在**團隊總結看板**的卡片上
+  直接點開，不必另外開頁面或翻檔案總管。**三個回報項目都有**（打卡＝2026-08-25；非專案事項／下週預計＝2026-08-26），
+  輸入欄一律用共用元件 **`<DocUrlField>`**、送出前驗證一律走 **`validateDocInput()`**
+  ——三處長得一模一樣，抽出來才不會下次只改到其中一個。
+  顯示位置＝看板卡片（打卡的那顆併在「狀態／分數／✏️主管」那排徽章裡，不自己佔一整列；
+  非專案／下週預計則在內容區塊下方）、三個彈窗（可編輯與唯讀兩種版面；編輯時欄位旁就有一顆可**就地試開**，
+  不必存檔→回看板→再點一次才發現貼錯）、歷史回報逐列、主管代修面板（那一列整個是 `<button>`，
+  **不能再塞可點的 `<a>`**，只標示「已附文件」）、甘特 tooltip（只標「📎 已附文件連結」，
+  tooltip 是 `pointer-events-none` 點不到）、週報 Excel（Sheet1 一欄、Sheet2 兩欄，UNC 產生真正可點的超連結）、
+  複製週報文字。「沿用」會連同連結一起帶入（同一份文件常延續數週）。
+  ⚠ **「內容清空但連結還在」的列要照樣顯示**：看板卡片、週報文字、Excel 的過濾條件都要把 docUrl 算進去，
+  只判斷 note 的話那筆連結會憑空消失。同理彈窗的「清空內容／清空重填」按鈕字樣也要看 docUrl。
   一律用共用元件 **`<DocLink url={} stopPropagation={} />`**，**不分來源一律 `<a target="_blank">`，
   點一下就開新分頁**（使用者指示；曾短暫做成「http 開新分頁／路徑類改複製路徑鈕」，
   同一顆圖示點下去兩種結果，使用者預期不到）。
