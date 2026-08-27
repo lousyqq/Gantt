@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MSD 專案追蹤總表 使用者手冊</title>
+<style>
+/* ── 設計代號 ───────────────────────────────────────────────
+   色彩沿用系統本身：品牌深海軍藍 #001F5B、焦點金 #FDD075、
+   深色表面階梯 #1E293B → #334155 → #3E4C61（與產品同一套）。
+   淺色模式的次要文字用 #556274（產品為投影機環境自訂的 slate-500）。
+   字體不外連（內網禁 CDN）：中文走系統字族，資料型文字走等寬字族。
+   ──────────────────────────────────────────────────────── */
+:root{
+  --navy:#001F5B; --navy-2:#0A3178; --gold:#FDD075; --gold-ink:#8A5A08;
+  --ground:#F4F6FA; --surface:#FFFFFF; --surface-2:#EDF1F8;
+  --ink:#0E1726; --ink-2:#31415A; --muted:#556274;
+  --rule:#D3DBE8; --rule-strong:#AEBBCE;
+  --member:#0369A1; --member-bg:#E0F2FE;
+  --manager:#B45309; --manager-bg:#FEF3C7;
+  --exec:#15803D; --exec-bg:#DCFCE7;
+  --danger:#B91C1C; --danger-bg:#FEE2E2;
+  --code-bg:#EEF2F9; --code-ink:#1E3A6E;
+  --shadow:0 1px 2px rgba(14,23,38,.06),0 8px 24px -12px rgba(14,23,38,.18);
+  --rail-w:264px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --navy:#0B2A6B; --navy-2:#12377F; --gold:#FDD075; --gold-ink:#FCD34D;
+    --ground:#131B2B; --surface:#1E293B; --surface-2:#334155;
+    --ink:#E8EEF8; --ink-2:#CBD5E1; --muted:#A3AEC0;
+    --rule:#3E4C61; --rule-strong:#5A6B84;
+    --member:#7DD3FC; --member-bg:#0C3B54;
+    --manager:#FCD34D; --manager-bg:#4A2F09;
+    --exec:#86EFAC; --exec-bg:#0F3D24;
+    --danger:#FCA5A5; --danger-bg:#4C1618;
+    --code-bg:#0F172A; --code-ink:#BFD4F7;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --navy:#0B2A6B; --navy-2:#12377F; --gold:#FDD075; --gold-ink:#FCD34D;
+  --ground:#131B2B; --surface:#1E293B; --surface-2:#334155;
+  --ink:#E8EEF8; --ink-2:#CBD5E1; --muted:#A3AEC0;
+  --rule:#3E4C61; --rule-strong:#5A6B84;
+  --member:#7DD3FC; --member-bg:#0C3B54;
+  --manager:#FCD34D; --manager-bg:#4A2F09;
+  --exec:#86EFAC; --exec-bg:#0F3D24;
+  --danger:#FCA5A5; --danger-bg:#4C1618;
+  --code-bg:#0F172A; --code-ink:#BFD4F7;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:24px}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition:none!important}}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Microsoft JhengHei","Noto Sans TC","PingFang TC","Segoe UI",-apple-system,"Helvetica Neue",sans-serif;
+  font-size:16px; line-height:1.75; -webkit-font-smoothing:antialiased;
+}
+code,kbd,.mono{font-family:"Cascadia Mono",Consolas,"SF Mono",ui-monospace,"Courier New",monospace}
+
+/* ── 版面骨架 ── */
+.wrap{display:grid;grid-template-columns:var(--rail-w) minmax(0,1fr);gap:0;min-height:100vh}
+.rail{
+  position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;
+  background:var(--navy);color:#fff;padding:22px 0 40px;
+}
+.rail-brand{padding:0 22px 18px;border-bottom:1px solid rgba(255,255,255,.16);margin-bottom:14px}
+.rail-brand .mark{display:flex;align-items:center;gap:9px}
+.rail-brand svg{width:20px;height:20px;color:var(--gold);flex:0 0 auto}
+.rail-brand .t{font-weight:800;font-size:15px;letter-spacing:.02em}
+.rail-brand .s{margin-top:4px;font-size:11.5px;color:rgba(255,255,255,.72);letter-spacing:.06em}
+.rail-group{padding:14px 22px 4px;font-size:10.5px;letter-spacing:.18em;color:var(--gold);font-weight:800}
+.rail a{
+  display:block;padding:5px 22px;color:rgba(255,255,255,.82);text-decoration:none;
+  font-size:13px;border-left:3px solid transparent;transition:background .15s,color .15s
+}
+.rail a:hover{background:rgba(255,255,255,.09);color:#fff}
+.rail a.on{background:rgba(255,255,255,.14);color:#fff;border-left-color:var(--gold);font-weight:700}
+.rail a:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+.rail .num{display:inline-block;min-width:2.2em;color:rgba(255,255,255,.5);font-size:11.5px}
+.rail a.on .num{color:var(--gold)}
+
+main{max-width:900px;padding:0 clamp(20px,4vw,56px) 96px;width:100%}
+
+/* ── 頁首 ── */
+.hero{padding:56px 0 34px;border-bottom:2px solid var(--navy)}
+.eyebrow{font-size:11px;letter-spacing:.24em;font-weight:800;color:var(--gold-ink);margin:0 0 14px}
+h1{font-size:clamp(30px,4.4vw,44px);line-height:1.2;margin:0;font-weight:900;letter-spacing:-.015em;text-wrap:balance}
+.lede{margin:16px 0 0;font-size:17px;color:var(--ink-2);max-width:62ch}
+.meta{margin-top:22px;display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted)}
+.meta b{color:var(--ink-2);font-weight:700}
+
+/* ── 角色切換 ── */
+.rolebar{
+  position:sticky;top:0;z-index:20;background:var(--ground);
+  padding:14px 0 12px;margin-bottom:6px;border-bottom:1px solid var(--rule);
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px
+}
+.rolebar .lbl{font-size:12px;font-weight:800;color:var(--muted);margin-right:2px}
+.rolebtn{
+  font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;
+  padding:5px 13px;border-radius:999px;border:1px solid var(--rule-strong);
+  background:var(--surface);color:var(--ink-2);transition:.15s
+}
+.rolebtn:hover{border-color:var(--navy);color:var(--ink)}
+.rolebtn[aria-pressed="true"]{background:var(--navy);border-color:var(--navy);color:#fff}
+.rolebtn:focus-visible{outline:2px solid var(--gold-ink);outline-offset:2px}
+.themebtn{margin-left:auto}
+
+/* ── 章節 ── */
+section{padding:40px 0 8px;border-top:1px solid var(--rule)}
+section:first-of-type{border-top:0}
+section.hidden{display:none}
+h2{
+  font-size:23px;font-weight:900;letter-spacing:-.01em;margin:0 0 6px;
+  display:flex;align-items:baseline;flex-wrap:wrap;gap:10px;text-wrap:balance
+}
+h2 .n{font-size:12.5px;font-weight:800;color:var(--muted);letter-spacing:.1em;flex:0 0 auto}
+h3{font-size:16.5px;font-weight:800;margin:30px 0 8px;color:var(--ink);text-wrap:balance}
+h4{font-size:14px;font-weight:800;margin:20px 0 4px;color:var(--ink-2)}
+p{margin:10px 0;max-width:70ch}
+ul,ol{margin:10px 0;padding-left:1.35em;max-width:70ch}
+li{margin:5px 0}
+li::marker{color:var(--muted)}
+a{color:var(--navy)}
+:root[data-theme="dark"] a,:root:not([data-theme="light"]) a{color:var(--ink)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) a{color:#9DC0FF}}
+
+/* ── 角色標籤 ── */
+.tags{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.tag{
+  font-size:11px;font-weight:800;padding:2px 9px;border-radius:999px;
+  border:1px solid currentColor;letter-spacing:.03em;white-space:nowrap
+}
+.tag.member{color:var(--member);background:var(--member-bg)}
+.tag.manager{color:var(--manager);background:var(--manager-bg)}
+.tag.exec{color:var(--exec);background:var(--exec-bg)}
+.tag.all{color:var(--muted);background:var(--surface-2)}
+
+/* ── 卡片與提示 ── */
+.card{
+  background:var(--surface);border:1px solid var(--rule);border-radius:12px;
+  padding:18px 20px;margin:16px 0;box-shadow:var(--shadow)
+}
+.card>:first-child{margin-top:0}
+.card>:last-child{margin-bottom:0}
+.grid{display:grid;gap:14px;margin:16px 0}
+@media (min-width:720px){.grid.c2{grid-template-columns:1fr 1fr}.grid.c3{grid-template-columns:repeat(3,1fr)}}
+.note{
+  border-left:3px solid var(--navy);background:var(--surface);
+  padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0;font-size:14.5px
+}
+.note.warn{border-left-color:var(--manager)}
+.note.stop{border-left-color:var(--danger)}
+.note .h{font-weight:800;font-size:12.5px;letter-spacing:.06em;margin-bottom:3px;color:var(--muted)}
+.note.warn .h{color:var(--manager)}
+.note.stop .h{color:var(--danger)}
+.note p{margin:4px 0}
+
+/* ── 步驟 ── */
+ol.steps{list-style:none;padding:0;counter-reset:s;margin:14px 0}
+ol.steps>li{
+  counter-increment:s;position:relative;padding:2px 0 2px 42px;margin:12px 0
+}
+ol.steps>li::before{
+  content:counter(s);position:absolute;left:0;top:2px;
+  width:26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;
+  font-size:12.5px;font-weight:800;display:flex;align-items:center;justify-content:center;
+  font-family:"Cascadia Mono",Consolas,ui-monospace,monospace
+}
+ol.steps>li b{display:block;font-weight:800}
+
+/* ── 表格 ── */
+.tablewrap{overflow-x:auto;margin:16px 0;border:1px solid var(--rule);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:480px}
+th,td{padding:9px 13px;text-align:left;border-bottom:1px solid var(--rule);vertical-align:top}
+thead th{
+  background:var(--surface-2);font-size:12px;font-weight:800;letter-spacing:.06em;
+  color:var(--ink-2);white-space:nowrap;position:sticky;top:0
+}
+tbody tr:last-child td{border-bottom:0}
+td.mono,th.mono{font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+code{
+  background:var(--code-bg);color:var(--code-ink);padding:1px 6px;border-radius:5px;
+  font-size:.88em;border:1px solid var(--rule)
+}
+kbd{
+  background:var(--surface);border:1px solid var(--rule-strong);border-bottom-width:2px;
+  border-radius:5px;padding:1px 7px;font-size:.82em;font-weight:700;color:var(--ink-2);
+  white-space:nowrap
+}
+
+/* ── 圖例（重現系統內的甘特色義） ── */
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin:12px 0;font-size:13.5px;align-items:center}
+.legend .i{display:flex;align-items:center;gap:7px}
+.sw{width:22px;height:12px;border-radius:3px;border:1px solid;flex:0 0 auto}
+.sw.plan{background:repeating-linear-gradient(45deg,#FFF6D6,#FFF6D6 3px,#FDEDB8 3px,#FDEDB8 6px);border-color:#B45309}
+.sw.exec{background:#15803D;border-color:#166534}
+.sw.mon{background:#0369A1;border-color:#075985}
+.sw.not{background:#64748B;border-color:#475569}
+.sw.pend{background:var(--surface);border:2px solid #F87171}
+
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;margin:12px 0;font-size:14.5px;align-items:baseline}
+.kv dt{font-weight:800;color:var(--ink-2);white-space:nowrap}
+.kv dd{margin:0;color:var(--ink-2)}
+
+footer{
+  margin-top:56px;padding-top:22px;border-top:2px solid var(--navy);
+  font-size:13px;color:var(--muted)
+}
+
+/* ── 窄螢幕 ── */
+@media (max-width:900px){
+  .wrap{grid-template-columns:1fr}
+  .rail{position:static;height:auto;padding:18px 0 22px}
+  .rail nav{display:flex;flex-wrap:wrap;gap:2px 0}
+  .rail a{border-left:0;border-bottom:3px solid transparent;padding:5px 14px}
+  .rail a.on{border-left:0;border-bottom-color:var(--gold)}
+  .rail-group{width:100%;padding:10px 22px 2px}
+  main{padding-top:0}
+  .hero{padding-top:32px}
+}
+
+/* ── 列印 ── */
+@media print{
+  .rail,.rolebar{display:none}
+  .wrap{display:block}
+  main{max-width:none;padding:0}
+  body{background:#fff;color:#000;font-size:11.5pt}
+  section{page-break-inside:auto;border-top:1px solid #999}
+  h2,h3{page-break-after:avoid}
+  .card,.note,.tablewrap{page-break-inside:avoid;box-shadow:none}
+  a{color:#000;text-decoration:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="rail">
+  <div class="rail-brand">
+    <div class="mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/></svg>
+      <span class="t">MSD 專案追蹤總表</span>
+    </div>
+    <div class="s">使用者手冊</div>
+  </div>
+  <nav id="toc" aria-label="章節目錄"></nav>
+</aside>
+
+<main>
+
+<header class="hero">
+  <p class="eyebrow">MSD 專案追蹤總表</p>
+  <h1>使用者手冊</h1>
+  <p class="lede">每週在甘特圖上回報進度、由主管評分與講評、再由高階主管檢視全年度產出。這份手冊按角色拆開：先看「你這週要做什麼」，需要細節時再往下翻。</p>
+  <div class="meta">
+    <span><b>適用版本</b> 2026-08-26（含三處回報的文件連結）</span>
+    <span><b>年度</b> 2026（53 週）</span>
+    <span><b>使用對象</b> 團隊成員、管理部主管、高階主管</span>
+  </div>
+</header>
+
+<div class="rolebar">
+  <span class="lbl">我的身分</span>
+  <button class="rolebtn" data-role="all" aria-pressed="true">全部內容</button>
+  <button class="rolebtn" data-role="member" aria-pressed="false">成員</button>
+  <button class="rolebtn" data-role="manager" aria-pressed="false">主管</button>
+  <button class="rolebtn" data-role="exec" aria-pressed="false">高階主管</button>
+  <button class="rolebtn themebtn" id="themebtn" aria-pressed="false">切換深色</button>
+</div>
+
+<!-- ══════════ 1 ══════════ -->
+<section id="s-what" data-role="common" data-group="入門" data-title="系統在做什麼">
+  <h2><span class="n">01</span>系統在做什麼<span class="tags"><span class="tag all">全體</span></span></h2>
+  <p>一張橫跨整年的甘特圖，列出每位成員的專案與「計畫區間」（排定的起訖週）。每到一週，成員針對當週有排到的每個區間<strong>打卡回報</strong>；主管據此評分、回覆與講評；高階主管則透過成果清單檢視全年度的具體產出與 MP Saving。</p>
+
+  <h3>每週的節奏</h3>
+  <div class="grid c3">
+    <div class="card">
+      <p class="tags"><span class="tag member">成員</span></p>
+      <p><b>回報三件事</b></p>
+      <p>當週排到的任務打卡、下週預計執行工作（必填）、非專案事項（選填）。全部集中在 header 的「📋 本週回報中心」。</p>
+    </div>
+    <div class="card">
+      <p class="tags"><span class="tag manager">主管</span></p>
+      <p><b>檢視、評分、講評</b></p>
+      <p>用「📊 團隊總結」看板逐人檢視本週回報，給分數、留週報回覆；缺漏的人可一鍵複製名單去催。</p>
+    </div>
+    <div class="card">
+      <p class="tags"><span class="tag exec">高階主管</span></p>
+      <p><b>看產出</b></p>
+      <p>切到「成果清單」，用 KPI 卡片篩出重點關注／有具體產出／有 MP Saving 的專案，需要時匯出 Excel。</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <p class="h">關於「週次」</p>
+    <p>系統的週次是 ISO 週（<strong>週一為一週起始</strong>），由今天的日期自動推算。2026 年共 53 週。header 中央的「系統週數」顯示的就是你目前正在檢視的那一週，不一定等於本週。</p>
+  </div>
+</section>
+
+<!-- ══════════ 2 ══════════ -->
+<section id="s-login" data-role="common" data-group="入門" data-title="登入與身分">
+  <h2><span class="n">02</span>登入與身分<span class="tags"><span class="tag all">全體</span></span></h2>
+  <ol class="steps">
+    <li><b>開啟系統網址</b>由 IT 提供的內網位址（通常是 <code>http://主機/Gantt</code>）。</li>
+    <li><b>在登入畫面點選自己的名字</b>沒有密碼；點下去即進入。身分會記在這台電腦的瀏覽器裡，之後重整或隔天再開都不必重選。</li>
+    <li><b>確認右上角顯示的是你</b>姓名下方會標示「成員／主管」與 Windows 工號。</li>
+  </ol>
+  <p>工號是系統向 Windows 自動取得的（用於稽核紀錄，知道每筆異動是誰在哪台電腦做的）。若你是從非網域環境連線，工號會空白，<strong>不影響任何功能</strong>。</p>
+  <p>要換人使用，按右上角的<strong>登出</strong>圖示；深色／淺色與檢視偏好不會被清除，那屬於這台電腦的使用習慣。</p>
+
+  <div class="note warn">
+    <p class="h">看到「無法瀏覽」畫面</p>
+    <p>系統可由主管開啟「瀏覽權限卡控」，只有名冊內指定部門／工號的人能進入。若你確定自己應該有權限，請把畫面上顯示的工號告訴主管，由主管在「⚙️ 管理 → 瀏覽權限」加入規則。</p>
+  </div>
+</section>
+
+<!-- ══════════ 3 ══════════ -->
+<section id="s-ui" data-role="common" data-group="入門" data-title="畫面導覽">
+  <h2><span class="n">03</span>畫面導覽<span class="tags"><span class="tag all">全體</span></span></h2>
+
+  <h3>由上而下四層</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>區域</th><th>內容</th></tr></thead>
+      <tbody>
+        <tr><td><b>Header</b>（深藍列）</td><td>系統名稱、<b>系統週數</b>（‹ › 或直接輸入數字）、回報／總結入口、⚙️ 管理選單、身分、深色切換、登出。</td></tr>
+        <tr><td><b>工具列</b></td><td>搜尋框、a~e 類型篩選、成員下拉、年度、三種檢視切換、回到本週、緊湊模式、展開／收合。</td></tr>
+        <tr><td><b>概況列</b></td><td>「W○○ 概況」回報完成度、狀態分佈晶片、⏰ 即將到期、甘特色義圖例、鍵盤提示。</td></tr>
+        <tr><td><b>甘特圖</b></td><td>左側凍結欄（No／分類／專案名稱）＋右側 53 週的時間軸。</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>甘特圖上的顏色代表什麼</h3>
+  <div class="legend">
+    <span class="i"><span class="sw plan"></span>計畫區間（排定的起訖週）</span>
+    <span class="i"><span class="sw exec"></span>有執行</span>
+    <span class="i"><span class="sw mon"></span>Monitor</span>
+    <span class="i"><span class="sw not"></span>未執行</span>
+    <span class="i"><span class="sw pend"></span>本週排定但尚未回報</span>
+  </div>
+  <p>黃色斜紋條＝這個專案排定要做的週次區間；條上的彩色小點＝該週的回報狀態。滑鼠停在條上會出現細節浮框（含專案／區間 NID、是否附了文件連結）。</p>
+  <p><strong>點一下甘特條</strong>就會開啟該區間的打卡視窗——這是回報的主要入口之一。</p>
+
+  <h3>成員下拉會一路跟著你</h3>
+  <p>工具列的成員下拉是<strong>三種檢視共用的同一個篩選</strong>，切換檢視不會被重設。登入時的預設值：成員＝只看自己、主管＝全部成員。</p>
+
+  <div class="note">
+    <p class="h">畫面變窄時控制項會自動收起</p>
+    <p>開啟團隊總結看板、或在 1366 以下的筆電／投影機使用時，工具列會把「找資料」用的搜尋框與類型晶片收起來，把空間讓給甘特圖。變寬（或關掉看板）就會自動恢復，不是故障。</p>
+  </div>
+</section>
+
+<!-- ══════════ 4 ══════════ -->
+<section id="s-views" data-role="common" data-group="入門" data-title="三種檢視">
+  <h2><span class="n">04</span>三種檢視<span class="tags"><span class="tag all">全體</span></span></h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>檢視</th><th>用途</th><th>可否編輯</th></tr></thead>
+      <tbody>
+        <tr><td><b>週檢視</b></td><td>日常操作。可左右捲動時間軸、打卡、管理專案與區間。</td><td>可</td></tr>
+        <tr><td><b>年度總覽</b></td><td>整年 53 週自動縮放進一個畫面寬，沒有水平捲軸，適合看全貌與投影。</td><td>唯讀</td></tr>
+        <tr><td><b>成果清單</b></td><td>全年度所有專案的具體產出與 MP Saving 總表，可排序、篩選、匯出 Excel。</td><td>唯讀（★ 標記除外）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>週檢視與年度總覽的選擇會被記住，下次開啟沿用；成果清單不記憶（重開一律回到週檢視）。</p>
+  <p>切到成果清單時，所有「當週」相關的控制項（系統週數、回報入口、團隊總結、補登開關）都會隱藏——那是全年度視角，與某一週無關。</p>
+</section>
+
+<!-- ══════════ 5 ══════════ -->
+<section id="s-report" data-role="member manager" data-group="成員" data-title="每週要回報的三件事">
+  <h2><span class="n">05</span>每週要回報的三件事<span class="tags"><span class="tag member">成員</span><span class="tag manager">主管可代填</span></span></h2>
+
+  <p>按 header 的 <strong>📋 本週回報中心</strong>（紅色數字＝還沒完成的項目數）。面板頂端有一條完成度進度條，下方依優先序分成三區：</p>
+
+  <div class="grid c3">
+    <div class="card">
+      <p><b>① 本週待打卡任務</b></p>
+      <p>當週有排到的每個計畫區間各一筆。<strong>必填</strong>，也是紅點的主要來源。</p>
+    </div>
+    <div class="card">
+      <p><b>② 下週預計執行工作</b></p>
+      <p><strong>必填</strong>。每人每週一筆，寫下一週打算做什麼。</p>
+    </div>
+    <div class="card">
+      <p><b>③ 非專案事項</b></p>
+      <p><strong>選填</strong>。不屬於任何專案、但值得讓主管知道的事。不計入紅點。</p>
+    </div>
+  </div>
+  <p>三項都完成後，面板會顯示 🎉 完成畫面。</p>
+
+  <h3>5.1　任務打卡</h3>
+  <p>從回報中心點任務，或直接<strong>點甘特圖上的彩色條</strong>，都會開啟同一個打卡視窗。</p>
+  <ol class="steps">
+    <li><b>選狀態（三選一）</b><span class="legend" style="margin:6px 0 0"><span class="i"><span class="sw exec"></span>有執行</span><span class="i"><span class="sw mon"></span>Monitor</span><span class="i"><span class="sw not"></span>未執行</span></span>「未執行」是<strong>有回報、只是這週沒動</strong>，與「沒交」是兩回事，該填還是要填。</li>
+    <li><b>填寫工作說明</b>這週實際做了什麼。</li>
+    <li><b>（選填）貼上文件連結</b>見下方 5.4。</li>
+    <li><b>送出</b>畫面上方會出現 ✅ 提示，甘特條該週會亮起對應顏色的小點。</li>
+  </ol>
+
+  <h4>兩個省時的捷徑</h4>
+  <ul>
+    <li><b>↩ 沿用上次回報</b>：狀態還沒選時，視窗上方會出現這顆按鈕，一鍵把最近一次的狀態、內容與文件連結帶進來，再改幾個字即可。</li>
+    <li><b>前幾週回報</b>：視窗中段列出這個區間先前的回報（預設展開最近 3 週），每一列都有「沿用」，可以挑任一週來套用。</li>
+  </ul>
+
+  <h3>5.2　下週預計執行工作（必填）</h3>
+  <p>每人每週一筆，與專案無關。沒填的話，回報中心會顯示紅色的「必填尚未填寫」，主管的團隊看板上也會出現 <code>📅 下週預計未填</code> 標記。</p>
+
+  <h3>5.3　非專案事項（選填）</h3>
+  <p>臨時支援、跨部門協助、教育訓練之類。填了會顯示在主管的團隊看板上。</p>
+
+  <h3>5.4　文件連結（三處都可以貼）</h3>
+  <p>任務打卡、非專案事項、下週預計，<strong>三個欄位都能附一個文件連結</strong>。主管在看板上點一下圖示就會另開分頁開啟，不必再另外找檔案。</p>
+  <ul>
+    <li>可貼網址（<code>https://…</code>；沒寫 <code>https://</code> 系統會自動補上），也可貼網路磁碟路徑（<code>\\server\share\檔案.xlsx</code>）或本機路徑。</li>
+    <li>輸入欄旁邊有一顆<strong>試開</strong>圖示，存檔前就能先確認貼對了。</li>
+    <li>清空欄位再送出＝移除連結，不影響已填的文字內容。</li>
+  </ul>
+  <div class="note warn">
+    <p class="h">路徑類連結可能點不開，這是瀏覽器的限制</p>
+    <p>Chrome／Edge 預設封鎖從網頁開啟 <code>file://</code>（點了不會有反應也不會報錯），需由 IT 以網域政策放行。<strong>優先貼 http／https 連結</strong>；若只有路徑，替代作法是從匯出的週報 Excel 開啟——Excel 裡是真正可點的超連結，沒有這個限制。</p>
+  </div>
+
+  <h3>5.5　補登（修改過去的週次）</h3>
+  <p>平常成員只能回報<strong>當週</strong>，往前翻是唯讀（header 會顯示「🔒 唯讀檢視中 · 返回本週」）。</p>
+  <p>當主管開啟補登豁免期時，畫面上方會出現一整條琥珀色警示列，header 也會多一顆 <strong>🕘 修改 W○○ 回報</strong>；此時翻到任一過去週次都能修改當週的任務打卡、非專案事項與下週預計。所有補登都會留下稽核紀錄。</p>
+</section>
+
+<!-- ══════════ 6 ══════════ -->
+<section id="s-proj" data-role="manager" data-group="主管" data-title="專案與計畫區間">
+  <h2><span class="n">06</span>專案與計畫區間<span class="tags"><span class="tag manager">主管</span></span></h2>
+
+  <h3>新增專案</h3>
+  <p>甘特圖左側依成員分組，每個成員群組列的右側有 <strong>＋ 新增專案</strong>。表單欄位：</p>
+  <dl class="kv">
+    <dt>專案名稱</dt><dd>必填。</dd>
+    <dt>分類</dt><dd>自由文字，會出現在凍結欄的「分類」格。</dd>
+    <dt>類型 a~e</dt><dd>一級專案/KPI、重大貢獻及亮點、日常管理、其他加分項、主管交辦。對應工具列的彩色篩選晶片。</dd>
+    <dt>負責人</dt><dd>可在編輯時改人，專案會整列移到新負責人的群組下。</dd>
+    <dt>NID</dt><dd>選填的流水編號，一個專案可含多組。</dd>
+  </dl>
+
+  <h3>計畫區間</h3>
+  <p>專案本身不會產生回報，<strong>回報是掛在「計畫區間」上的</strong>。在專案名稱列右側按綠色 <strong>＋</strong> 新增區間，填名稱與起訖週；區間的 NID 可指定對應到專案的哪一組編號。</p>
+  <p>已建立的區間，點甘特條 → 視窗下半部即可調整起訖週或刪除。</p>
+
+  <div class="note">
+    <p class="h">刪除都可以反悔</p>
+    <p>刪除專案或區間後，畫面下方的提示會附一顆 <strong>↩ 復原</strong>，10 秒內按下即可還原（後端為軟刪除）。</p>
+  </div>
+
+  <h3>拖曳排序</h3>
+  <p>同一位成員底下的專案可用拖曳調整順序。<strong>搜尋、類型篩選或「未回報」篩選啟用時，拖曳排序會暫停</strong>——畫面上不是完整清單，拖了會排錯。</p>
+
+  <h3>🎯 具體產出與 MP 效益</h3>
+  <p>專案名稱列右側的 🎯 圖示開啟。填「預計交付的具體產出成果」與「MP Saving」（選填）。這是<strong>專案層級</strong>的欄位，所有計畫區間共用，也是高階主管在成果清單上看的主要內容。已填會顯示為實色圖示，未填為淡色。</p>
+</section>
+
+<!-- ══════════ 7 ══════════ -->
+<section id="s-dash" data-role="manager member" data-group="主管" data-title="團隊總結看板">
+  <h2><span class="n">07</span>團隊總結看板<span class="tags"><span class="tag manager">主管</span><span class="tag member">成員可看</span></span></h2>
+  <p>按 header 的 <strong>📊 W○○ 團隊總結</strong>，右側會展開一整條側邊面板，逐人列出當週回報。成員預設「只看我的週報」，主管預設全隊折疊。</p>
+
+  <h3>成員列上的資訊</h3>
+  <dl class="kv">
+    <dt>分段進度條</dt><dd>條填滿多少＝回報了多少。已回報的三段是實心（有執行／Monitor／未執行），<strong>未回報留空槽不填色</strong>。</dd>
+    <dt>n/m 回報</dt><dd>已回報數／本週排定任務數。還有人沒交時轉為琥珀色。</dd>
+    <dt>🏆 得分</dt><dd>本週得分＝各任務打卡分數加總（回報預設 1 分、主管可調 0.3~1；未回報 0 分）；滿分＝本週排定任務數。</dd>
+    <dt>📅 下週預計未填</dt><dd>折疊狀態下只標「例外」——強制項沒填才會亮這顆。</dd>
+  </dl>
+
+  <h3>可以做的動作</h3>
+  <ul>
+    <li><b>點任務卡片</b>：左側甘特圖對應區間會暫時淺藍高亮，方便邊講邊指。再點一次或關閉看板即還原。</li>
+    <li><b>複製週報</b>：把該成員本週的完整回報（含文件連結）組成文字複製到剪貼簿，可直接貼到通訊軟體或郵件。</li>
+    <li><b>主管回覆</b>：針對「這位成員的這一週」留一段回覆，<strong>全員都看得到</strong>（紫色區塊）。已回覆時按鈕會轉為紫色的「✓ 已回覆」。留空白送出＝清除回覆。</li>
+    <li><b>複製待回報名單（n）</b>：主管專用，且只有真的有人沒交時才出現。內容含每個人缺漏了哪些項目與項目名稱，可直接貼去催。</li>
+    <li><b>⬇️ 匯出 Excel</b>：匯出當週全隊週報（含文件連結欄，UNC 路徑會產生真正可點的超連結）。</li>
+  </ul>
+
+  <div class="note">
+    <p class="h">看板開著時可以繼續操作甘特圖</p>
+    <p>看板是唯讀側邊面板，主內容區會同步內縮而不是被蓋住，<kbd>←</kbd><kbd>→</kbd> 平移與 <kbd>H</kbd> 回本週都還能用。看板開啟時，資料仍會持續自動更新（可以看著成員陸續交上來）。</p>
+  </div>
+</section>
+
+<!-- ══════════ 8 ══════════ -->
+<section id="s-score" data-role="manager" data-group="主管" data-title="評分與代修">
+  <h2><span class="n">08</span>評分與代成員修正<span class="tags"><span class="tag manager">主管</span></span></h2>
+
+  <h3>8.1　打卡評分</h3>
+  <p>開啟任一筆打卡回報，主管會多看到一區「主管評分微調（點擊即時更新分數）」。五個級距：</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th class="mono">分數</th><th>級距</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">0.3</td><td>再三交代</td></tr>
+        <tr><td class="mono">0.5</td><td>說一動做一動</td></tr>
+        <tr><td class="mono">0.8</td><td>完成老闆交代</td></tr>
+        <tr><td class="mono">0.9</td><td>超越老闆期許</td></tr>
+        <tr><td class="mono">1.0</td><td>主動承擔</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>成員回報後<strong>預設即 1 分</strong>，未回報為 0 分；只有主管能調整，點下去立即生效。</p>
+
+  <h3>8.2　🛠 編輯 W○○ 回報（代修面板）</h3>
+  <p>header 上的常駐入口，可代任一成員修正<strong>目前檢視中那一週</strong>的任務打卡、非專案事項、下週預計，並編輯主管回覆。不需要開啟補登豁免期。</p>
+  <p>由主管代改的內容，在畫面上會標示 <strong>✏️ 主管修正</strong>，成員看得出來是誰動過。</p>
+
+  <h3>8.3　補登總開關</h3>
+  <p>工具列的 <strong>🔒 僅限當週 / 🔓 補登 ON</strong>。開啟後<strong>全體成員</strong>都能回報與調整今年度的所有歷史週次，畫面上方會出現整條琥珀色警示列提醒目前處於豁免期。</p>
+  <div class="note warn">
+    <p class="h">這顆是系統級開關</p>
+    <p>它影響的是所有人的寫入權限，不是只有你自己。用完記得關回「🔒 僅限當週」。</p>
+  </div>
+</section>
+
+<!-- ══════════ 9 ══════════ -->
+<section id="s-admin" data-role="manager" data-group="主管" data-title="⚙️ 管理選單">
+  <h2><span class="n">09</span>⚙️ 管理選單<span class="tags"><span class="tag manager">主管</span></span></h2>
+  <p>低頻但重要的四個入口，收在 header 右上角的「⚙️ 管理 ▾」。</p>
+
+  <div class="grid c2">
+    <div class="card">
+      <h4>👥 成員管理</h4>
+      <p>新增、改名、移除成員。移除是<strong>軟刪除</strong>；同名成員若曾被移除，再次新增會自動重新啟用原有資料。<strong>名下還有專案的成員不能移除</strong>，請先改指派負責人。</p>
+    </div>
+    <div class="card">
+      <h4>🔐 瀏覽權限</h4>
+      <p>以部門名冊比對決定誰能進入系統。規則內的條件是 AND、規則之間是 OR；只填工號＝該人的白名單。總開關預設關閉；開啟後採 <strong>fail-closed</strong>（比對不到就擋）。</p>
+    </div>
+    <div class="card">
+      <h4>📈 使用統計</h4>
+      <p>依天數區間查看登入次數與使用率。</p>
+    </div>
+    <div class="card">
+      <h4>📜 異動紀錄</h4>
+      <p>全系統的稽核紀錄，已翻譯成白話（例如「開啟歷史補登…」而不是 <code>true</code>）。可依<strong>日期區間、操作人、動作、資料類型</strong>篩選，也能在結果中再用關鍵字尋找。</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <p class="h">異動紀錄一次只顯示最近 300 筆</p>
+    <p>畫面會標示「符合 N 筆、僅顯示最近 300 筆」。要查「上個月某人改了什麼」，請直接用日期與操作人條件縮小範圍，不要用捲動的方式翻找。</p>
+  </div>
+</section>
+
+<!-- ══════════ 10 ══════════ -->
+<section id="s-results" data-role="exec manager" data-group="高階主管" data-title="成果清單">
+  <h2><span class="n">10</span>成果清單<span class="tags"><span class="tag exec">高階主管</span><span class="tag manager">主管</span></span></h2>
+  <p>工具列切到<strong>成果清單</strong>。全年度所有專案的單列平面表：No、分類、類型、專案名稱、負責人、預計交付具體產出成果、MP Saving、NID。唯讀，沒有操作欄——要編輯請切回週檢視用 🎯 入口。</p>
+
+  <h3>頂部的 KPI 卡片＝可點的篩選器</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>卡片</th><th>篩出的專案</th></tr></thead>
+      <tbody>
+        <tr><td><b>⭐ 重點關注項目</b></td><td>被標記 ★ 的專案。</td></tr>
+        <tr><td><b>💡 具備 MP Saving</b></td><td>已填 MP Saving 的專案。</td></tr>
+        <tr><td><b>🎯 有具體產出成果</b></td><td>已填產出成果的專案。</td></tr>
+        <tr><td><b>⚠️ 待補充產出效益</b></td><td>產出與 MP Saving 都還沒填的專案。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>點卡片即套用篩選（再點一次或用空狀態的清除鈕取消）。所有欄位標題都可點擊排序，點第二次換方向。</p>
+
+  <h3>★ 重點關注</h3>
+  <p>專案名稱前的星號<strong>只在成果清單顯示</strong>，點一下即標記／取消。標記存在資料庫，<strong>全員共享</strong>，不是個人書籤。</p>
+
+  <h3>匯出 Excel</h3>
+  <p>右上角的 <strong>⬇️ 匯出 Excel（n 案）</strong> 匯出的是<strong>畫面上當下這 n 案</strong>，含套用中的篩選與排序順序——適合帶著離線瀏覽。篩選後 0 案時按鈕會停用（沒有東西可以匯出）。</p>
+</section>
+
+<!-- ══════════ 11 ══════════ -->
+<section id="s-common" data-role="common" data-group="通用" data-title="通用操作">
+  <h2><span class="n">11</span>通用操作<span class="tags"><span class="tag all">全體</span></span></h2>
+
+  <h3>11.1　搜尋與篩選</h3>
+  <ul>
+    <li><b>搜尋框</b>：比對專案與任務名稱。</li>
+    <li><b>a~e 類型晶片</b>：可多選，右側「清除」一次取消。</li>
+    <li><b>成員下拉</b>：三種檢視共用，切換檢視不會重設。</li>
+    <li><b>「未回報」晶片</b>（概況列）：點一下只留本週還沒回報的專案，再點取消。主管催報最快的路徑。</li>
+  </ul>
+  <p>若篩到一筆都不剩，畫面會列出<strong>目前生效中的每一個條件</strong>並各給一顆清除鈕（兩個以上會多給「清除全部條件」），不會只丟一句「找不到資料」。</p>
+  <p>「未回報」篩到 0 筆是好消息，畫面會顯示 🎉 已全數回報。</p>
+
+  <h3>11.2　鍵盤快捷鍵</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th class="mono">按鍵</th><th>作用</th></tr></thead>
+      <tbody>
+        <tr><td class="mono"><kbd>H</kbd> / <kbd>Home</kbd></td><td>回到本週並置中</td></tr>
+        <tr><td class="mono"><kbd>←</kbd> <kbd>→</kbd></td><td>左右平移 4 週</td></tr>
+        <tr><td class="mono"><kbd>Shift</kbd>＋<kbd>←</kbd> <kbd>→</kbd></td><td>微移 1 週</td></tr>
+        <tr><td class="mono"><kbd>Tab</kbd> → <kbd>↑</kbd> <kbd>↓</kbd></td><td>進入甘特區後上下切換甘特條</td></tr>
+        <tr><td class="mono"><kbd>Enter</kbd></td><td>開啟目前選取的甘特條；單行輸入欄按下即送出表單</td></tr>
+        <tr><td class="mono"><kbd>Esc</kbd></td><td>關閉最上層視窗；有未儲存內容時會先確認</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>header 的系統週數可<strong>直接輸入數字</strong>再按 Enter 跳週，不必一週一週按。輸入超出範圍會自動夾回邊界。</p>
+
+  <h3>11.3　深色模式</h3>
+  <p>header 右側的 🌙／☀️ 切換，設定會被記住。深色配色針對投影會議環境調校過，投影時亦可使用。</p>
+
+  <h3>11.4　自動同步與連線中斷</h3>
+  <p>系統每 60 秒靜默更新一次，別人的異動會自動出現，不需要重整。<strong>有彈窗或面板開啟時會暫停更新</strong>（避免你正在看的資料在眼前跳動），關閉後恢復。</p>
+  <div class="note stop">
+    <p class="h">看到 header 出現「⚠ 連線中斷，畫面為 HH:mm 的快照」</p>
+    <p>代表連續兩次以上更新失敗，<strong>你現在看到的數字是那個時間點的舊資料</strong>，不要據此做判斷。按晶片上的「重新連線」；若仍失敗，請聯絡 IT 確認系統或網路狀態。</p>
+  </div>
+
+  <h3>11.5　同時編輯的注意事項</h3>
+  <p>目前的規則是<strong>後存的蓋過先存的</strong>。若你和主管可能同時修改同一筆回報，請先關閉彈窗讓畫面更新到最新，再開啟編輯。</p>
+</section>
+
+<!-- ══════════ 12 ══════════ -->
+<section id="s-faq" data-role="common" data-group="通用" data-title="疑難排解">
+  <h2><span class="n">12</span>疑難排解<span class="tags"><span class="tag all">全體</span></span></h2>
+
+  <h4>找不到「本週回報中心」按鈕</h4>
+  <p>三種情況會隱藏它：你在<strong>成果清單</strong>、<strong>團隊總結看板開著</strong>、或你的身分是主管（主管用的是「🛠 編輯 W○○ 回報」）。切回週檢視、關閉看板即可。</p>
+
+  <h4>翻到過去的週次卻不能填</h4>
+  <p>正常。成員只能回報當週，需由主管開啟「補登」豁免期。header 會顯示「🔒 唯讀檢視中 · 返回本週」。</p>
+
+  <h4>甘特圖表頭捲不見／畫面只剩幾欄</h4>
+  <p>表頭是固定的，若跟著捲走請按 <kbd>Ctrl</kbd>＋<kbd>F5</kbd> 強制重新整理（通常是瀏覽器快取到舊版檔案）。畫面欄位變少多半是團隊總結看板開著，關掉即恢復。</p>
+
+  <h4>點了文件連結沒有反應</h4>
+  <p>若貼的是 <code>\\server\…</code> 或 <code>C:\…</code> 這類路徑，瀏覽器預設封鎖從網頁開啟本機／網路磁碟位置。改貼 http／https 連結，或從匯出的週報 Excel 開啟。滑鼠停在圖示上可看到原始路徑，也能自行複製。</p>
+
+  <h4>匯出的 Excel 內容和畫面不一樣</h4>
+  <p>成果清單匯出的是<strong>畫面當下顯示的那幾案</strong>（含篩選與排序）。若想匯出全部，先把 KPI 卡片與所有篩選清掉再匯出。</p>
+
+  <h4>畫面停在載入中轉圈</h4>
+  <p>權限檢查有 15 秒逾時，逾時會顯示錯誤畫面與「重試」。若反覆出現，請聯絡 IT。</p>
+
+  <h4>色彩或版面看起來不對（白底白字之類）</h4>
+  <p>按 <kbd>Ctrl</kbd>＋<kbd>F5</kbd> 強制重新整理。系統改版後若瀏覽器留著舊的樣式檔就會這樣。</p>
+</section>
+
+<!-- ══════════ 13 ══════════ -->
+<section id="s-glossary" data-role="common" data-group="通用" data-title="名詞對照">
+  <h2><span class="n">13</span>名詞對照<span class="tags"><span class="tag all">全體</span></span></h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>名詞</th><th>意思</th></tr></thead>
+      <tbody>
+        <tr><td><b>計畫區間</b></td><td>專案底下排定的一段起訖週（例如 W12–W20）。回報是掛在區間上，不是掛在專案上。</td></tr>
+        <tr><td><b>打卡 / 回報</b></td><td>針對「某個計畫區間的某一週」填寫狀態與工作說明。</td></tr>
+        <tr><td><b>狀態</b></td><td>有執行／Monitor／未執行。「未執行」＝有回報但這週沒動，不等於沒交。</td></tr>
+        <tr><td><b>下週預計</b></td><td>每人每週一筆的強制回報項目，與專案無關。</td></tr>
+        <tr><td><b>非專案事項</b></td><td>每人每週一筆的選填回報項目。</td></tr>
+        <tr><td><b>主管回覆</b></td><td>主管針對「某位成員的某一週」留的回覆，全員可見（紫色區塊）。</td></tr>
+        <tr><td><b>補登</b></td><td>回報或修改非當週的紀錄。成員需主管開啟豁免期；主管本來就能代修。</td></tr>
+        <tr><td><b>MP Saving</b></td><td>該專案預計節省的人力（Manpower），填在 🎯 產出視窗，統計於成果清單。</td></tr>
+        <tr><td><b>NID</b></td><td>選填的流水編號。一個專案可含多組，計畫區間可指定對應到哪一組。</td></tr>
+        <tr><td><b>★ 重點關注</b></td><td>成果清單上的標記，存於資料庫、全員共享。</td></tr>
+        <tr><td><b>類型 a~e</b></td><td>一級專案/KPI、重大貢獻及亮點、日常管理、其他加分項、主管交辦。</td></tr>
+        <tr><td><b>異動紀錄</b></td><td>所有寫入操作的稽核紀錄，含操作人與 Windows 工號。</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <p>MSD 專案追蹤總表 · 使用者手冊 — 對應 2026-08-26 版功能。系統操作問題請洽管理部主管；連線、權限與部署問題請洽 IT。</p>
+</footer>
+
+</main>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── 目錄：由章節自身的 data-group / data-title 生成，改章節不必改兩處 ── */
+  var sections = Array.prototype.slice.call(document.querySelectorAll('main section'));
+  var toc = document.getElementById('toc');
+  var lastGroup = null;
+  var links = [];
+
+  sections.forEach(function (sec, i) {
+    var group = sec.getAttribute('data-group') || '';
+    if (group !== lastGroup) {
+      var g = document.createElement('div');
+      g.className = 'rail-group';
+      g.textContent = group;
+      toc.appendChild(g);
+      lastGroup = group;
+    }
+    var a = document.createElement('a');
+    a.href = '#' + sec.id;
+    a.setAttribute('data-role', sec.getAttribute('data-role') || 'common');
+    var n = document.createElement('span');
+    n.className = 'num';
+    n.textContent = String(i + 1).padStart(2, '0');
+    a.appendChild(n);
+    a.appendChild(document.createTextNode(sec.getAttribute('data-title') || sec.id));
+    toc.appendChild(a);
+    links.push(a);
+  });
+
+  /* ── 角色篩選：手冊的章節本來就依角色而異，濾掉不適用的比整份讀完快 ── */
+  var roleBtns = Array.prototype.slice.call(document.querySelectorAll('.rolebtn[data-role]'));
+  function applyRole(role) {
+    roleBtns.forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-role') === role));
+    });
+    sections.forEach(function (sec, i) {
+      var roles = (sec.getAttribute('data-role') || 'common').split(/\s+/);
+      var show = role === 'all' || roles.indexOf('common') > -1 || roles.indexOf(role) > -1;
+      sec.classList.toggle('hidden', !show);
+      links[i].style.display = show ? '' : 'none';
+    });
+    try { localStorage.setItem('msd_manual_role', role); } catch (e) {}
+  }
+  roleBtns.forEach(function (b) {
+    b.addEventListener('click', function () { applyRole(b.getAttribute('data-role')); });
+  });
+  var savedRole = 'all';
+  try { savedRole = localStorage.getItem('msd_manual_role') || 'all'; } catch (e) {}
+  applyRole(savedRole);
+
+  /* ── 主題：預設跟隨系統，手動切換會在 <html> 蓋上 data-theme ── */
+  var themeBtn = document.getElementById('themebtn');
+  function isDarkNow() {
+    var stamp = document.documentElement.getAttribute('data-theme');
+    if (stamp) return stamp === 'dark';
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function syncThemeBtn() {
+    var dark = isDarkNow();
+    themeBtn.textContent = dark ? '切換淺色' : '切換深色';
+    themeBtn.setAttribute('aria-pressed', String(dark));
+  }
+  themeBtn.addEventListener('click', function () {
+    var next = isDarkNow() ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('msd_manual_theme', next); } catch (e) {}
+    syncThemeBtn();
+  });
+  try {
+    var savedTheme = localStorage.getItem('msd_manual_theme');
+    if (savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
+  } catch (e) {}
+  syncThemeBtn();
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    var onMq = function () { if (!document.documentElement.getAttribute('data-theme')) syncThemeBtn(); };
+    if (mq.addEventListener) mq.addEventListener('change', onMq);
+    else if (mq.addListener) mq.addListener(onMq);
+  }
+
+  /* ── 目錄跟隨捲動 ── */
+  if ('IntersectionObserver' in window) {
+    var visible = new Set();
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) visible.add(e.target.id); else visible.delete(e.target.id);
+      });
+      var first = sections.filter(function (s) { return visible.has(s.id); })[0];
+      links.forEach(function (a) {
+        a.classList.toggle('on', !!first && a.getAttribute('href') === '#' + first.id);
+      });
+    }, { rootMargin: '-10% 0px -70% 0px' });
+    sections.forEach(function (s) { io.observe(s); });
+  }
+})();
+</script>
+</body>
+</html>
