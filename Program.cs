@@ -9,19 +9,61 @@ var builder = WebApplication.CreateBuilder(args);
 // Kestrel 由此套件處理;掛 IIS 時 handler 會自動交給 IIS 的 Windows 驗證(IIS 需啟用 Windows Authentication,匿名驗證也要保持啟用)。
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNegotiate();
 builder.Services.AddAuthorization();
+builder.Services.AddHttpContextAccessor();   // 多站台:ConnStr() 要從目前請求的 PathBase 判斷是哪個群組(見 ResolveSite)
 
 var app = builder.Build();
+
+// 本機模擬 IIS 子目錄(只在設定了 PathBase 時生效;IIS 上不需要,ASP.NET Core Module 會自己填 PathBase):
+//   dotnet run --project Gantt.csproj --urls http://localhost:5099 --PathBase /Gantt_IMD
+// 之後用 http://localhost:5099/Gantt_IMD/ 開,ResolveSite() 就會挑 Sites:Gantt_IMD,可在開發機驗證多站台設定。
+var devPathBase = app.Configuration["PathBase"];
+if (!string.IsNullOrWhiteSpace(devPathBase)) app.UsePathBase(devPathBase);
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// 連線字串來自 appsettings.json 的 ConnectionStrings:Gantt。
-// 每次取用時即時讀取(appsettings.json 預設 reloadOnChange:true)——部署後直接改檔即可切換測試 DB
-// (如 Initial Catalog=Gantt→Gantt2),存檔數秒內生效,無須重新發佈或回收應用程式集區。
-string ConnStr() => app.Configuration.GetConnectionString("Gantt")
-    ?? throw new InvalidOperationException("找不到連線字串 ConnectionStrings:Gantt");
+// ── 多站台(2026-09-13):同一份程式發佈到四個 IIS application(/Gantt、/Gantt_IMD、/Gantt_EMS1、/Gantt_EMS2),
+//    各連自己的 DB、各有自己的群組名稱。**用 IIS application 的路徑(Request.PathBase)當 key** 去 appsettings 的 Sites 段落找設定:
+//      "Sites": { "Gantt": { "GroupName": "MSD", "ConnectionString": "…Database=Gantt…" }, "Gantt_IMD": { … }, … },
+//      "SiteDefault": "Gantt"        ← PathBase 為空(本機 dotnet run)或找不到對應 key 時用哪一個
+//    四個資料夾放**完全相同**的設定檔即可,發佈時不必再逐一改連線字串與群組名稱。
+//    ⚠ PathBase 是 IIS 依 application 設定填的,不是使用者可以在網址上改的東西,所以拿它選 DB 是安全的;
+//      Kestrel 本機沒有 PathBase → 走 SiteDefault。IConfiguration 的 key 不分大小寫,/gantt_imd 也對得到。
+//    ⚠ 沒有 Sites 段落時退回舊格式(ConnectionStrings:Gantt ＋ Site:GroupName,預設 MSD)——舊部署不改設定照樣能跑。
+//    與過去相同,每次取用即時讀取(reloadOnChange):部署後改檔數秒生效,無須回收應用程式集區。
+var httpCtx = app.Services.GetRequiredService<IHttpContextAccessor>();
+(string Key, string GroupName, string Conn) ResolveSite()
+{
+    var cfg = app.Configuration;
+    var sites = cfg.GetSection("Sites");
+    if (sites.Exists())
+    {
+        var pathKey = (httpCtx.HttpContext?.Request.PathBase.Value ?? "").Trim('/');
+        var key = pathKey.Length > 0 && sites.GetSection(pathKey).Exists() ? pathKey : (cfg["SiteDefault"] ?? "");
+        var sec = sites.GetSection(key);
+        if (key.Length > 0 && sec.Exists())
+        {
+            var conn = sec["ConnectionString"];
+            if (string.IsNullOrWhiteSpace(conn))
+                throw new InvalidOperationException($"Sites:{key}:ConnectionString 未設定");
+            return (key, sec["GroupName"] ?? key, conn);
+        }
+        throw new InvalidOperationException($"找不到站台設定：PathBase=/{pathKey}、SiteDefault={cfg["SiteDefault"]}（請檢查 appsettings 的 Sites 段落）");
+    }
+    return ("Gantt", cfg["Site:GroupName"] ?? "MSD",
+        cfg.GetConnectionString("Gantt") ?? throw new InvalidOperationException("找不到連線字串 ConnectionStrings:Gantt"));
+}
+string ConnStr() => ResolveSite().Conn;
+
+// 站台資訊(群組名稱):前端登入頁標題、header、document.title 都用它,取代原本寫死的「MSD」。
+// 刻意不碰 DB——DB 連不上時 ErrorScreen 的標題也要對。
+app.MapGet("/api/site", () =>
+{
+    try { var s = ResolveSite(); return Results.Ok(new { siteKey = s.Key, groupName = s.GroupName }); }
+    catch (Exception ex) { return Fail(ex); }
+});
 
 const int DefaultYear = 2026;
 
@@ -59,6 +101,29 @@ IResult? ValidateWeekRange(int start, int end)
 // 🚨 `javascript:`／`data:`／`vbscript:` 一律擋掉:這個值會被前端放進 <a href>,
 //    存進去等於一個「主管一定會點」的儲存型 XSS。前端也擋一次,但前端擋不住直接打 API,
 //    所以真正的防線在這裡。允許的形式=http/https 網址、UNC 路徑(\\server\share)、本機路徑。
+// 「尚未到的週次」不可回報／回覆(2026-09-12 使用者決定:系統是檢視過去到現在的專案狀態,主管也不開放對未來週打卡)。
+// 以伺服器今天的 ISO 週為準(與前端 getTodayWeek 同一套演算法:週一起始、含跨年 53 週);前端已擋,這是第二道防線。
+static bool IsFutureWeek(int year, int week)
+{
+    var today = DateTime.Today;
+    int y = System.Globalization.ISOWeek.GetYear(today), w = System.Globalization.ISOWeek.GetWeekOfYear(today);
+    return year > y || (year == y && week > w);
+}
+IResult? RejectFutureWeek(int year, int week, string what) =>
+    IsFutureWeek(year, week) ? Bad($"W{week:00} 尚未到，不可預先{what}。") : null;
+
+// AppSettings 布林開關(缺列＝false):AllowRetroCheckin／AccessControlEnabled 這類主管在網頁上切的設定。
+static async Task<bool> SettingOn(SqlConnection conn, string key)
+{
+    using var cmd = new SqlCommand("SELECT Value FROM dbo.AppSettings WHERE KeyName = @k", conn);
+    cmd.Parameters.AddWithValue("@k", key);
+    return ((await cmd.ExecuteScalarAsync()) as string)?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+}
+// 子區間打卡總開關(2026-09-12):**放 appsettings.json 的 Features:SubIntervalCheckin,不放 DB、不做在網頁上**——
+// 使用者要求避免誤操作(這是改變全體回報單位的設定,不該一顆鈕就切)。與連線字串同樣每次即時讀(reloadOnChange),
+// 改檔存檔數秒內生效、使用者重新整理即套用。缺值＝false(子區間只排程不打卡)。
+bool SubCheckinOn() => app.Configuration.GetValue<bool>("Features:SubIntervalCheckin", false);
+
 const int DocUrlMax = 500;
 IResult? ValidateDocUrl(string? url)
 {
@@ -174,10 +239,41 @@ app.MapGet("/api/bootstrap", async (int? year) =>
         }
         var projects = projOrder.Select(id => projMap[id]).ToList();
 
+        // 子區間(遷移 18):掛到 tasks[*].subs。父區間／專案已軟刪的自然不會被 JOIN 到。
+        // 只有在 TaskSubIntervals 存在時才查:遠端尚未跑遷移 18 的話,整包 bootstrap 不能因此失敗
+        // (遷移 16/17 曾因 DocUrl 欄位不存在讓整個系統開不起來,同一個坑不踩第二次)。
+        var taskByCode = projects.SelectMany(p => p.Tasks).ToDictionary(t => t.Id);
+        using (var chk = new SqlCommand("SELECT OBJECT_ID('dbo.TaskSubIntervals','U')", conn))
+        if (await chk.ExecuteScalarAsync() is not DBNull and not null)
+        {
+            using var cmd = new SqlCommand(@"
+                SELECT t.TaskCode, s.SubId, s.Name, s.StartWeek, s.EndWeek
+                FROM dbo.TaskSubIntervals s
+                JOIN dbo.Tasks t    ON t.TaskId = s.TaskId AND t.IsDeleted = 0
+                JOIN dbo.Projects p ON p.ProjectId = t.ProjectId AND p.IsDeleted = 0 AND p.ScheduleYear = @y
+                WHERE s.IsDeleted = 0
+                ORDER BY s.StartWeek, s.EndWeek, s.SortOrder, s.SubId", conn);
+            cmd.Parameters.AddWithValue("@y", y);
+            using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                if (taskByCode.TryGetValue(r.GetString(0), out var task))
+                    task.Subs.Add(new SubIntervalDto { Id = r.GetInt32(1), Name = r.GetString(2), Start = r.GetInt32(3), End = r.GetInt32(4) });
+        }
+
         // taskLogs[taskCode][week] = { status, note, docUrl, isExecuting, score, reporter, reporterRole, updatedAt }
+        //   ＝對「計畫區間」的回報(SubId IS NULL);
+        // subLogs[subId][week]     = 同格式,＝對「子區間」的回報(遷移 20)。
+        // 兩份分開放:前端所有 `taskLogs[t.id]?.[week]` 取值點語意不變(仍是父層那筆),
+        // 子區間那份另外查;回報單位由前端依「該週有無進行中的子區間」判斷(見 app.jsx weekUnits)。
+        // ⚠ 遷移 20 之前 WeeklyLogs 沒有 SubId 欄:先 COL_LENGTH 檢查再決定 SQL,遠端未跑遷移時整包不能因此失敗。
+        bool hasSubLogCol;
+        using (var chk = new SqlCommand("SELECT COL_LENGTH('dbo.WeeklyLogs','SubId')", conn))
+            hasSubLogCol = await chk.ExecuteScalarAsync() is not DBNull and not null;
         var taskLogs = new Dictionary<string, Dictionary<int, object>>();
+        var subLogs = new Dictionary<int, Dictionary<int, object>>();
         using (var cmd = new SqlCommand(@"
-            SELECT t.TaskCode, w.WeekNo, w.Status, w.Note, w.Score, u.UserName, u.Role, w.UpdatedAt, w.DocUrl
+            SELECT t.TaskCode, w.WeekNo, w.Status, w.Note, w.Score, u.UserName, u.Role, w.UpdatedAt, w.DocUrl" +
+            (hasSubLogCol ? ", w.SubId" : ", NULL AS SubId") + @"
             FROM dbo.WeeklyLogs w
             JOIN dbo.Tasks t ON t.TaskId = w.TaskId
             LEFT JOIN dbo.Users u ON u.UserId = w.ReportedByUserId
@@ -196,8 +292,18 @@ app.MapGet("/api/bootstrap", async (int? year) =>
                 string? reporterRole = r.IsDBNull(6) ? null : r.GetString(6);
                 string updatedAt = r.GetDateTime(7).ToString("yyyy-MM-dd HH:mm");
                 string? docUrl = r.IsDBNull(8) ? null : r.GetString(8);
-                if (!taskLogs.TryGetValue(code, out var m)) { m = new(); taskLogs[code] = m; }
-                m[wk] = new { status, note, docUrl, isExecuting = status != "not_executed", score, reporter, reporterRole, updatedAt };
+                int? subId = r.IsDBNull(9) ? null : r.GetInt32(9);
+                var log = new { status, note, docUrl, isExecuting = status != "not_executed", score, reporter, reporterRole, updatedAt };
+                if (subId is int sid)
+                {
+                    if (!subLogs.TryGetValue(sid, out var sm)) { sm = new(); subLogs[sid] = sm; }
+                    sm[wk] = log;
+                }
+                else
+                {
+                    if (!taskLogs.TryGetValue(code, out var m)) { m = new(); taskLogs[code] = m; }
+                    m[wk] = log;
+                }
             }
         }
 
@@ -294,14 +400,10 @@ app.MapGet("/api/bootstrap", async (int? year) =>
             }
         }
 
-        bool allowRetroCheckin = false;
-        using (var cmd = new SqlCommand("SELECT Value FROM dbo.AppSettings WHERE KeyName = 'AllowRetroCheckin'", conn))
-        {
-            var val = await cmd.ExecuteScalarAsync();
-            allowRetroCheckin = (val as string)?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
-        }
+        bool allowRetroCheckin = await SettingOn(conn, "AllowRetroCheckin");
+        bool subCheckinEnabled = SubCheckinOn();
 
-        return Results.Ok(new { year = y, years, weeks, users, projects, taskLogs, extraNotes, extraNoteMeta, weeklyPlans, weeklyPlanMeta, weeklyComments, weeklyCommentMeta, allowRetroCheckin });
+        return Results.Ok(new { year = y, years, weeks, users, projects, taskLogs, subLogs, subCheckinEnabled, extraNotes, extraNoteMeta, weeklyPlans, weeklyPlanMeta, weeklyComments, weeklyCommentMeta, allowRetroCheckin });
     }
     catch (Exception ex) { return Fail(ex); }
 });
@@ -315,12 +417,15 @@ app.MapPost("/api/weekly-log", async (WeeklyLogReq req) =>
     // 狀態只有這三種(對應甘特條的綠/藍/灰);其他值寫進去會讓前端查不到對應的顏色與標籤
     if (req.Status is not ("executed" or "monitor" or "not_executed"))
         return Bad("回報狀態不正確（僅接受 有執行／Monitor／未執行）。");
+    if (RejectFutureWeek(req.Year, req.Week, "回報") is { } futErr) return futErr;
     var docErr = ValidateDocUrl(req.DocUrl);
     if (docErr is not null) return docErr;
     try
     {
         using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
+        if (req.SubId is not null && !SubCheckinOn())
+            return Bad("「子區間打卡」功能目前未開啟，請對計畫區間回報。");
         using var cmd = new SqlCommand("dbo.usp_UpsertWeeklyLog", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@TaskCode", req.TaskCode);
         cmd.Parameters.AddWithValue("@Year", req.Year);
@@ -332,6 +437,9 @@ app.MapPost("/api/weekly-log", async (WeeklyLogReq req) =>
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
         // 空字串照樣送:SP 內 NULLIF 會轉成 NULL,使用者才能把已填的連結清空
         cmd.Parameters.AddWithValue("@DocUrl", (object?)req.DocUrl?.Trim() ?? DBNull.Value);
+        // 子區間打卡(遷移 20):**只在有值時才傳 @SubId**——遠端尚未跑遷移 20 時 SP 沒這個參數,
+        // 一律傳會讓所有打卡(含對計畫區間的)整個壞掉;不傳則舊 SP 照常運作。
+        if (req.SubId is int subId) cmd.Parameters.AddWithValue("@SubId", subId);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -341,6 +449,7 @@ app.MapPost("/api/weekly-log", async (WeeklyLogReq req) =>
 // 3) 非專案事項 — usp_UpsertExtraNote
 app.MapPost("/api/extra-note", async (ExtraNoteReq req) =>
 {
+    if (RejectFutureWeek(req.Year, req.Week, "填寫") is { } futErr) return futErr;
     var docErr = ValidateDocUrl(req.DocUrl);
     if (docErr is not null) return docErr;
     try
@@ -366,6 +475,7 @@ app.MapPost("/api/extra-note", async (ExtraNoteReq req) =>
 // 3.1) 下週預計執行工作 — usp_UpsertWeeklyPlan
 app.MapPost("/api/weekly-plan", async (WeeklyPlanReq req) =>
 {
+    if (RejectFutureWeek(req.Year, req.Week, "填寫") is { } futErr) return futErr;
     var docErr = ValidateDocUrl(req.DocUrl);
     if (docErr is not null) return docErr;
     try
@@ -390,6 +500,7 @@ app.MapPost("/api/weekly-plan", async (WeeklyPlanReq req) =>
 // 3.1.5) 主管週報回覆 — usp_UpsertWeeklyComment(僅主管,SP 內檢查;空字串=清空回覆)
 app.MapPost("/api/weekly-comment", async (WeeklyCommentReq req) =>
 {
+    if (RejectFutureWeek(req.Year, req.Week, "回覆") is { } futErr) return futErr;
     try
     {
         using var conn = new SqlConnection(ConnStr());
@@ -411,6 +522,9 @@ app.MapPost("/api/weekly-comment", async (WeeklyCommentReq req) =>
 // 3.2) 專案具體產出項目 — usp_UpdateProjectDeliverable(僅負責人或主管,SP 內檢查)
 app.MapPost("/api/project/deliverable", async (DeliverableReq req) =>
 {
+    // ⚠ 與子區間端點同一個坑:SP 的權限判斷是 `@Actor <> @OwnerName`,Actor 為 NULL 時比對結果 UNKNOWN → IF 被跳過,
+    //   資料先寫、AuditLog.ActorName NOT NULL 才炸(SP 無交易)→ 留下沒有稽核紀錄的產出項目。API 層先擋。
+    if (BlankStr(req.Actor)) return Bad("缺少操作者。");
     try
     {
         using var conn = new SqlConnection(ConnStr());
@@ -456,10 +570,13 @@ app.MapPost("/api/weekly-log/score", async (ScoreReq req) =>
     // 不是自由數值——放行任意數字會讓「本週得分/滿分」的統計失去意義
     if (req.Score is not (0.3m or 0.5m or 0.8m or 0.9m or 1m))
         return Bad("分數僅接受 0.3／0.5／0.8／0.9／1。");
+    if (RejectFutureWeek(req.Year, req.Week, "評分") is { } futErr) return futErr;
     try
     {
         using var conn = new SqlConnection(ConnStr());
         await conn.OpenAsync();
+        if (req.SubId is not null && !SubCheckinOn())
+            return Bad("「子區間打卡」功能目前未開啟。");
         using var cmd = new SqlCommand("dbo.usp_UpdateLogScore", conn) { CommandType = CommandType.StoredProcedure };
         cmd.Parameters.AddWithValue("@TaskCode", req.TaskCode);
         cmd.Parameters.AddWithValue("@Year", req.Year);
@@ -468,6 +585,7 @@ app.MapPost("/api/weekly-log/score", async (ScoreReq req) =>
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        if (req.SubId is int subId) cmd.Parameters.AddWithValue("@SubId", subId);   // 理由同 /api/weekly-log
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -670,6 +788,77 @@ app.MapPost("/api/task/delete", async (TaskDeleteReq req) =>
     catch (Exception ex) { return Fail(ex); }
 });
 
+// 10.1) 新增／修改子區間 — usp_UpsertTaskSubInterval(遷移 18)
+//       權限(主管或專案負責人)、「必須落在父區間內」、「每條最多 10 個」都在 SP 內檢查 → RAISERROR 照原文回 400。
+app.MapPost("/api/task/sub", async (SubIntervalUpsertReq req) =>
+{
+    if (BlankStr(req.TaskCode)) return Bad("缺少任務代碼。");
+    // ⚠ Actor 一定要在這裡擋:SP 的權限判斷是 `@Actor <> @OwnerName`,NULL 比對結果是 UNKNOWN → 整個 IF 被跳過;
+    //   接著資料先寫入、AuditLog.ActorName NOT NULL 才炸(SP 沒交易)→ 留下一筆沒有稽核紀錄的子區間。
+    if (BlankStr(req.Actor)) return Bad("缺少操作者。");
+    if (BlankStr(req.Name)) return Bad("子區間名稱不可空白。");
+    if (req.Name.Trim().Length > 200) return Bad("子區間名稱請勿超過 200 個字元。");
+    if (ValidateWeekRange(req.Start, req.End) is { } weekErr) return weekErr;
+    try
+    {
+        using var conn = new SqlConnection(ConnStr());
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_UpsertTaskSubInterval", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@SubId", (object?)req.SubId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@TaskCode", req.TaskCode);
+        cmd.Parameters.AddWithValue("@Name", req.Name.Trim());
+        cmd.Parameters.AddWithValue("@Start", req.Start);
+        cmd.Parameters.AddWithValue("@End", req.End);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        var outId = new SqlParameter("@NewSubId", SqlDbType.Int) { Direction = ParameterDirection.Output };
+        cmd.Parameters.Add(outId);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true, subId = outId.Value is int id ? id : (int?)null });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 10.2) 刪除子區間(軟刪除) — usp_DeleteTaskSubInterval
+app.MapPost("/api/task/sub/delete", async (SubIntervalDeleteReq req) =>
+{
+    if (BlankStr(req.Actor)) return Bad("缺少操作者。");   // 理由同上:NULL 會略過 SP 的權限檢查
+    try
+    {
+        using var conn = new SqlConnection(ConnStr());
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_DeleteTaskSubInterval", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@SubId", req.SubId);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
+// 10.3) 復原軟刪除的子區間(刪除 toast 的「↩ 復原」;遷移 20) — usp_RestoreTaskSubInterval
+//       子區間自遷移 20 起有回報紀錄掛在底下,誤刪就不再是「重建即可」,故補上復原。
+app.MapPost("/api/task/sub/restore", async (SubIntervalDeleteReq req) =>
+{
+    if (BlankStr(req.Actor)) return Bad("缺少操作者。");
+    try
+    {
+        using var conn = new SqlConnection(ConnStr());
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand("dbo.usp_RestoreTaskSubInterval", conn) { CommandType = CommandType.StoredProcedure };
+        cmd.Parameters.AddWithValue("@SubId", req.SubId);
+        cmd.Parameters.AddWithValue("@Actor", req.Actor);
+        cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+        return Results.Ok(new { success = true });
+    }
+    catch (Exception ex) { return Fail(ex); }
+});
+
 // 11) 稽核紀錄查詢(主管「異動紀錄」面板) — 讀 AuditLog 最近 N 筆,
 //     並於讀取時把技術代碼(如 t101-1@2026W9、軟刪除)翻譯成給高階主管看的白話摘要(summary)。
 // 篩選條件皆為選填,未帶就不加限制(維持原本「最近 n 筆」的行為,舊呼叫端不受影響)。
@@ -705,6 +894,16 @@ app.MapGet("/api/audit-log", async (int? top, string? from, string? to, string? 
         using (var r0 = await cmd.ExecuteReaderAsync())
             while (await r0.ReadAsync())
                 projInfo[r0.GetInt32(0).ToString()] = (r0.GetString(1), r0.GetString(2));
+
+        // 子區間名稱對照(含已刪除;遷移 20 起打卡稽核的 EntityId 可能帶 #SubId)。表不存在(遠端未跑 18)就留空。
+        var subInfo = new Dictionary<int, string>();
+        using (var chk = new SqlCommand("SELECT OBJECT_ID('dbo.TaskSubIntervals','U')", conn))
+        if (await chk.ExecuteScalarAsync() is not DBNull and not null)
+        {
+            using var cmd = new SqlCommand("SELECT SubId, Name FROM dbo.TaskSubIntervals", conn);
+            using var r0 = await cmd.ExecuteReaderAsync();
+            while (await r0.ReadAsync()) subInfo[r0.GetInt32(0)] = r0.GetString(1);
+        }
 
         var statusLabel = new Dictionary<string, string>
         { ["executed"] = "有執行", ["monitor"] = "Monitor(例行監控)", ["not_executed"] = "未執行" };
@@ -744,12 +943,16 @@ app.MapGet("/api/audit-log", async (int? top, string? from, string? to, string? 
             {
                 switch (entityType)
                 {
-                    case "WeeklyLog":   // entityId = t101-1@2026W9,NewValue = 狀態(CLOCKIN)或分數(SCORE)
+                    case "WeeklyLog":   // entityId = t101-1@2026W9 或 t101-1#5@2026W9(子區間打卡,遷移 20),NewValue = 狀態(CLOCKIN)或分數(SCORE)
                     {
                         var at = (entityId ?? "").Split('@');
                         var (y, w) = at.Length == 2 ? ParseYw(at[1]) : ("?", "?");
-                        var where = at.Length > 0 && taskInfo.TryGetValue(at[0], out var ti)
-                            ? $"專案「{ti.Proj}」的任務「{ti.Task}」" : "任務";
+                        var unit = at.Length > 0 ? at[0] : "";
+                        var hashAt = unit.IndexOf('#');
+                        var code = hashAt > 0 ? unit[..hashAt] : unit;
+                        var where = taskInfo.TryGetValue(code, out var ti) ? $"專案「{ti.Proj}」的任務「{ti.Task}」" : "任務";
+                        if (hashAt > 0 && int.TryParse(unit[(hashAt + 1)..], out var subId))
+                            where += subInfo.TryGetValue(subId, out var sn) ? $"的子區間「{sn}」" : "的子區間";
                         if (action == "SCORE")
                         {
                             var scoreName = new Dictionary<string, string>
@@ -879,6 +1082,30 @@ app.MapGet("/api/audit-log", async (int? top, string? from, string? to, string? 
                                 : "復原已刪除的計畫區間";
                         break;
                     }
+                    // 子區間(遷移 18):entityId = t101-1#5(父區間代碼 # 子區間 id)。
+                    // 子區間本身不在 taskInfo 對照表裡,名稱一律從 Old/NewValue 解析(格式與 Task 相同:name=… | W..-W..)。
+                    case "SubInterval":
+                    {
+                        var hash = (entityId ?? "").IndexOf('#');
+                        var code = hash > 0 ? entityId![..hash] : (entityId ?? "");
+                        var where = taskInfo.TryGetValue(code, out var ti) ? $"專案「{ti.Proj}」的計畫區間「{ti.Task}」" : "計畫區間";
+                        var (nn, nr) = ParseTaskSchedule(newV ?? "");
+                        var (on, orr) = ParseTaskSchedule(oldV ?? "");
+                        if (action == "INSERT") return $"在{where}下新增子區間「{nn}」（排程 {nr}）";
+                        if (action == "UPDATE")
+                        {
+                            var parts = new List<string>();
+                            if (on != nn) parts.Add($"子區間「{on}」更名為「{nn}」");
+                            if (orr != nr) parts.Add($"排程 {orr} → {nr}");
+                            var what = parts.Count > 0 ? string.Join("，", parts) : $"子區間「{nn}」內容未變更";
+                            return $"調整{where}的子區間：{what}";
+                        }
+                        if (action == "DELETE")
+                            return $"刪除{where}的子區間「{on}」（{orr}）" +
+                                   ((detail ?? "").Contains("筆回報") ? "，" + detail!.Replace("軟刪除（", "").TrimEnd('）') : "");
+                        if (action == "RESTORE") return $"復原已刪除的子區間「{nn}」（{where}，{nr}）";
+                        break;
+                    }
                     case "User":
                         return action switch
                         {
@@ -992,7 +1219,10 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
     try
     {
         // --- 撈本週排定任務(含未回報)、非專案事項、下週預計工作 ---
-        var rows = new List<(string Owner, string Category, string Type, string Project, string Task, int Start, int End, string? Status, string? Note, string? DocUrl)>();
+        // Sheet1 一列＝一個「回報單位」(遷移 20):該週有進行中的子區間 → 每個子區間一列(「本週階段」欄＝子區間名稱、
+        // 狀態＝該子區間的回報);沒有 → 計畫區間一列。父層那週已有紀錄(切子區間前回報過的舊週)→ 仍以父層一列呈現,
+        // 階段欄併列名稱。與前端 weekUnits() 同一套規則。
+        var rows = new List<(string Owner, string Category, string Type, string Project, string Task, int Start, int End, string? Status, string? Note, string? DocUrl, string TaskCode, string Phase)>();
         var userOrder = new List<string>();
         var extraD = new Dictionary<string, string>();
         var planD = new Dictionary<string, string>();
@@ -1001,12 +1231,45 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
         using (var conn = new SqlConnection(ConnStr()))
         {
             await conn.OpenAsync();
+            bool hasSubTable, hasSubLogCol;
+            using (var chk = new SqlCommand("SELECT OBJECT_ID('dbo.TaskSubIntervals','U')", conn))
+                hasSubTable = await chk.ExecuteScalarAsync() is not DBNull and not null;
+            using (var chk = new SqlCommand("SELECT COL_LENGTH('dbo.WeeklyLogs','SubId')", conn))
+                hasSubLogCol = await chk.ExecuteScalarAsync() is not DBNull and not null;
+            // 子區間打卡總開關關著時,不逐子區間展開(與前端 weekUnits 同一條規則);子區間的回報也不查。
+            // ⚠ 父層查詢的 `AND w.SubId IS NULL` 仍看 hasSubLogCol(欄位存不存在),否則關掉開關後既有的子區間回報會讓父層 JOIN 出多列。
+            bool subCheckin = hasSubLogCol && SubCheckinOn();
+
+            // 子區間(遷移 18):taskCode → 本週落在範圍內的子區間 (SubId, Name, 該子區間本週回報)。表不存在(遠端未跑 18)就留空。
+            var phaseD = new Dictionary<string, List<(int SubId, string Name, string? Status, string? Note, string? DocUrl)>>();
+            if (hasSubTable)
+            {
+                using var cmd = new SqlCommand(@"
+                    SELECT t.TaskCode, s.SubId, s.Name" + (subCheckin ? ", w.Status, w.Note, w.DocUrl" : ", NULL, NULL, NULL") + @"
+                    FROM dbo.TaskSubIntervals s
+                    JOIN dbo.Tasks t ON t.TaskId = s.TaskId AND t.IsDeleted = 0" +
+                    (subCheckin ? " LEFT JOIN dbo.WeeklyLogs w ON w.SubId = s.SubId AND w.ScheduleYear = @y AND w.WeekNo = @w" : "") + @"
+                    WHERE s.IsDeleted = 0 AND s.StartWeek <= @w AND s.EndWeek >= @w
+                    ORDER BY s.StartWeek, s.EndWeek, s.SubId", conn);
+                cmd.Parameters.AddWithValue("@y", y);
+                cmd.Parameters.AddWithValue("@w", w);
+                using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                {
+                    if (!phaseD.TryGetValue(r.GetString(0), out var list)) { list = new(); phaseD[r.GetString(0)] = list; }
+                    list.Add((r.GetInt32(1), r.GetString(2),
+                              r.IsDBNull(3) ? null : r.GetString(3),
+                              r.IsDBNull(4) ? null : r.GetString(4),
+                              r.IsDBNull(5) ? null : r.GetString(5)));
+                }
+            }
             using (var cmd = new SqlCommand(@"
-                SELECT u.UserName, p.Category, p.TypeCode, p.Name, t.TaskName, t.StartWeek, t.EndWeek, w.Status, w.Note, w.DocUrl
+                SELECT u.UserName, p.Category, p.TypeCode, p.Name, t.TaskName, t.StartWeek, t.EndWeek, w.Status, w.Note, w.DocUrl, t.TaskCode
                 FROM dbo.Tasks t
                 JOIN dbo.Projects p ON p.ProjectId = t.ProjectId AND p.IsDeleted = 0 AND p.ScheduleYear = @y
                 JOIN dbo.Users u    ON u.UserId = p.OwnerUserId
-                LEFT JOIN dbo.WeeklyLogs w ON w.TaskId = t.TaskId AND w.ScheduleYear = @y AND w.WeekNo = @w
+                LEFT JOIN dbo.WeeklyLogs w ON w.TaskId = t.TaskId AND w.ScheduleYear = @y AND w.WeekNo = @w" +
+                (hasSubLogCol ? " AND w.SubId IS NULL" : "") + @"
                 WHERE t.IsDeleted = 0 AND t.StartWeek <= @w AND t.EndWeek >= @w
                 ORDER BY u.SortOrder, p.SortOrder, p.ProjectId, t.SortOrder", conn))
             {
@@ -1014,11 +1277,24 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
                 cmd.Parameters.AddWithValue("@w", w);
                 using var r = await cmd.ExecuteReaderAsync();
                 while (await r.ReadAsync())
-                    rows.Add((r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4),
-                              r.GetInt32(5), r.GetInt32(6),
-                              r.IsDBNull(7) ? null : r.GetString(7),
-                              r.IsDBNull(8) ? null : r.GetString(8),
-                              r.IsDBNull(9) ? null : r.GetString(9)));
+                {
+                    var code = r.GetString(10);
+                    var parentStatus = r.IsDBNull(7) ? null : r.GetString(7);
+                    var phases = phaseD.GetValueOrDefault(code);
+                    if (subCheckin && parentStatus is null && phases is { Count: > 0 })
+                    {
+                        // 回報單位＝子區間:一個子區間一列
+                        foreach (var ph in phases)
+                            rows.Add((r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4),
+                                      r.GetInt32(5), r.GetInt32(6), ph.Status, ph.Note, ph.DocUrl, code, ph.Name));
+                    }
+                    else
+                        rows.Add((r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4),
+                                  r.GetInt32(5), r.GetInt32(6), parentStatus,
+                                  r.IsDBNull(8) ? null : r.GetString(8),
+                                  r.IsDBNull(9) ? null : r.GetString(9),
+                                  code, phases is null ? "" : string.Join("、", phases.Select(p => p.Name))));
+                }
             }
             using (var cmd = new SqlCommand(
                 "SELECT UserName FROM dbo.Users WHERE IsActive = 1 AND Role = 'member' ORDER BY SortOrder", conn))
@@ -1063,7 +1339,8 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
 
         // --- Sheet 1:專案執行 ---
         var ws = wb.Worksheets.Add($"W{w:00} 專案執行");
-        string[] headers = { "成員", "分類", "類型", "專案名稱", "計畫任務", "排程", "本週狀態", "工作說明", "文件連結" };
+        // 「本週階段」= 計畫區間底下、本週落在範圍內的子區間(遷移 18);沒切子區間的列留空
+        string[] headers = { "成員", "分類", "類型", "專案名稱", "計畫任務", "排程", "本週階段", "本週狀態", "工作說明", "文件連結" };
         for (int i = 0; i < headers.Length; i++) ws.Cell(1, i + 1).Value = headers[i];
         var head = ws.Range(1, 1, 1, headers.Length);
         head.Style.Font.Bold = true;
@@ -1080,12 +1357,13 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
             ws.Cell(row, 4).Value = t.Project;
             ws.Cell(row, 5).Value = t.Task;
             ws.Cell(row, 6).Value = $"W{t.Start}–W{t.End}";
-            ws.Cell(row, 7).Value = t.Status is null ? "未回報" : (statusLabel.GetValueOrDefault(t.Status, t.Status));
-            ws.Cell(row, 8).Value = t.Note ?? "";
+            ws.Cell(row, 7).Value = t.Phase;
+            ws.Cell(row, 8).Value = t.Status is null ? "未回報" : (statusLabel.GetValueOrDefault(t.Status, t.Status));
+            ws.Cell(row, 9).Value = t.Note ?? "";
             // 文件連結:Excel 對 UNC 路徑(\\server\share\…)的超連結是可以直接開的——
             // 瀏覽器則要靠網域政策放行(見前端 DocLink 的說明),所以匯出檔在內網常是最穩的開啟路徑。
-            PutLink(ws, row, 9, t.DocUrl);
-            var st = ws.Cell(row, 7).Style;
+            PutLink(ws, row, 10, t.DocUrl);
+            var st = ws.Cell(row, 8).Style;
             st.Font.Bold = true;
             st.Fill.BackgroundColor = t.Status switch
             {
@@ -1100,9 +1378,9 @@ app.MapGet("/api/weekly-report-excel", async (int? year, int? week) =>
         used.Style.Border.InsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
         used.Style.Border.OutsideBorder = ClosedXML.Excel.XLBorderStyleValues.Thin;
         ws.SheetView.FreezeRows(1);
-        ws.Column(4).Width = 45; ws.Column(5).Width = 30; ws.Column(8).Width = 50; ws.Column(9).Width = 40;
-        ws.Columns(1, 3).AdjustToContents(); ws.Column(6).AdjustToContents(); ws.Column(7).AdjustToContents();
-        ws.Column(8).Style.Alignment.WrapText = true;
+        ws.Column(4).Width = 45; ws.Column(5).Width = 30; ws.Column(7).Width = 24; ws.Column(9).Width = 50; ws.Column(10).Width = 40;
+        ws.Columns(1, 3).AdjustToContents(); ws.Column(6).AdjustToContents(); ws.Column(8).AdjustToContents();
+        ws.Column(9).Style.Alignment.WrapText = true;
 
         // --- Sheet 2:非專案事項 + 下週預計工作 ---
         var ws2 = wb.Worksheets.Add($"W{w:00} 非專案事項");
@@ -1632,10 +1910,20 @@ class TaskItemDto
     public int Start { get; set; }
     public int End { get; set; }
     public string? Nid { get; set; }           // 該進度區間對應哪組 NID(選填)
+    public List<SubIntervalDto> Subs { get; set; } = new();   // 子區間(遷移 18):只排程不打卡,可重疊
+}
+
+class SubIntervalDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public int Start { get; set; }
+    public int End { get; set; }
 }
 
 // ActorEmpId = 前端 /api/whoami 偵測到的 Windows 工號(如 00058897);非網域環境為 null,由 apiPost 自動附帶
-record WeeklyLogReq(string TaskCode, int Year, int Week, string Status, string? Note, string Actor, string? ActorRole, string? ActorEmpId, string? DocUrl = null);
+// SubId(遷移 20):對子區間打卡時帶子區間 id;對計畫區間打卡為 null
+record WeeklyLogReq(string TaskCode, int Year, int Week, string Status, string? Note, string Actor, string? ActorRole, string? ActorEmpId, string? DocUrl = null, int? SubId = null);
 record ExtraNoteReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole, string? ActorEmpId, string? DocUrl = null);
 record TaskScheduleReq(string TaskCode, string Name, int Start, int End, string Actor, string? ActorRole, string? ActorEmpId, string? Nid);
 record ProjectCreateReq(string Type, string Category, string Owner, string Name, int Year, string Actor, string? ActorRole, string? ActorEmpId, string? Nid);
@@ -1644,13 +1932,15 @@ record ProjectDeleteReq(int ProjectId, string Actor, string? ActorRole, string? 
 record ProjectReorderReq(List<int>? OrderedIds, string Actor, string? ActorRole, string? ActorEmpId);
 record TaskCreateReq(int ProjectId, string TaskName, int Start, int End, string Actor, string? ActorRole, string? ActorEmpId, string? Nid);
 record TaskDeleteReq(string TaskCode, string Actor, string? ActorRole, string? ActorEmpId);
+record SubIntervalUpsertReq(int? SubId, string TaskCode, string Name, int Start, int End, string Actor, string? ActorRole, string? ActorEmpId);
+record SubIntervalDeleteReq(int SubId, string Actor, string? ActorRole, string? ActorEmpId);
 record UserCreateReq(string UserName, string Actor, string? ActorRole, string? ActorEmpId);
 record UserUpdateReq(string UserName, string NewName, string Actor, string? ActorRole, string? ActorEmpId);
 record UserDeleteReq(string UserName, string Actor, string? ActorRole, string? ActorEmpId);
 record WeeklyPlanReq(string UserName, int Year, int Week, string Note, string Actor, string? ActorRole, string? ActorEmpId, string? DocUrl = null);
 record WeeklyCommentReq(string UserName, int Year, int Week, string? Comment, string Actor, string? ActorRole, string? ActorEmpId);
 record DeliverableReq(int ProjectId, string? Deliverable, string? MpSaving, string Actor, string? ActorRole, string? ActorEmpId);
-record ScoreReq(string TaskCode, int Year, int Week, decimal Score, string Actor, string? ActorRole, string? ActorEmpId);
+record ScoreReq(string TaskCode, int Year, int Week, decimal Score, string Actor, string? ActorRole, string? ActorEmpId, int? SubId = null);
 record RetroCheckinReq(bool Enabled, string Actor, string? ActorRole);
 record ResultsExcelReq(int Year, List<int>? ProjectIds);
 record AccessRuleAddReq(string? Empno, string? DeptName, string? Dept1, string? Dept2, string? Dept3, string? Note, string Actor, string? ActorRole, string? ActorEmpId);

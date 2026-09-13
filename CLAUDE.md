@@ -10,13 +10,16 @@ MSD 專案追蹤總表 — ASP.NET Core 9 Minimal API 後端 + React SPA 前端�
 | `memory.md` | 專案現況概觀＋目前待辦 | 覆寫更新，不累積流水帳 |
 | `DB_table.md` | DB 結構＋**完整變更歷史** | **只能往下新增，不可刪減**（遠端增量遷移依賴此歷史） |
 | `系統架構.md` | 模組與資料流總覽 | 架構有變時同步更新 |
-| `使用者手冊.html` | **給使用者看**的操作手冊（非開發文件） | 功能異動影響操作流程時同步更新 |
+| `wwwroot/使用者手冊.html` | **給使用者看**的操作手冊（非開發文件）；**放 `wwwroot/` 隨發佈一起上線**，系統 header 的書本圖示開新分頁（2026-09-13 起） | 功能異動影響操作流程時同步更新 |
 
 ## 維護規則（最重要）
 
 - **絕對禁止更改 `old.sql`／`new.sql`**：兩檔為遠端正式環境已執行完畢的架構基準。遠端已有正式資料，
-  **嚴禁刪庫／刪表重建**。所有 DB 結構異動一律新增編號遷移檔 `15_xxx.sql`… 往下遞增（10~15 已存在）、
+  **嚴禁刪庫／刪表重建**。所有 DB 結構異動一律新增編號遷移檔 `21_xxx.sql`… 往下遞增（10~20 已存在）、
   冪等設計，並**追加紀錄至 `DB_table.md`**。歷史逐檔 01~09 在 `backup_sql/`（僅供參考）。
+  ⚠ **改 CHECK 約束時要 DROP「實際存在的名字」**（查 `sys.check_constraints`），不要照自己命名慣例猜：`new.sql` 升 53 週時
+  DROP 的是不存在的 `CK_WeeklyLogs_WeekNo`，`old.sql` 的 `CK_WLog_Week`（1–52）就這樣留了下來與新約束同時生效，
+  W53 打卡到年底才會炸（遷移 19 修）。
 - `sim_create_WEB_notes_person.sql` 僅開發機用（模擬遠端名冊 VIEW），**遠端勿執行**。
 
 ## 專案結構
@@ -117,18 +120,48 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
     的物件裡（＝`{by, byRole, at, docUrl}`）。理由：內容改成物件要動十幾個 `?.[week] || ''` 取值點，
     而 meta 本來就一路傳到每個顯示／編輯的地方（彈窗 `meta` prop、看板 `extraMeta`/`planMeta`、代修面板），
     放這裡零新增 prop、也不會漏掉任何一處；`MetaLine` 只讀 by/byRole/at，多一個欄位不影響。
-- `POST /api/weekly-log/score` — 主管評分（0.3/0.5/0.8/0.9/1，SP 檢查權限）
+- `POST /api/weekly-log/score` — 主管評分（0.3/0.5/0.8/0.9/1，SP 檢查權限）；與 `/api/weekly-log` 同樣收選填 `subId`（子區間打卡，遷移 20）
 - `POST /api/weekly-comment` — 主管週報回覆（每人每週一筆，空字串=清空；看板紫色區塊全員可見）
 
 **專案／任務（主管）**
 - `POST /api/project`(+`/update` 含改負責人、`/delete`、`/restore`、`/reorder`、`/deliverable` 含 MpSaving)
 - `POST /api/task`(+`/delete`、`/restore`)、`POST /api/task-schedule`
 - 刪除 toast 附「↩ 復原」10 秒一鍵反悔（restore）
+- **子區間（遷移 18，2026-09-11；遷移 20 起可打卡）**：`POST /api/task/sub`（`subId` null＝新增，回 `{subId}`）、`POST /api/task/sub/delete`、`POST /api/task/sub/restore`。
+  **主管＋專案負責人**皆可編（SP 內檢查）。bootstrap 的 `tasks[*].subs = [{id,name,start,end}]`（依起週→迄週排序）。
+  ⚠ **子區間就是回報單位（遷移 20，2026-09-12 使用者決定，推翻遷移 18 的「只排程不打卡」）——但有總開關**
+  `appsettings.json` 的 **`Features:SubIntervalCheckin`**（**預設 false**，使用者決定先不用；**刻意不做在網頁上、不放 DB**——
+  使用者要求避免誤操作，只能改設定檔；`SubCheckinOn()` 每次即時讀，改檔數秒生效、使用者重新整理即套用）。
+  關著時 `weekUnits` 永遠回 `mode:'task'`、子條不畫色點、帶 `subId` 的回報／評分後端 400、Excel 不展開。
+  前端旗標是模組變數 `SUB_CHECKIN`，**只在 `refreshData` 裡跟整包資料一起更新**（bootstrap 回 `subCheckinEnabled`），
+  旗標與 taskLogs／subLogs 永遠同一批，useMemo 靠資料物件換新而重算——不要另外用 prop 傳。
+  ⚠ **不要再加回網頁上的切換鈕或 `/api/settings/sub-checkin`**（曾做過一版、依使用者要求拆掉）。
+  ⚠ 開→關時已用子區間回報的週會顯示「未回報」（父層無紀錄；資料保留），確認訊息與手冊都有講，勿再提為 bug。
+  規則只有一份 `weekUnits(task, week, taskLogs, subLogs)`（`app.jsx` 頂部），所有待回報／已回報／分數都從它出去，
+  **不要在別處再判斷一次**：①該週有落在範圍內的子區間 → 單位＝那些子區間各自打卡；沒有 → 單位＝計畫區間本身
+  ②父層那週已有紀錄（切子區間前回報過的舊週）→ `legacy`，視為已回報、不催子區間 ③計畫區間該週分數＝子區間分數平均
+  （未回報＝0），看板「得分 x/滿分」的滿分仍＝計畫區間數（`taskTotal`），「回報 x/y」則以單位計——兩個分母**刻意不同**。
+  DB：`WeeklyLogs.SubId NULL`＝父層紀錄；bootstrap 分兩份回 `taskLogs[taskCode][week]`（父層）＋`subLogs[subId][week]`，
+  既有 `taskLogs[t.id]?.[week]` 取值點語意不變。`/api/weekly-log`／`/score` 收選填 `subId`，**只在有值時才傳 `@SubId`**
+  （遠端未跑遷移 20 時舊 SP 沒這個參數，一律傳會讓所有打卡壞掉）。有回報紀錄的子區間**只有主管能刪**（SP 也擋），
+  刪除 toast 有「↩ 復原」（`/api/task/sub/restore`）。甘特父條在子區間模式畫**彙總色點**（部分＝琥珀 `PARTIAL_DOT`），
+  子條自己畫色點＋❗紅框、**進 roving 群組**（id `s<SubId>`）。**待回報紅框只框「回報單位」**（2026-09-13 使用者決定）：
+  子區間模式且子列展開時只框待回報的子條、父條不框（`isPending` 多 `!(wu.mode==='sub' && subExpanded)`），否則父子同時亮紅
+  分不出哪條要打卡；子列**收合時父條代為承接**（子條看不到，不承接則待回報訊號整個消失）。TaskModal 以 `unitSub` 為當前回報單位，
+  子區間模式顯示單位晶片列（`role=tablist`），表單打到一半（`reportDirty()`）不能切單位。
+  ⚠ 起迄**必須落在父區間內**、每條最多 10 筆；父區間改期會跑出範圍時 `usp_UpdateTaskSchedule` RAISERROR 列出名稱
+  （不靜默截斷），前端 `submitSchedule` 也先擋一次並列出哪幾筆。
+  ⚠ bootstrap 先 `OBJECT_ID('dbo.TaskSubIntervals')` 再查：遠端未跑遷移 18 時整包不能因此失敗。
+  ⚠ 稽核 `EntityType='SubInterval'`、`EntityId=TaskCode#SubId`，DELETE 的 OldValue 帶名稱（子區間不在 taskInfo 對照表裡）。
+  ⚠ 兩支端點都先 `BlankStr(req.Actor)` → 400：SP 的權限判斷是 `@Actor <> @OwnerName`，NULL 比對＝UNKNOWN 會**整個略過**；
+    接著資料先寫入、`AuditLog.ActorName NOT NULL` 才炸（SP 無交易）→ 留下沒有稽核紀錄的資料。既有其他 SP 同樣沒交易，
+    新端點一律在 API 層先擋 Actor（`/api/project/deliverable` 同一種 SP 寫法，2026-09-12 已補）。
 
 **成員（主管）**：`POST /api/user`(+`/update`、`/delete`)——軟刪除；同名曾移除則重新啟用；名下有專案擋刪。
 
 **設定／統計／匯出**
 - `POST /api/settings/retro-checkin` — 補登總開關（**request 欄位為 `enabled`**，曾誤送 `allow` 導致從未寫入 DB）
+- 子區間打卡總開關**沒有端點**：只在 `appsettings.json` 的 `Features:SubIntervalCheckin`，bootstrap 回 `subCheckinEnabled` 供前端讀取
 - `GET /api/audit-log?top=&from=&to=&actor=&action=&entityType=` — 稽核紀錄，**API 層翻譯白話 summary**
   （對照含已刪資料；前端顯示 summary、原代碼放 title）。篩選條件皆選填、參數化組 WHERE，回傳
   `{logs, actors, matched, truncated}`——`actors` 取自 AuditLog 而非 Users（才含已移除／已改名者），
@@ -156,6 +189,16 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
 
 **錯誤處理慣例**：所有端點 catch 走 `Fail(ex)` — 內部例外只記 log 回一般化 500；SP `RAISERROR`(50000) 照原文回 400。
 新增端點沿用，勿直接回 `ex.Message`。
+
+**未來週次一律不可寫入（2026-09-12 使用者決定）**：系統是檢視「過去到現在」的狀態，**主管也不開放**對未來週打卡。
+後端 `RejectFutureWeek(year, week, what)`（`ISOWeek` 算今天，與前端 `getTodayWeek` 同演算法）套在 `weekly-log`／`score`／
+`extra-note`／`weekly-plan`／`weekly-comment` 五支 → 400「W45 尚未到，不可預先回報」。前端：`TaskModal.canClockIn` 加
+`!isFutureWeek`、兩個回報彈窗 `readOnly`＋`future` 文案、header 主管的 🛠 鈕在未來週隱藏並改出「📅 未來週次・僅檢視」晶片、
+看板 `onEditComment` 傳 `undefined`、催報鈕隱藏。主管**仍可切到未來週看排程**（那是甘特的用途），只收寫入入口。
+
+**⏰ 即將到期的判斷（2026-09-12 修）**：`remain <= 2 || (remain <= DEADLINE_RATIO_MAX_REMAIN(4) && elapsed >= 0.7)`。
+原本只看比例，整年 52 週的區間在 9 月（71%）、剩 16 週就被標「即將到期」——實測 18 條進行中 7 條被標、真正快到期只有 1 條。
+「即將」的語意是剩下的時間不多，比例之外一定要有絕對週數。
 
 **輸入驗證慣例（2026-08-10 新增）**：**使用者輸入錯誤要用 `Bad(msg)` 回 400 明文，不可掉進 `Fail(ex)`**。
 掉進 `Fail` 會變成 500「伺服器處理失敗，請稍後再試」——但「專案名稱空白」「結束週早於開始週」「分數 7」
@@ -187,16 +230,93 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   ⚠ **commit 在 Enter／失焦，不在 `onChange`**：邊打字邊切週會在打「1」時先跳 W01，整張甘特白重算一次。
   ⚠ 超出範圍**夾回邊界不是拒收**；成員的上限是 `todayWeek`（與 › 鈕 disabled 的規則一致）。
   ⚠ `type=number` 的微調鈕要用 `.week-input` 隱藏（深藍 header 上是灰方塊，還吃掉 16px；欄位只有 36px）。
+- **子區間在甘特圖上＝專案列下方的「縮排子列」，一個子區間一列**（2026-09-11）：重疊的子區間自然成階梯，
+  名稱寫在凍結欄（`└ 名稱`），條再窄都讀得到；子列上鋪一層父區間範圍的淡色底帶（`--gantt-sub-band`），
+  子條落在帶子裡就看得出屬於哪條計畫區間（同專案兩條以上計畫區間都有子區間時，名稱前再標父區間名晶片）。
+  ⚠ 不擠進父條裡畫分段（重疊表達不了、文字塞不下）、也不做同列多泳道堆疊（名稱欄對不上、要用猜的）。
+  ⚠ 階段（未開始／進行中／已結束）依 **`todayWeek`**（不是 `currentWeek`）判斷，但**只寫在 tooltip，條的樣式不分階段**
+    （2026-09-13 定案，見下方配色條）；**不做時間百分比進度**（時間過去≠做完）；色點只在子區間打卡總開關開著時畫。
+    使用者已決定**不要「✓ 完成」手動標記**，勿再提。
+  ⚠ 展開／收合鈕＝名稱**後面**的 `▾ n`／`▸ n` 晶片（放前面會讓有／無子區間的列類型晶片錯位），沒有子區間的列完全不變。
+    **週檢視預設展開、年度總覽預設收合**（使用者決定；總覽的核心是整年一畫面），兩邊各記「偏離預設」的專案 id
+    到 `gantt_prefs`（`subCollapsed`／`subExpandedOv`），`isSubExpanded(projId)` 依 `isOverview` 挑對應那份。
+    全域一鍵＝工具列「顯示 ▾」下拉裡的「展開／收合全部子區間」（`setAllSubExpanded`，2026-09-13；只在 `hasAnySubs` 時列出）：
+    作用於**目前檢視**那份 prefs——週檢視全收＝把所有帶子區間的案子塞進 `subCollapsed`、總覽全展＝塞進 `subExpandedOv`，
+    反方向都是清空（prefs 記的是「偏離預設」，不是絕對狀態）。
+  ⚠ **子條用 teal（青綠）色系，與父條的琥珀色明確分色**（2026-09-13 使用者決定，推翻同日稍早的「沿用父條琥珀色、只靠深淺分階」）：
+    同色系版實測「一眼望去看不出來是什麼」——子條、父條、奶油底帶全是黃的。teal 是圖上唯一沒被賦予語意的色相
+    （琥珀＝計畫區間、藍＝高亮／按鈕、綠／天藍＝狀態色點、紅＝待回報／當週線、紫＝主管回覆）。
+    **一種樣式、不分階段**：斜紋 `#CCFBF1`/`#BDF7EC` ＋ `rgba(15,118,110,0.75)` 1px 框——與父條**完全同一種構造**
+    （同紋距、同框粗細、同透明度）只換色相；圖例「子區間」色塊同款。
+    ⚠ **暗條是 `#BDF7EC` 不是 `#99F6E4`**（2026-09-13 使用者：子條看起來比父條重、主從反了）：父條兩條斜紋亮度差只有 0.03、
+    子條原本 0.10＝3 倍，紋路太吵才顯得搶眼（亮條與邊框深度本來就與父條一樣）。改後 ΔL=0.05 同量級。
+    **不要整條調淺**：亮條（L .88）與奶油底帶（L≈.92）只差 .04，再淺就融進底帶；子條是打卡入口，變淡會像不能點。
+    主從層次由 `└` 縮排、子列位置、父區間底帶表達，顏色只要「不搶」。
+    ⚠ **不依階段變樣式**（2026-09-13 使用者兩次回報後定案）：之前依今天分三階段（未開始虛線／進行中實心→斜紋深框／已結束
+    淡斜紋淡框），使用者看到上下兩個專案的子條顏色不同，直覺是「顏色不一致＝壞掉」而不是「一個進行中一個已結束」。
+    父條本來就不分階段（W01 的區間到年底照樣奶油斜紋），子條單獨分只是多一套要學的語彙；階段留在 tooltip。
+    ⚠ **也不用實心**（更早一版進行中是 `#99F6E4` 實心，使用者回報「變成實心綠色」）：父條全是斜紋，全圖唯一一條實心飽和色
+    會被讀成「進度填色／做完了」（甘特慣例實心填滿＝完成度），而本站刻意不做時間百分比進度。
+    ⚠ 已結束**不用灰**（兩輪踩坑）：slate-200 帶藍、在暖底帶上被推成「淺藍」；換 stone 暖灰仍是**全圖唯一一條灰的**——
+    父條本來就不會因為過去了就變灰（W01–W09 的區間照樣奶油色），灰是子條獨有的新語彙，融不進去。
+    ⚠ 不用藍：最早進行中用 `#DBEAFE`／`#2563EB`，**與父條「看板高亮」的色值一模一樣**，
+    點看板整組全藍、分不出哪條是剛點的；藍色在本站又是按鈕／連結語彙，子條讀起來像「被選中的按鈕」。
+    現行藍色只剩一個意思＝高亮，**且高亮以「回報單位」為準**（2026-09-13 使用者：「我點亮子區間，應該只顯示子區間排程」）：
+    `highlightedTaskId`＋`highlightedSubId` 一對，看板點子區間的卡只亮那條子條（`sub.id === highlightedSubId`）、
+    點父層／legacy 的卡只亮父條（`highlightedSubId == null`）；看板卡片的「◀ 甘特圖已高亮」也比對兩個 id。
+    點子區間的卡會順手把該專案的子列展開（走 ▾ n 同一份 prefs），否則收合狀態下亮的那條看不到。
+    清高亮一律走 `clearHighlight()`（兩個一起清）。曾做成「亮父條連同全部子條」，一組全藍分不出點的是哪條，已推翻。
+    概況列圖例的「子區間」色塊要同步（行內固定色，兩處各寫一份）。
+  ⚠ 子條可點＝開彈窗並直接停在該子區間的回報；自遷移 20 起子條是打卡入口，**與父條同進 roving 群組**（原本 `tabIndex=-1` 已取消）。
+  ⚠ **子條的 hover 回饋與 tooltip 比照父條**（2026-09-13）：`shadow-sm transition-transform hover:scale-y-110`＋同一套
+    `showTooltip(e, proj, task, sub)`（第四個參數帶 `subInfo`：該子區間本週紀錄／歷史，取自 `subLogs`、受 `SUB_CHECKIN` 控）。
+    原本子條滑過去毫無反應、只有原生 `title`（延遲 1 秒、不含回報內容）——使用者會覺得「父條會動、子條不會動＝不能點」。
+    **子條不掛原生 `title`**（與自訂 tooltip 疊在一起）；凍結欄的名稱 `span` 仍保留 `title`。
+  ⚠ **收合時不要在父條上畫子區間縮圖**（2026-09-13 做過一版、同日依使用者回報拆掉）：曾在父條頂端畫每個子區間一段 3px teal
+    細帶，想讓預設收合的年度總覽不展開也看得到子排程。使用者收合後問「計畫區間怎麼變成這樣？」——子區間 W06–W48 幾乎與父條
+    等長時，那條細帶讀起來是**父條多了一道綠邊／壞掉**，不是「底下有子區間」。父條與子條一樣**只有一種樣式**，收合狀態靠
+    `▸ n` 晶片＋tooltip 的子區間清單表達即可，不要再在條上疊任何「附加標記」。
+  ⚠ **名稱欄的 `└` 已改成樹狀導引線**（2026-09-13）：每列一個 `└` 在 10 筆子區間時每列都像「最後一筆」，父列捲出畫面後也不知道
+    這幾列屬於誰、到哪結束。現行＝`border-slate-400` 直線貫穿子列（最後一列只到 `bottom:50%` 自然收成 └）＋7px 橫向短線接名稱，
+    最後一列底線 `border-slate-300`（其餘 `-200`）標出群組結尾。純 CSS、`aria-hidden`；縮排 `subIndent` 週 40／總覽 16、
+    `guideX = subIndent - 10`。**不做 hover 父⇄子互相標示**（底帶已表達八成，且每次 mouseenter 多一次整頁重繪）。
+  ⚠ 拖曳排序中子列**照畫**、掛與父列同一組 `rowDragOver`／`rowDrop`（目標一律 `proj.id`，落在子列＝落在父專案；
+    被拖專案的子列一併 `opacity-40`，藍色目標線只畫父列）。曾做成「拖曳中藏子列」——上方有十幾列子區間時整張表
+    一開拖就縮短，游標下的目標跳成另一個專案（2026-09-12 修）。搜尋 `hay` 含子區間名稱，
+    **且命中子區間的專案暫時視為展開**（`subSearchHits`，不寫 prefs；`▾ n` 晶片期間 disabled）——否則收合狀態下
+    搜「驗證」跑出一個名稱裡沒有「驗證」的專案，使用者只會覺得搜尋壞了。
+  ⚠ TaskModal 新增列的**起迄週留空＝沿用父區間起迄**（`resolveSubWeeks`）：placeholder 顯示的就是父區間的 10／27，
+    灰字暗示「不填就是這個值」，驗證卻擋下來會像壞了。新增列有內容時各列 ✎／🗑 一併 disabled（表單是共用的一份，
+    按 ✎ 會無聲覆蓋掉打到一半的內容）。編輯但三欄都沒改 → 直接收掉、**不打 API**（免「內容未變更」稽核噪音）。
+  ⚠ 子區間刪除的「↩ 復原」已於遷移 20 補上（子區間底下開始掛回報紀錄後，「重建即可」的前提消失）；
+    Confirm 訊息會列出「含 n 筆週回報」。
+  ⚠ 遷移檔的 `SET QUOTED_IDENTIFIER ON` 要放在 **filtered index 之前**（不只是 SP 之前）；沒帶 `-I` 時索引會 1934 失敗、SP 照建。
+  ⚠ 列高 週 26／緊湊 22／總覽 16（父列 40／30／24），條色走行內固定色（與父條同一條規則，不受深色映射影響）。
+  ⚠ TaskModal 的子區間存檔／取消後**彈窗不關**，全域 `MODAL_DIRTY` 要自己處理：其他欄位（回報、排程）都沒動才
+    `clearModalDirty()`（`otherFieldsDirty()`），否則剛存完子區間按 ESC 會誤跳「放棄未儲存」（實測踩到）。
+  ⚠ 概況列圖例的「子區間」格**只在資料裡真的有子區間時顯示**（`hasAnySubs`）：圖例解釋的是看得到的東西，
+    且這格 57px 會讓 1024＋看板的概況列由一行變兩行（有子區間時接受兩行，沒有就別佔那個寬）。
+  ⚠ 週報 Excel Sheet1、複製週報文字、看板卡片自遷移 20 起**一列／一張卡＝一個回報單位**：子區間模式下每個子區間一列
+    （Excel「本週階段」欄＝子區間名、文字寫成 `區間 › 子區間`、卡片區間名旁 `› 子區間` 藍晶片）；只有 `legacy`（父層舊紀錄）
+    才用「階段：…」列出當週階段。「該週」一律指 `currentWeek` 不是今天；兩份週報文字共用 `reportTaskLine()`。
+    後端 Excel 的展開規則與前端 `weekUnits` 相同（父層無紀錄且有進行中子區間 → 逐子區間），先 `COL_LENGTH('dbo.WeeklyLogs','SubId')` 再組 SQL。
 - **「W.. 概況」的統計跟著 `ownerFilter` 走**（2026-08-10）：標題就寫在被篩選過的表格正上方，
   選了「玉婷」卻顯示全隊 3/21、而表格是 16/69，兩組數字對不起來（實測切 all→玉婷→裕隆，晶片三次都不變）。
   標題會同步顯示範圍（`全隊概況`／`玉婷概況`），使用者不必用猜的。
   ⚠ 但**不吃搜尋與類型篩選**：那兩個是臨時的「找資料」動作，概況是「這週該做的事完成多少」的固定基準。
-- **「未回報」晶片＝可切換的篩選鈕**（`pendingOnly`，2026-08-10）：主管每週的核心動作就是「誰還沒交」，
-  原本看到「未回報 18」之後只能自己在 69 列裡找紅框。用 `<button aria-pressed>`（不必套 `clickable`）。
+- **概況列四顆狀態晶片都是可切換的篩選鈕**（`statusFilter`：`null|'pending'|'executed'|'monitor'|'not_executed'`；
+  2026-08-10 先做「未回報」、2026-09-13 擴成四顆——旁邊三顆長得一樣卻只是數字，使用者會去點）：主管每週的核心動作
+  就是「誰還沒交」「誰這週沒做」，原本看到「未回報 18」之後只能自己在 69 列裡找紅框。用 `<button aria-pressed>`
+  （不必套 `clickable`），選中態的 ring 色跟晶片同色相（`ringClass`）。
+  ⚠ **單選不多選**：四者是同一批「本週回報單位」的分割，主管一次只問一個問題；點另一顆＝換條件、點同一顆＝取消。
+  ⚠ 分類只有一份 `unitMatchesStatus(unit, key)`（`app.jsx` 頂部，與 `weekStats` 同一套規則：沒 log＝未回報、
+  有 log 依 status、非 monitor/not_executed 一律算有執行）——晶片上的數字與篩出的列才對得起來，不要在別處再寫一份。
+  `pendingOnly` 保留為 `statusFilter === 'pending'` 的衍生值，給「🎉 已全數回報」空狀態用。
   ⚠ 它會隱藏部分列 → 必須併進 `isFilteringRows`（暫停拖曳排序）。
-  ⚠ 看板開啟／切成果清單時：**篩選中的話那顆要留著**（否則清單只剩幾列卻找不到地方取消），
-  切成果清單則直接 `setPendingOnly(false)`（全年度視角沒有「本週未回報」的概念）。
-  ⚠ 篩到 0 筆時不要報「找不到專案」——那其實是好消息，改顯示「已全數回報」＋「顯示全部專案」出口。
+  ⚠ 看板開啟／窄螢幕把晶片收起時：**篩選中的那顆要留著**（各自 `|| statusFilter === key`；否則清單只剩幾列卻找不到
+  地方取消），切成果清單則直接 `setStatusFilter(null)`（全年度視角沒有「本週」的概念）。
+  ⚠ 「未回報」篩到 0 筆時不要報「找不到專案」——那其實是好消息，改顯示「已全數回報」＋「顯示全部專案」出口；
+  其餘三種篩到 0 筆走一般的 `<EmptyFilterState>`（「只看有執行」為 0 沒有好壞可言）。
 - **篩到 0 筆的空狀態一律用 `<EmptyFilterState>`**（2026-08-10）：它做兩件事，少一件都不算數——
   ①**講出是什麼把清單清空的**（造成 0 筆的條件散在三處：工具列的搜尋框與 a~e 晶片、header 的成員下拉、
   成果清單自己的 KPI 卡片，使用者看不到「現在同時生效了哪些」）②**就地給出口**，每個條件各一顆清除鈕
@@ -212,6 +332,11 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   也無法點週次移動當週紅線。總覽的週欄寬＝剩餘空間÷週數（非固定 `weekW`），故該列在總覽時
   不加固定寬度、字級降到 9px、只顯示數字；欄寬 <16px（如 1366＋看板開啟＝12px）時**只標 5 的倍數與當週**，
   未標數字的格子照樣可點（hover／title 不變）。門檻與欄寬由 `overviewWeekW`／`sparseWeekLabel` 推算。
+- **年度總覽的計畫條也寫區間名稱**（2026-09-13；原本 `!isOverview` 關掉、註解說「壓縮後塞不下」）：一列有 2～4 條時
+  凍結欄只有專案名，不標字就分不出哪條是哪個階段，只能 hover。「塞不下」用真實資料算過才拿掉守門——最短區間 3 週、
+  8 成 ≥4 週；實測 1920 104/105 完整放得下、1366 開看板（週欄 12px）83/105，其餘靠既有 `truncate` 截斷、完整名稱在 tooltip
+  與 `aria-label`。總覽用 `text-[9px] leading-none`（條內只有 14px，週次列已是 9px 有先例；行高不鎖 1 會撞到底部色點）。
+  ⚠ 子區間列**不加**（名稱已在凍結欄 `└ 名稱`）；單區間專案的區間名常與專案名重複，**照加、不做例外**（規則一致優先）。
 - **年度總覽的名稱欄由「週欄保底寬」倒推**（`MIN_OVERVIEW_WEEK_W = 20` → `overviewNameW`）：
   原本寫死 240，1920 下明明有空間卻不用（截斷 22%）。現行＝把剩餘空間讓給名稱欄，但先保證每個週欄 ≥20px。
   上限沿用週檢視的 `nameColWidth`（切換兩檢視時名稱欄不跳動）、下限 240（任何情況都不比原本差）。
@@ -294,6 +419,23 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   因此會永久轉圈且無提示（使用者唯一出路是自己想到按 Ctrl+F5）。現行＝15 秒逾時 → ErrorScreen＋重試。
   ⚠ 逾時**不比照既有 catch 直接放行**：catch 是「明確被拒絕／連不上」，逾時是「不知道伺服器怎麼了」，
   未知狀態下自動放行等於把權限閘門變成裝飾（維持 fail-closed）。
+  ⚠ catch 裡**只有 `TypeError`（fetch 本身失敗＝連不上）才放行**（2026-09-12 修）：伺服器有回應但 4xx/5xx 是
+  「檢查失敗」不是「連不上」，原本一律放行等於 `AccessRules` 查詢炸掉時卡控自動失效；現改 ErrorScreen＋重試。
+- **「本週」只存在於今年——時間關係一律走 App 的三個旗標，不要各處自己比 `currentWeek` 與 `todayWeek`**（2026-09-12 修）：
+  `isCurrentYear`（`scheduleYear === getTodayScheduleYear()`）、`isFutureWeek`（未來年度或今年的未來週；誰都不能寫，後端同樣擋）、
+  `isReportingWeek`（今年且＝本週；成員「本週回報」的唯一目標）。`todayWeek` 在別的年度只是被夾到 1 或最後一週的值，
+  原本各處直接拿它比：成員切到 2027 會看到「本週回報中心 1」在催 2027 W01 的下週預計（送出被 400），到了 2027 切回 2026
+  又會把 W53 當本週、不用補登權限就能寫去年的回報。非本年度：徽章歸零、回報中心／🛠／催報收起、header 出
+  「📅 非本年度・僅檢視・回到 N 年」晶片（`goToCurrentWeek`／H 在非本年度＝切回今年）。子元件（TaskModal、
+  ManagerWeekPanel 的 `historical`、看板的 `isFutureWeek`）都收 prop，不自己算。
+  ⚠ `getTodayScheduleYear()` 與 `getTodayWeek()` 目前都是**日曆年／ISO 週**，與公司「週日起始、含 1/1 那週為 W1」的規則
+  不符（每個星期日差一週、跨年整段錯）；**待使用者確認 2027 行事曆後只改這兩個函式**，其餘判斷不用動。
+  ⚠ 切年度後的系統週由 `refreshData` 在該年度載入完成時切到本週並置中（`loadedYearRef` 比對年度，60 秒輪詢不會動使用者選好的週）：
+  該年有幾週（52／53）要等 bootstrap 回來才知道，在下拉的 onChange 用預設 52 算會讓 53 週年度的 W53 落成 W52。
+- **甘特 tooltip 的座標不進 state**（2026-09-12 修）：App 沒有任何 memo 邊界，`x/y` 放 state 等於每次 mousemove 整張
+  77 列 × 53 格重繪（實測每次 7–18ms，投影筆電滑過甘特條會掉幀）。內容（哪條區間）仍走 `tooltip` state，
+  座標存 `tooltipPosRef`、`placeTooltip()` 直接改節點 `style.left/top`，節點掛載時由 callback ref 套用最後座標。
+  實測修正後 mousemove 0ms、只有進出一條區間（內容換）才付一次 16–18ms 的整頁重繪。
 
 **Modal／Toast 規範**
 - 遮罩**不綁點擊關閉**（防誤點遺失輸入）；例外：無輸入的下拉選單（如 ⚙️ 管理）可點外關。
@@ -386,30 +528,62 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   看板的「複製週報／主管回覆」（21→25 高）、成果清單 ★（13×24→25×24，`-ml-1.5` 抵銷）。
   ⚠ 年度總覽的甘特條（高 15px）**刻意不改**：那是「整年 53 週一畫面」的必然結果，加高就破壞核心前提。
 - 工具列 `flex-nowrap + overflow-x-auto + [&>*]:flex-shrink-0` 不換行；操作元件小尺寸（11px、py-1），內容區大字。
+  ⚠ **1366 是工具列的驗收寬度**（2026-09-13 實測溢出 114px 吐橫向捲軸，右緣的鈕被切掉）：加任何控制項前先量。
+  現行＝「展開｜收合」＋「子區間 ▾｜▸」四顆文字鈕收成一顆 **「顯示 ▾」下拉**（`showDisplayMenu`，四個都是低頻的
+  「整張表一次展開／收合」）；a~e 類型晶片改用 `PROJECT_TYPES[k].short` 四字短名（全名放 `title`），419→352px。
+  ⚠ 工具列是 `z-30` 的 stacking context、又是 `overflow-x-auto`：**下拉選單本體不能放在工具列裡**（absolute 被裁、
+  fixed z-[70] 被壓在 z-30 層、蓋不過甘特 sticky 表頭 z-50，實測被月份列吃掉一半）。選單放工具列**外面**當兄弟節點、
+  `fixed` 定位、座標在點開當下從按鈕 `getBoundingClientRect()` 算（`displayMenuPos`）。加進 `isAnyModalOpen` 與 ESC 清單。
+  項目由 `displayMenuItems` 決定：成員群組兩項只在 `groupedProjects.length >= 2` 時列（成員預設只看自己＝一個群組，
+  「收合」等於把整張表收掉）、子區間兩項只在 `hasAnySubs` 時列；一項都沒有整顆鈕不顯示。
+- **概況列圖例不重畫統計晶片已有的顏色**（2026-09-13 去重）：左側「有執行 n／Monitor n／未執行 n」三顆晶片本身就是
+  同色系的圖例，右側圖例的三個色點只在晶片收起時（`!statusChipsVisible`＝看板開啟或 `tightStatsBar`）才補回，
+  圖例 554→380px。「❗待回報」永遠留在圖例——它解釋的是甘特條的**紅框**（形狀），與黃色計數晶片「未回報」長得不一樣。
+  概況列標題也不再寫月份（header 週數選擇器已有 `2026/09`）。
 - **鍵盤焦點外框**：Tailwind preflight 會把 outline 全清掉（實測 `outline-style: none`），`input.css` 已補回
   全域 `:focus-visible`（**不是 `:focus`**——滑鼠點擊不出現外框，只有鍵盤操作才顯示，不影響滑鼠體感）。
   深藍 header／表頭上的控制項改用亮金 `#FDD075`（對 `#001F5B` 對比 10.73；藍框只有 3.04），
   深色模式的 header 底色不變，故 `.dark header …` 要一併指定，否則 `.dark`（0,1,0）會蓋掉 `header`（0,0,1）。
 - 主管 header 只留高頻鈕（🛠 編輯回報／📊 團隊總結），低頻管理入口一律加進右上「⚙️ 管理 ▾」選單。
 - 甘特斑馬紋（sticky 欄同步上色）；圖例常駐可見（閱讀輔助資訊不藏 tooltip）。
+- **凍結欄遮罩層的高度必須剛好等於表格**（2026-09-13 修）：原本 `height:100000 + margin-bottom:-100000`，以為負 margin
+  「不撐長捲軸」——**負 margin 只抵銷版面位置，不抵銷捲動溢出**，容器 `scrollHeight` 實測就是 100000，群組全收合時滾輪一動
+  整張表被捲出畫面（成員只看自己 5 案時每天都會遇到）。現行＝遮罩與 `<table>` 放同一個 grid 格（wrapper `display:grid`、
+  兩者 `gridArea:'1 / 1'`），遮罩被拉到與表格等高、`sticky left-0` 照常；週檢視欄用 `max-content`（表格比容器寬）、
+  總覽用 `100%`。實測 scrollHeight＝表格高、全收合時＝clientHeight（捲不動）、橫向捲動遮罩仍貼左緣、thead 仍 sticky。
 
 **其他行為**
 - `API_BASE` 執行期自動偵測部署根路徑（IIS 子目錄相容），勿寫死。
+- **使用手冊入口＝header 帳號區的書本圖示 `<a target="_blank">`**（2026-09-13）：手冊寫了 13 章卻沒有任何入口，使用者根本不知道有這份。
+  手冊本體移到 `wwwroot/使用者手冊.html`（隨 publish 上線、不需另外複製）；連結為 `${API_BASE}/使用者手冊.html?role=member|manager&theme=dark|light`
+  ——手冊端讀 `?role` 直接停在該身分的章節（會寫進它自己的 `msd_manual_role`）、`?theme` 只蓋這一次不存（手冊自己的切換鈕才是明確選擇）。
+  ⚠ 放 header 不放 ⚙️ 管理：成員也要看得到（⚙️ 只有主管有）。⚠ 是連結不是按鈕（開新分頁），用 `<a>` 且 `aria-label` 是唯一可及名稱。
+  ⚠ 手冊 URL 的中文檔名用 `encodeURIComponent`，IIS 與 Kestrel 都能正確解碼；不要為了 URL 好看改英文檔名（四份文件與記憶都以此名稱指涉）。
 - 離線策略：連不到後端顯示 ErrorScreen，不塞假資料。
 - 補登機制：主管開關開啟時成員可修非當週（PendingPanel retro 琥珀樣式）；主管常駐 ManagerWeekPanel 代修
   任一成員任一週（顯示「✏️主管修正」標記）；最後編輯資訊統一用 `MetaLine` 元件。
 - 團隊總結看板：成員預設「只看我的週報」、主管預設全隊折疊；卡片常駐「📋 複製週報」。
 - **依情境收控制項（兩組條件，新增入口時一併判斷）**
   ①**成果清單＝全年度視角** → `!isResults` 隱藏所有「當週」控制項：header 的**系統週數選擇器**、
-  主管「🛠 編輯 W.. 回報」、成員「📋 本週回報中心」／「🕘 修改 W.. 回報」、「📊 團隊總結」、
-  「🔒 僅限當週／🔓 補登 ON」（它管的是當週打卡權限）、展開／收合。
+  主管「🛠 編輯 W.. 回報」、成員「📋 本週回報中心」／「🕘 修改 W.. 回報」、「📊 團隊總結」、「顯示 ▾」。
   ②**看板開啟＝「檢視本週已完成工作」的唯讀情境** → `!showWeeklyReport` 隱藏所有**編輯／跳出情境**的入口：
   「🛠 編輯 W.. 回報」（成員的兩顆同理）、「成果清單」（跳到全年度視角）、
-  「🔒 僅限當週／🔓 補登 ON」（改寫入權限的系統設定，誤點會直接對全體開放歷史補登）、
   全隊狀態晶片與「⏰ 即將到期」（前者在看板裡已被每人的分段條拆得更細＝重複資訊，後者會開另一個面板跳出情境）。
   ⚠ 收整區時**連同前面的分隔線一起收**，否則工具列會留下孤立的豎線。
   兩組都保留 ⚙️管理／深色／登出，以及**看板情境下仍需要的**系統週數（切週會同步換看板內容）、
   週檢視／年度總覽、密度切換、回到本週。分段控制少一段不影響外觀（圓角與邊框在容器上）。
+  ⚠ **補登總開關已不在工具列**（2026-09-13 移進 ⚙️ 管理選單第一項，ON 時琥珀底）：
+  它是改全體寫入權限的系統設定、一年按不到幾次，原本是工具列上唯一的系統設定、混在檢視切換旁容易誤點。
+  ON 時畫面上的琥珀橫幅與「關閉歷史補登」照舊 → 狀態與關閉入口都在原地，只有「開啟」進了選單。
+  ⚠ **選單項目的標籤寫「動作」、小字寫「現況」**（2026-09-13 使用者問「這個名稱是否需修正」）：`🔓 開放歷史補登／目前：僅限當週回報`
+  ↔ `🔒 關閉歷史補登／目前：開放中…`。原本標籤是「歷史補登：僅限當週」這種**狀態描述**、點下去卻做相反的事，其他四項都是
+  「點了會去哪」，只有這項要先讀 10px 小字才知道是開還是關（`desc` 要寫「點擊開放…」就是標籤沒講清楚的證據）。
+  ⚠ 這個功能**全站只叫「歷史補登」**：橫幅、橫幅按鈕、toast、手冊原本各叫「豁免期」「回報/調正歷史進度」「補登 ON」，
+  主管從選單開「歷史補登」、畫面卻跳出「豁免期」，會以為是另一個東西。新增文案沿用同一個詞。
+- **「回到本週」已在本週時改白底外框，離開本週才深色實心**（2026-09-13）：深色實心緊貼在檢視切換右邊看起來像第四個
+  被選中的分頁；深淺本身就在講「你現在不在本週」（行事曆軟體「今天」鈕的慣例）。⚠ 不 disabled、不隱藏——橫向捲遠後它仍是
+  「重新置中」的入口。⚠ 這顆**不加 `transition`**：嵌入式／背景分頁環境 transition 可能不推進，實測切到 W36 後底色永遠停在
+  起始的白色（class 已換成 `text-white`、inline 已是 `--brand-btn`，computed 卻是白底 slate-700 字）。
 - **看板只屬於甘特類檢視（週檢視／年度總覽），成果清單不提供**：看板是「配合甘特圖講評本週」用的
   （點卡片會去高亮甘特區間），成果清單是全年度產出總表、沒有甘特可對照，開了只會把清單擠窄。
   ⚠ 只隱藏入口鈕擋不住「看板開著時切過去」這條路徑，切換到成果清單時必須**一併關閉看板**，
@@ -443,7 +617,33 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   故「未執行」深淺兩邊都用 slate-500。實測 淺 3.30／4.10／4.76（投影 3.15／3.86／4.43）、
   深 7.83／6.44／3.75（投影 6.01／4.99／3.02）。圖例色點也用 `fill`，才會與條完全同色。
 - 回報中心 🎉 只在任務＋下週預計**全部完成**才顯示。
-- **打卡彈窗（TaskModal）顯示「前幾週回報」**：位置在排程卡與「W.. 實際執行回報」之間——寫的時候不用捲動就能
+- **打卡彈窗（TaskModal）的版面順序照「使用者來做什麼」排，不照資料結構排**（2026-09-13 重排）——
+  「來做什麼」由 **`info.origin`** 判斷（同日第五批）：
+  - **從回報面板開**（本週回報中心／補登面板／主管 🛠／⏰到期面板；`origin` 未設）＝要打卡 →
+    ①「W.. 實際執行回報」**置頂**（1600×900 實測整窗 569px、不捲動就按得到儲存）②「前幾週回報」（預設收合）
+    ③「排程與子區間」合併成**一張可折疊卡放最下面**（`setupOpen`，預設收合）。
+  - **從甘特條開**（父條／子條都 `origin:'gantt'`）＝在看排程 → `scheduleFirst`：①排程與子區間（**展開**）②前幾週回報
+    ③回報區放最下面；**非本週排定的區間不渲染回報區**（排程卡就在最上面寫著 W27–W31，再放「此任務排定於 W27–W31、非 W37
+    排定項目」是同一句話講兩次；歷史回報仍留）。
+    ⚠ 唯一例外＝**成員點自己本週可打卡的條**仍回報置頂：甘特條本來就是成員最常用的打卡入口，
+    否則每次打卡都得先捲過排程卡。`scheduleFirst = origin==='gantt' && !(member && canClockIn)`。
+  ⚠ 三個區塊先各自組成 `reportSection`／`historySection`／`setupSection` 再依 `scheduleFirst` 決定 **DOM 順序**，
+    不用 CSS `order`（Tab 順序要跟視覺順序一致）。
+  ⚠ **標題列固定、只捲內容**：卡片 `flex flex-col max-h-[90vh] overflow-hidden`、標題列 `flex-shrink-0`、
+    內容區 `overflow-y-auto min-h-0`。原本整張卡 `overflow-y-auto`，一捲標題列就跟著走，看不到開的是哪個專案哪條區間。
+    其他彈窗多半不會超過一屏，暫未改；新彈窗若內容會超過 90vh 一律沿用這個結構。
+  ⚠ 折疊卡的預設＝`!canClockIn || scheduleFirst`：打卡情境收合、唯讀情境（非本週區間／未來週／無權限）沒有回報表單、
+    排程就是主要內容 → 展開。
+  ⚠ **「儲存排程」留在排程四欄正下方，不放到子區間下面**（2026-09-13 使用者問）：它只送名稱／起迄週／NID，子區間是
+    **每列各自即時存檔**、不經過這顆鈕；放到子區間下面會暗示「連子區間一起存」。範圍用三件事講清楚：
+    ①破壞性的「🗑 刪除區間」改到**左邊、低調文字鈕**，主要動作靠右（原本兩顆並排等寬，誤觸距離 0）；
+    ②沒改過就 `disabled` 並寫「排程未變更」（`scheduleDirty`）——改子區間列它不會亮起來，可按狀態本身就在講範圍；
+    ③子區間標題的說明開頭就寫「每列各自儲存（不經上方「儲存排程」）」。
+  `setupForced`（排程驗證錯誤／子區間編輯中／新增列有字／子區間錯誤）時強制展開且切換鈕 disabled，表單不會在使用者眼前被收掉。
+  收合時標題列自帶摘要（`W06–W52・NID・子區間 3（進行中 2）`），標題列（header）也多一行 `task.name・起迄週・NID`
+  （用已儲存的 `task` 值不是表單值），收著也知道這是哪條區間。原本排程卡＋子區間清單佔 600px+，回報表單永遠在折線下。
+  回報區的常駐說明壓成一行（分數說明在標題旁已有 🏆 晶片，重複），各狀態完整說明放三顆狀態鈕的 `title`。
+- **打卡彈窗顯示「前幾週回報」**：位置緊接在「W.. 實際執行回報」下方——寫的時候往下看一眼就能
   對照上週寫到哪。資料取自 `logs` prop（＝`taskLogs[task.id]`，本來就在 client 端，**不需要再打 API**）；
   只取 `week < currentWeek`、新到舊。預設展開最近 3 週（`HISTORY_PREVIEW`），更多則收在「顯示全部 n 週」後面；
   清單 `max-h-56 + overflow-y-auto`，長區間展開後不會把回報區推出畫面。**沒有任何歷史就整塊不渲染**（不留空殼）。
@@ -495,10 +695,33 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   ⚠ 只在 `isManager && pendingSummary.length > 0` 出現：全員交齊時擺一顆按不出東西的鈕只是噪音。
   ⚠ 放**子工具列**不放標題列：標題列已有三顆鈕，窄面板（400px）再加會擠爆。
 
+## 多站台部署（2026-09-13）
+
+- **同一份程式發佈到四個 IIS application**（`/Gantt`＝MSD、`/Gantt_IMD`、`/Gantt_EMS1`、`/Gantt_EMS2`），各連自己的 DB
+  （`Gantt`／`Gantt_IMD`／`Gantt_EMS1`／`Gantt_EMS2`，目前同一台主機、日後可能拆）。**四個資料夾的設定檔完全相同**，
+  發佈時不再逐一改連線字串或群組名稱。使用者決定走「各用各的」（方案 A），不做單站多租戶（加 GroupId 動 26 支 SP）。
+- 機制：`Program.cs` 的 `ResolveSite()` 以 **`Request.PathBase`（IIS application 路徑，去掉斜線）當 key** 查 `Sites` 段落
+  → `{GroupName, ConnectionString}`；PathBase 為空（本機 Kestrel）或查無此 key → `SiteDefault`。`ConnStr()` 從它出去，
+  40 個呼叫點零改動（靠 `IHttpContextAccessor`）。`GET /api/site` 回 `{siteKey, groupName}`，**不碰 DB**（DB 掛了標題也要對）。
+  ⚠ PathBase 是 ASP.NET Core Module 依 IIS application 設定填的，**不是使用者能在網址上改的**，拿它選 DB 是安全的。
+  ⚠ 沒有 `Sites` 段落 → 退回舊格式 `ConnectionStrings:Gantt`＋`Site:GroupName`（預設 MSD），舊部署不改設定照樣跑。
+- 正式主機設定＝**專案根目錄的 `appsettings.Production.json`**（使用者決定放專案內、`.gitignore` 排除，含真實帳密不進版控；
+  範本 `appsettings.Production.example.json` 給新 clone 用）。IIS 環境預設 Production → 每次 `dotnet publish` 自動帶上並覆蓋
+  `appsettings.json` 的 `Sites`，伺服器零手動步驟；四個 IIS 資料夾丟同一份輸出。repo 的 `appsettings.json` 只放開發機 DB。
+  ⚠ 本機 `dotnet run` 走 launchSettings 的 Development，**不會**讀到 Production 檔；但直接執行發佈出的 dll（未設
+  `ASPNETCORE_ENVIRONMENT`）會讀到＝連上正式 DB。日後 DB 拆到別台主機 → 只改那一筆的 `Data Source`。
+- 前端：原本寫死「MSD」6 處（登入頁 h2、header、`document.title`×2、未授權文案、`index.html <title>`）全改吃
+  `siteName`（App 掛載時打 `/api/site`），取不到就顯示不帶群組的「專案追蹤總表」。`API_BASE` 本來就自動偵測子目錄，不用動。
+- 本機驗證多站台：`dotnet run … --PathBase /Gantt_IMD`（`app.UsePathBase` 只在設了 `PathBase` 時生效；IIS 不需要），
+  站台設定可用環境變數 `Sites__Gantt_IMD__ConnectionString=…` 注入。實測 `/Gantt_IMD/api/site`→IMD、bootstrap 走該筆連線、
+  登入頁顯示「IMD 專案追蹤系統」；同一程序的根路徑仍回 SiteDefault。
+- ⚠ `Features:SubIntervalCheckin`、`Auth`、`Access` 目前仍是**全站共用**（四個站台同一份設定檔＝同一個值）；
+  哪天某群組要不同值，把它們搬進 `Sites:{key}` 底下、`ResolveSite()` 多回幾個欄位即可，先不做。
+
 ## 資料庫
 
-- 連線字串 `appsettings.json ConnectionStrings:Gantt`；`Program.cs` 以 `ConnStr()` **每次即時讀取**
-  （reloadOnChange）——部署後改 appsettings 數秒生效，勿改回啟動時讀一次。
+- 連線字串：見上節「多站台部署」（`Sites:{PathBase}:ConnectionString`；舊格式 `ConnectionStrings:Gantt` 仍可用）；
+  `Program.cs` 以 `ConnStr()` **每次即時讀取**（reloadOnChange）——部署後改 appsettings 數秒生效，勿改回啟動時讀一次。
 - 結構、SP 清單、遷移規則與**完整變更歷史**見 `DB_table.md`（append-only）。
 - 開新年度：`EXEC dbo.usp_EnsureScheduleYear <年度>;`（週數以 ScheduleWeeks 筆數為準）。
 - sqlcmd 必帶 `-I -f 65001 -b`。

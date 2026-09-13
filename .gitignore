@@ -13,3 +13,6 @@ node_modules/
 
 # 本機環境
 *.log
+
+# 正式主機站台設定（含真實 DB 帳密）：放在專案內讓發佈自動帶上，但不進版控；範本見 appsettings.Production.example.json
+appsettings.Production.json

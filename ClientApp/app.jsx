@@ -19,6 +19,11 @@ const getTodayWeek = (scheduleYear = DEFAULT_SCHEDULE_YEAR, weeksTotal = WEEKS_T
   return Math.min(weeksTotal, Math.max(1, week));
 };
 const DEFAULT_CURRENT_WEEK = getTodayWeek();
+// 「今天」屬於哪個排程年度。選到別的年度時整年都是過去或未來,沒有「本週」可言——
+// 所有「本週回報」的入口(徽章、回報中心、打卡)都只認 scheduleYear === getTodayScheduleYear()。
+// ⚠ 目前與 getTodayWeek 一樣暫用日曆年;公司週次規則(週日起始、含 1/1 那週為 W1)確認後兩者要一起改,
+//   只改這兩個函式即可,其餘判斷都經由 isCurrentYear／isReportingWeek／isFutureWeek 三個旗標。
+const getTodayScheduleYear = () => new Date().getFullYear();
 const NAVY = '#001F5B';
 // 品牌色的「按鈕」版本:深色模式下提亮成 #2563EB(見 input.css 的 --brand-btn)。
 // 為什麼要分成兩個常數:NAVY 用在標題列/表頭那種大面積色塊,深色下維持深海軍藍才好看;
@@ -47,12 +52,13 @@ const groupWeeksToMonths = (weeks) => {
 };
 
 // 類型標籤:邊框用 400/500 深階(投影機對比打折,300 級邊框在布幕上會消失)
+// short＝工具列篩選晶片用的四字短名(全名放 title):五顆全名晶片 419px,是 1366 寬時工具列溢出的主因之一(2026-09-13)
 const PROJECT_TYPES = {
-  'a': { label: '一級專案/KPI', chip: 'bg-pink-100 text-pink-800 border-pink-400', dot: 'bg-pink-500' },
-  'b': { label: '重大貢獻及亮點', chip: 'bg-yellow-100 text-yellow-800 border-yellow-500', dot: 'bg-yellow-500' },
-  'c': { label: '日常管理', chip: 'bg-teal-100 text-teal-800 border-teal-400', dot: 'bg-teal-500' },
-  'd': { label: '其他加分項', chip: 'bg-orange-100 text-orange-800 border-orange-400', dot: 'bg-orange-500' },
-  'e': { label: '主管交辦', chip: 'bg-purple-100 text-purple-800 border-purple-400', dot: 'bg-purple-500' }
+  'a': { label: '一級專案/KPI', short: '一級專案', chip: 'bg-pink-100 text-pink-800 border-pink-400', dot: 'bg-pink-500' },
+  'b': { label: '重大貢獻及亮點', short: '重大貢獻', chip: 'bg-yellow-100 text-yellow-800 border-yellow-500', dot: 'bg-yellow-500' },
+  'c': { label: '日常管理', short: '日常管理', chip: 'bg-teal-100 text-teal-800 border-teal-400', dot: 'bg-teal-500' },
+  'd': { label: '其他加分項', short: '其他加分', chip: 'bg-orange-100 text-orange-800 border-orange-400', dot: 'bg-orange-500' },
+  'e': { label: '主管交辦', short: '主管交辦', chip: 'bg-purple-100 text-purple-800 border-purple-400', dot: 'bg-purple-500' }
 };
 
 // 狀態色加深(範本 B 高對比):白字在色塊上達 WCAG AA,年長使用者更易辨識
@@ -75,6 +81,56 @@ const STATUS_META = {
 // (用 slate-700 時「未執行實心 slate-500」對空槽只有 2.18,分不出有填沒填;壓暗後 3.80)。
 // 軌道與列底同色沒關係——外框(淺 3.86／深 3.07)負責界定「這是一個空容器」。
 const BAR_TRACK = 'bg-white dark:bg-slate-900 border border-slate-500';
+
+// ── 回報單位(遷移 20,2026-09-12 使用者決定,推翻「子區間只排程不打卡」) ──────────────
+// 專案很大時一條計畫區間底下切了好幾個階段,只對計畫區間打卡會變成「一週只有一件事」,主管也看不出哪個階段
+// 動了、哪個卡住。規則(全站唯一一份,所有「待回報／已回報／分數」的計算都從這裡出去):
+//   ①該週有落在範圍內的子區間 → 回報單位＝那些子區間(各自打卡);沒有 → 回報單位＝計畫區間本身。
+//   ②父層那週若已有紀錄(切子區間之前回報過的舊週)→ 視為已回報、單位仍是計畫區間,不回頭催子區間(legacy)。
+//   ③計畫區間該週的分數＝子區間分數平均(未回報＝0),滿分仍＝計畫區間數——切得細不會讓分數膨脹。
+// taskLogs[taskCode][week]＝父層紀錄(SubId NULL)、subLogs[subId][week]＝子區間紀錄,後端分兩份回傳。
+// 總開關 SubIntervalCheckin(appsettings.json 的 Features:SubIntervalCheckin,預設關;使用者 2026-09-12 決定先不用,
+// 且**刻意不做在網頁上**避免誤操作——只能改設定檔,改完使用者重新整理即套用):關著時子區間回到「只排程不打卡」,
+// weekUnits 永遠回 mode:'task'。模組層變數而不是 prop:呼叫點有十幾處分散在四個元件;
+// **只在 refreshData 裡跟著整包資料一起更新**(bootstrap 回 subCheckinEnabled),
+// 這樣旗標永遠與 taskLogs/subLogs 同一批,所有 useMemo 都因資料物件換新而重算,不會有旗標變了、畫面沒跟上的窗口。
+let SUB_CHECKIN = false;
+const activeSubsOf = (task, week) => (task.subs || []).filter(s => s.start <= week && s.end >= week);
+const weekUnits = (task, week, taskLogs, subLogs) => {
+  const parentLog = taskLogs[task.id]?.[week];
+  const subs = SUB_CHECKIN ? activeSubsOf(task, week) : [];
+  if (parentLog || subs.length === 0) {
+    return { mode: 'task', units: [{ sub: null, log: parentLog }], reported: parentLog ? 1 : 0, total: 1,
+             score: parentLog ? Number(parentLog.score ?? 1) : 0, legacy: !!parentLog && subs.length > 0 };
+  }
+  const units = subs.map(s => ({ sub: s, log: subLogs[s.id]?.[week] }));
+  const reported = units.filter(u => u.log).length;
+  const score = units.reduce((a, u) => a + (u.log ? Number(u.log.score ?? 1) : 0), 0) / units.length;
+  return { mode: 'sub', units, reported, total: units.length, score, legacy: false };
+};
+// 甘特父條上的週色點:父層有紀錄 → 該狀態;子區間模式 → 全部回報完取「最積極」的狀態,只回報一部分 → 'partial'(琥珀)
+const PARTIAL_DOT = 'bg-amber-500';
+const unitsDotStatus = (wu) => {
+  if (wu.reported === 0) return null;
+  if (wu.mode === 'task') return wu.units[0].log.status;
+  if (wu.reported < wu.total) return 'partial';
+  const st = wu.units.map(u => u.log.status);
+  return st.includes('executed') ? 'executed' : st.includes('monitor') ? 'monitor' : 'not_executed';
+};
+// 概況列四顆狀態晶片的篩選鍵(2026-09-13):'pending'＝未回報、其餘三個＝已回報且為該狀態。
+// 分類規則與 weekStats 一模一樣(沒有 log＝未回報;有 log 依 status,非 monitor/not_executed 一律算有執行),
+// 晶片上的數字與篩出來的列數才對得起來——不要在別處再寫一份分類。
+const STATUS_FILTER_LABEL = { pending: '未回報', executed: '有執行', monitor: 'Monitor', not_executed: '未執行' };
+const unitMatchesStatus = (u, key) => {
+  if (key === 'pending') return !u.log;
+  if (!u.log) return false;
+  if (key === 'not_executed') return u.log.status === 'not_executed';
+  if (key === 'monitor') return u.log.status === 'monitor';
+  return u.log.status !== 'not_executed' && u.log.status !== 'monitor';
+};
+const unitLabel = (task, sub) => sub ? `${task.name} › ${sub.name}` : task.name;
+const sameUnit = (a, b) => a.task.id === b.task.id && (a.sub?.id ?? null) === (b.sub?.id ?? null);
+const NO_UNITS = Object.freeze({ pending: [], completed: [] });   // 「沒有待回報清單」的固定空值(非本年度／未來週)
 
 // --- 2. 資料來源:改由後端 API 讀寫 Gantt 資料庫 (取代原本寫死的 INITIAL_PROJECTS) ---
 // 自動偵測部署根路徑:本地為 ''(→ /api/...)、IIS 子應用程式(如 /Gantt/)則為 '/Gantt'(→ /Gantt/api/...)
@@ -200,6 +256,8 @@ const STATS_BAR_MIN_W = 700;
 // ⚠ 別調高:22px 時 1366(投影)算出來只剩 200px 給名稱欄、低於下限 240 → 投影環境完全得不到改善;
 //   20px 才讓 1366 也能把名稱欄從 240 撐到 300,而週欄只從 21.1 掉到 20.1。
 const MIN_OVERVIEW_WEEK_W = 20;
+// ⏰ 即將到期的「時程已過 70%」規則另加「剩餘 ≤ 這個週數」的上限(見 isTaskDeadlineSoon)
+const DEADLINE_RATIO_MAX_REMAIN = 4;
 
 // 彈窗「未儲存內容」旗標:表單型視窗(打卡/非專案/下週預計/產出/專案/區間)輸入時設 true、
 // 視窗卸載時自動清除;ESC 關窗前檢查,避免打到一半的內容被默默丟棄
@@ -863,8 +921,12 @@ function App() {
           setAccessError('伺服器沒有在時間內回應權限檢查（可能正在重啟）。');
           return;
         }
-        // 後端不可達時不在此擋(bootstrap 會另行顯示連線錯誤);卡控啟用時的失敗判斷在伺服器端(fail-closed)
-        setAccessCheck({ enabled: false, allowed: true });
+        // 只有「連不上」(fetch 本身丟 TypeError:ERR_CONNECTION_REFUSED／斷網)才放行——那時 bootstrap 也連不上,
+        // 會另行顯示連線錯誤畫面,這裡擋不擋沒差。
+        // ⚠ 伺服器有回應但是 4xx/5xx(apiGet 包成 Error)是「檢查失敗」不是「連不上」:原本一律放行,等於
+        //    AccessRules 查詢炸掉時卡控自動失效(fail-open)。改成錯誤畫面＋重試,與逾時同樣維持 fail-closed。
+        if (e instanceof TypeError) { setAccessCheck({ enabled: false, allowed: true }); return; }
+        setAccessError('權限檢查失敗：' + (e.message || '伺服器回應錯誤') + '。');
       }
     });
     return () => { cancelled = true; };
@@ -876,12 +938,21 @@ function App() {
   const [months, setMonths] = useState(MONTHS);
   const weeksTotal = useMemo(() => months.reduce((s, m) => s + m.weeks, 0), [months]);
 
+  // 群組名稱(2026-09-13 多站台):同一份程式發佈到 /Gantt、/Gantt_IMD…,後端依 IIS application 路徑從 appsettings 的
+  // Sites 段落回「MSD／IMD／EMS1…」。原本寫死「MSD」共 6 處(登入頁、header、分頁標題、未授權文案),全改吃這個值。
+  // /api/site 不碰 DB,DB 連不上時標題也是對的;取不到就顯示不帶群組的「專案追蹤總表」。
+  const [siteName, setSiteName] = useState('');
+  React.useEffect(() => {
+    apiGet('/api/site').then(r => { if (r && r.groupName) setSiteName(r.groupName); }).catch(() => {});
+  }, []);
+  const siteTitle = siteName ? `${siteName} 專案追蹤總表` : '專案追蹤總表';
+
   // 分頁標題帶目前週次(多分頁好辨識);非今年年度再帶年份;未登入維持原名
   React.useEffect(() => {
-    if (!currentUser) { document.title = 'MSD 專案追蹤總表'; return; }
-    const prefix = scheduleYear !== new Date().getFullYear() ? `${scheduleYear} ` : '';
-    document.title = `${prefix}W${String(currentWeek).padStart(2, '0')}｜MSD 專案追蹤總表`;
-  }, [currentUser, currentWeek, scheduleYear]);
+    if (!currentUser) { document.title = siteTitle; return; }
+    const prefix = scheduleYear !== getTodayScheduleYear() ? `${scheduleYear} ` : '';
+    document.title = `${prefix}W${String(currentWeek).padStart(2, '0')}｜${siteTitle}`;
+  }, [currentUser, currentWeek, scheduleYear, siteTitle]);
 
   // UI 狀態(範本 B:預設寬鬆模式,字級較大對年長者友善)
   const [isDark, setIsDark] = useState(() => readPrefs().dark === true);   // 深色模式偏好:重整後沿用(這台電腦)
@@ -893,10 +964,39 @@ function App() {
   const [isOverview, setIsOverview] = useState(false);   // 年度總覽:52 週自動縮放進一個畫面寬,無水平捲軸(唯讀瀏覽視角)
   const [isResults, setIsResults] = useState(false);     // 成果清單:集中檢閱所有專案具體成果項目與 MP 節省統計
   const [collapsedOwners, setCollapsedOwners] = useState(new Set());
+  // 子區間列的展開/收合(遷移 18)。預設值依檢視而異:
+  //   週檢視=有子區間就展開(主管要看的就是這個);年度總覽=收合(「整年一畫面」是核心前提,69 案再各加幾列會撐長)。
+  // 兩邊各記「偏離預設」的專案 id 並持久化到 gantt_prefs:主管收過的下次開還是收的。
+  const [subCollapsedWeek, setSubCollapsedWeek] = useState(() => new Set(readPrefs().subCollapsed || []));
+  const [subExpandedOverview, setSubExpandedOverview] = useState(() => new Set(readPrefs().subExpandedOv || []));
+  // 搜尋命中子區間名稱的專案一律視為展開(subSearchHits 在下方篩選區宣告;只在 render 時呼叫,不會踩到 TDZ)
+  const isSubExpanded = (projId) => subSearchHits.has(projId) || (isOverview ? subExpandedOverview.has(projId) : !subCollapsedWeek.has(projId));
+  const toggleSubExpanded = (projId) => {
+    if (isOverview) {
+      setSubExpandedOverview(prev => { const n = new Set(prev); n.has(projId) ? n.delete(projId) : n.add(projId); savePref('subExpandedOv', [...n]); return n; });
+    } else {
+      setSubCollapsedWeek(prev => { const n = new Set(prev); n.has(projId) ? n.delete(projId) : n.add(projId); savePref('subCollapsed', [...n]); return n; });
+    }
+  };
+  // 全域「子區間 ▾｜▸」(工具列「展開｜收合」旁):一案一案按 ▾ n 太慢(每案 3 條子區間＝表格高度翻三倍)。
+  // 兩份 prefs 記的是「偏離預設」:週檢視預設展開 → 全收＝把所有帶子區間的案子塞進 subCollapsed;
+  // 年度總覽預設收合 → 全展＝把它們塞進 subExpandedOv。另一個方向都是清空。
+  const setAllSubExpanded = (expanded) => {
+    const withSubs = projects.filter(p => p.tasks.some(t => (t.subs || []).length > 0)).map(p => p.id);
+    if (isOverview) {
+      const n = new Set(expanded ? withSubs : []); setSubExpandedOverview(n); savePref('subExpandedOv', [...n]);
+    } else {
+      const n = new Set(expanded ? [] : withSubs); setSubCollapsedWeek(n); savePref('subCollapsed', [...n]);
+    }
+  };
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState(new Set());       // 空 = 全部
-  // 「未回報」晶片的開關:只顯示本週有排定但尚未回報的專案(主管催報用)
-  const [pendingOnly, setPendingOnly] = useState(false);
+  // 概況列狀態晶片的篩選(2026-09-13 由「未回報」單顆擴成四顆):null＝不篩,'pending'／'executed'／'monitor'／'not_executed'
+  // ＝只顯示本週有回報單位屬於該狀態的專案。**單選不多選**:四者是同一批「本週回報單位」的分割,主管一次只問一個問題
+  // (誰沒交／誰這週沒做),點另一顆＝換問題、點同一顆＝取消。原本只有「未回報」能點,旁邊三顆長得一樣卻只是數字,使用者會去點。
+  const [statusFilter, setStatusFilter] = useState(null);
+  const pendingOnly = statusFilter === 'pending';   // 既有「未回報」專屬邏輯(🎉 已全數回報空狀態)沿用這個名字
+  const toggleStatusFilter = (key) => setStatusFilter(cur => (cur === key ? null : key));
   // 成員篩選:三個檢視統一用「成員下拉」('all' 或成員名),不再有週檢視專用的「只看我的專案」勾選框
   // ——同一件事兩種操作方式(勾選 vs 下拉)會讓使用者切檢視時以為篩選跑掉了。
   // 登入預設:成員=自己、主管=全部成員(見 handleLogin / DEFAULT_OWNER_FILTER)
@@ -939,6 +1039,7 @@ function App() {
 
   // 紀錄打卡、非專案工作與下週預計
   const [taskLogs, setTaskLogs] = useState({});
+  const [subLogs, setSubLogs] = useState({});   // subLogs[subId][week] = 對子區間的回報(遷移 20;格式同 taskLogs)
   const [extraNotes, setExtraNotes] = useState({});
   const [weeklyPlans, setWeeklyPlans] = useState({});   // weeklyPlans[user][week] = 下週預計執行工作(填寫於該週)
   const [weeklyComments, setWeeklyComments] = useState({}); // weeklyComments[user][week] = 主管週報回覆(選填,全員可見)
@@ -947,6 +1048,7 @@ function App() {
   const [weeklyPlanMeta, setWeeklyPlanMeta] = useState({});
   const [weeklyCommentMeta, setWeeklyCommentMeta] = useState({});
   const [allowRetroCheckin, setAllowRetroCheckin] = useState(false); // 主管全域開關：允許成員回報/調正歷史進度
+  const [subCheckinEnabled, setSubCheckinEnabled] = useState(false); // 子區間打卡開關(來自 appsettings.json,顯示用;判斷一律走 SUB_CHECKIN/weekUnits)
 
   // --- 同步狀態(給「連線中斷」指示用) ---
   // 原本 60 秒輪詢是 `refreshData().catch(() => {})`,後端重啟/斷網時畫面就停在舊資料、**完全沒有提示**
@@ -956,6 +1058,8 @@ function App() {
   const [syncFailures, setSyncFailures] = useState(0);   // 連續失敗次數(成功即歸零)
   const [lastSyncAt, setLastSyncAt] = useState(null);     // 最後一次成功同步的時間
 
+  // 最近一次載入完成的年度(切年度時把系統週切到該年度的本週用;見 refreshData 尾段)
+  const loadedYearRef = useRef(null);
   // 重新抓取資料但不顯示整頁 Loading (供編輯後靜默刷新)
   const refreshData = useCallback(async () => {
     let data;
@@ -976,7 +1080,10 @@ function App() {
     setProjects(data.projects || []);
     // 從 DB 資料同步重點關注標記（isStarred 存於 DB，全員共享）
     setStarredIds(new Set((data.projects || []).filter(p => p.isStarred || p.IsStarred).map(p => p.id ?? p.Id)));
+    SUB_CHECKIN = data.subCheckinEnabled === true;   // 一定在 setState 之前:同一批資料同一個旗標(見 weekUnits 說明)
+    setSubCheckinEnabled(SUB_CHECKIN);
     setTaskLogs(data.taskLogs || {});
+    setSubLogs(data.subLogs || {});
     setExtraNotes(data.extraNotes || {});
     setWeeklyPlans(data.weeklyPlans || {});
     setWeeklyComments(data.weeklyComments || {});
@@ -986,6 +1093,16 @@ function App() {
     if (typeof data.allowRetroCheckin === 'boolean') setAllowRetroCheckin(data.allowRetroCheckin);
     if (data.years && data.years.length) setYears(data.years);
     if (data.weeks && data.weeks.length) setMonths(groupWeeksToMonths(data.weeks));
+    // 換了年度(含首次載入、退回可用年度)才把系統週切到該年度的「本週」並置中。
+    // ⚠ 要在這裡而不是年度下拉的 onChange:該年度有幾週(52/53)要等 bootstrap 回來才知道,
+    //   在 onChange 用預設 52 算會讓 53 週年度的 W53 落成 W52;而且這裡才有辦法連 scrollTargetWeek 一起做。
+    //   用 loadedYearRef 比對,60 秒輪詢刷新同一年度不會動使用者選好的週。
+    if (loadedYearRef.current !== data.year) {
+      loadedYearRef.current = data.year;
+      const tw = getTodayWeek(data.year, (data.weeks || []).length || WEEKS_TOTAL);
+      setCurrentWeek(tw);
+      setScrollTargetWeek(tw);
+    }
   }, [scheduleYear]);
 
   // 從後端載入全部資料 (使用者 / 專案 / 打卡 / 非專案事項)
@@ -1006,6 +1123,11 @@ function App() {
   const [selectedTaskInfo, setSelectedTaskInfo] = useState(null);
   // 團隊總結看板點成員回報格 → 左側甘特圖對應區間暫時淺藍高亮(提示「正在講哪一項」),再點/關看板/點別處即還原
   const [highlightedTaskId, setHighlightedTaskId] = useState(null);
+  // 高亮的回報單位(2026-09-13):看板一張卡＝一個回報單位,點子區間的卡只亮**那條子條**(subId 有值),
+  // 點計畫區間的卡(父層/legacy)只亮父條(subId null)。原本只記 taskId,點子區間會把父條＋全部子條一起亮成一組,
+  // 使用者:「我點亮子區間,應該只顯示子區間排程」。
+  const [highlightedSubId, setHighlightedSubId] = useState(null);
+  const clearHighlight = () => { setHighlightedTaskId(null); setHighlightedSubId(null); };
   const [showExtraNoteModal, setShowExtraNoteModal] = useState(false);
   const [showWeeklyPlanModal, setShowWeeklyPlanModal] = useState(false);   // 下週預計執行工作
   // Toast:成功 2.5 秒;錯誤(訊息以 ❌ 開頭自動判定)停 6 秒且可手動關閉;
@@ -1033,6 +1155,8 @@ function App() {
   const [showAccessPanel, setShowAccessPanel] = useState(false); // 主管:瀏覽權限卡控面板(遷移 11)
   const [showUsagePanel, setShowUsagePanel] = useState(false);   // 主管:使用統計面板(登入次數,遷移 13)
   const [showAdminMenu, setShowAdminMenu] = useState(false);     // 主管:header「⚙️ 管理」下拉選單(收納低頻管理入口)
+  const [showDisplayMenu, setShowDisplayMenu] = useState(false); // 工具列「顯示 ▾」下拉(展開/收合全部成員群組、子區間)
+  const [displayMenuPos, setDisplayMenuPos] = useState({ top: 0, right: 0 });   // fixed 定位座標(工具列是 overflow 容器,absolute 會被裁掉)
   const [showDeadlinePanel, setShowDeadlinePanel] = useState(false); // 即將到期清單面板(頂部 ⏰ 晶片點開)
 
   const weekW = isCompact ? 22 : 32;
@@ -1053,6 +1177,13 @@ function App() {
   // 概況列已收無可收(剩下的三塊都不能刪)、但寬度仍不夠時的最後一手:縮間距與進度條(見 STATS_BAR_MIN_W)。
   // 只看 availW,不看 showWeeklyReport —— 1366 以上就算開著看板也放得下,不需要縮。
   const ultraTightStatsBar = availW < STATS_BAR_MIN_W;
+  // 概況列左側「有執行／Monitor／未執行」三顆統計晶片是否在畫面上:在 → 右側圖例不再重畫這三個色點(晶片本身就是圖例);
+  // 收起(看板開啟／窄螢幕)→ 圖例補回,讀圖必需的資訊任何情況都在。
+  // ⚠ 篩選中的那顆晶片不受此開關影響(各自 `|| statusFilter === key`):看板開啟／窄螢幕把三顆收起時,
+  //   使用者若正用「有執行」篩著,清單只剩幾列卻找不到地方取消——沿用「有殘留條件就保留該顆＋可清除」規則。
+  const statusChipsVisible = !showWeeklyReport && !tightStatsBar;
+  // 圖例的「子區間」格只在資料裡真的有子區間時顯示(見圖例處的說明)
+  const hasAnySubs = useMemo(() => projects.some(p => p.tasks.some(t => (t.subs || []).length > 0)), [projects]);
   // 年度總覽的名稱欄:原本寫死 240,1920 下明明還有空間卻不用 → 22% 的名稱被截(週檢視只有 1%)。
   // 改成「把剩餘空間讓給名稱欄,但先保證每個週欄至少 MIN_OVERVIEW_WEEK_W」,
   // 整年仍在同一畫面(表格 width:100%,週欄只是變窄,不會產生水平捲軸);
@@ -1064,24 +1195,40 @@ function App() {
   // 故 <16px 只標 5 的倍數與當週(格子本身仍可點,hover/title 不變)
   const overviewWeekW = isOverview ? (availW - frozenW) / weeksTotal : 0;
   const sparseWeekLabel = isOverview && overviewWeekW < 16;
-  const todayWeek = getTodayWeek(scheduleYear, weeksTotal);   // 本週(相對於選定年度)
-  const isViewingPast = currentWeek !== todayWeek;  // 是否在檢視非本週
+  const todayWeek = getTodayWeek(scheduleYear, weeksTotal);   // 本週(相對於選定年度;非本年度時夾在 1 或最後一週)
+  // 檢視中週次與「今天」的關係,三個旗標全站共用(2026-09-12 修):
+  //   原本各處直接比 currentWeek 與 todayWeek,但 todayWeek 在別的年度只是被夾到邊界的值——
+  //   成員切到 2027 會看到「本週回報中心 1」在催 2027 W01 的下週預計(送出被後端 400);
+  //   到了 2027 切回 2026,W53 又變成「本週」,不用補登權限就能寫去年的回報。
+  //   非本年度沒有「本週」:整年不是過去就是未來,回報入口一律收起。
+  const todayYear = getTodayScheduleYear();
+  const isCurrentYear = scheduleYear === todayYear;
+  const isFutureWeek = scheduleYear > todayYear || (isCurrentYear && currentWeek > todayWeek);   // 尚未到:誰都不能寫(後端同樣擋)
+  const isReportingWeek = isCurrentYear && currentWeek === todayWeek;                            // 成員「本週回報」的唯一目標週
+  const isViewingPast = !isReportingWeek;  // 是否在檢視非本週(含非本年度)
 
   // 團隊看板點回報格 → 展開該成員群組、捲到該列與當前週(靠左避開右側面板)、暫時高亮該區間;再點同項=取消
   const [pendingScrollProj, setPendingScrollProj] = useState(null);   // 觸發「捲到該列+當前週」的 effect(用 effect 而非 rAF,嵌入式瀏覽器較可靠)
-  const handleHighlightTask = useCallback((proj, task) => {
-    const willClear = highlightedTaskId === task.id;
+  const handleHighlightTask = useCallback((proj, task, sub = null) => {
+    const subId = sub?.id ?? null;
+    const willClear = highlightedTaskId === task.id && highlightedSubId === subId;
     setHighlightedTaskId(willClear ? null : task.id);
+    setHighlightedSubId(willClear ? null : subId);
     if (willClear) return;
+    // 子區間的卡 → 該專案的子列要展開(走與 ▾ n 晶片同一份 prefs),否則亮的那條在收合狀態下根本看不到
+    if (subId != null) {
+      if (isOverview) setSubExpandedOverview(prev => { const n = new Set(prev); n.add(proj.id); savePref('subExpandedOv', [...n]); return n; });
+      else setSubCollapsedWeek(prev => { const n = new Set(prev); n.delete(proj.id); savePref('subCollapsed', [...n]); return n; });
+    }
     setCollapsedOwners(prev => { const s = new Set(prev); s.delete(proj.owner); return s; });
     // 聚焦執行者:左側甘特只留這位成員的專案,主管講評時不被其他人的列干擾(關閉看板即還原登入預設)
     setOwnerFilter(proj.owner);
     setPendingScrollProj(proj.id);
-  }, [highlightedTaskId]);
+  }, [highlightedTaskId, highlightedSubId, isOverview]);
 
   // 關閉團隊看板:清除高亮與成員聚焦,甘特還原為「登入預設成員 ＋ 全部展開」
   const closeWeeklyReport = useCallback(() => {
-    setHighlightedTaskId(null);
+    setHighlightedTaskId(null); setHighlightedSubId(null);
     setShowWeeklyReport(false);
     setOwnerFilter(defaultOwnerFilter(role, currentUser));
     setCollapsedOwners(new Set());
@@ -1102,7 +1249,7 @@ function App() {
     setOwnerFilter(defaultOwnerFilter(selectedRole, user));   // 成員=自己、主管=全部成員
     setSearchText('');
     setTypeFilter(new Set());
-    setPendingOnly(false);
+    setStatusFilter(null);
     setShowPendingPanel(false);
     setShowRetroPanel(false);
     setShowWeekEditPanel(false);
@@ -1126,7 +1273,7 @@ function App() {
     setOwnerFilter('all');
     setSearchText('');
     setTypeFilter(new Set());
-    setPendingOnly(false);
+    setStatusFilter(null);
     setShowPendingPanel(false);
     setShowRetroPanel(false);
     setShowWeekEditPanel(false);
@@ -1168,6 +1315,8 @@ function App() {
   }, [weekW, frozenW]);
 
   const goToCurrentWeek = () => {
+    // 正在看別的年度 → 先切回今年;系統週會在該年度載入完成後由 refreshData 切到本週並置中
+    if (!isCurrentYear) { setScheduleYear(todayYear); return; }
     const tw = getTodayWeek(scheduleYear, weeksTotal);   // 動態取得今天的實際週(W27、下週為 W28…)
     setCurrentWeek(tw);                 // 將選取週強制切回本週
     setScrollTargetWeek(tw);            // 觸發 effect,於畫面更新後捲動定位
@@ -1182,7 +1331,7 @@ function App() {
         actorRole: role
       });
       setAllowRetroCheckin(!allowRetroCheckin);
-      showToast(!allowRetroCheckin ? '🔓 已開放全體成員回報/調正歷史進度' : '🔒 已恢復僅限當週打卡');
+      showToast(!allowRetroCheckin ? '🔓 已開放歷史補登，全體成員可回報歷史週次' : '🔒 已關閉歷史補登，僅限當週回報');
     } catch (e) {
       showToast('❌ 切換失敗：' + (e.message || '連線錯誤'));
     }
@@ -1227,18 +1376,21 @@ function App() {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   };
 
-  const handleSaveLog = async (taskId, status, note, docUrl = '') => {
+  // subId:對子區間打卡時帶子區間 id、對計畫區間打卡為 null(回報單位規則見 weekUnits)
+  const handleSaveLog = async (taskId, subId, status, note, docUrl = '') => {
     try {
       await apiPost('/api/weekly-log', {
-        taskCode: taskId, year: scheduleYear, week: currentWeek,
+        taskCode: taskId, subId: subId ?? null, year: scheduleYear, week: currentWeek,
         status, note, docUrl, actor: currentUser, actorRole: role
       });
-      setTaskLogs(prev => ({
+      const key = subId ?? taskId;
+      const setMap = subId ? setSubLogs : setTaskLogs;
+      setMap(prev => ({
         ...prev,
-        [taskId]: {
-          ...prev[taskId],
+        [key]: {
+          ...prev[key],
           [currentWeek]: {
-            ...(prev[taskId]?.[currentWeek] || {}),
+            ...(prev[key]?.[currentWeek] || {}),
             // docUrl 一律覆寫(含空字串):清空欄位再送出就是「把連結拿掉」,
             // 用 `|| 舊值` 之類的寫法會讓畫面上連結消不掉,與 DB 不一致
             isExecuting: status !== 'not_executed', status, note, docUrl: docUrl || null,
@@ -1248,8 +1400,8 @@ function App() {
       }));
       setSelectedTaskInfo(null);
       // 「下週預計工作」為強制回報項目:回報完本週最後一項任務後仍未填寫時,直接開啟填寫視窗
-      const remainingPending = myPendingTasks.filter(x => x.task.id !== taskId).length;
-      if (role === 'member' && currentWeek === todayWeek && remainingPending === 0 && !weeklyPlans[currentUser]?.[todayWeek]) {
+      const remainingPending = myPendingTasks.filter(x => !sameUnit(x, { task: { id: taskId }, sub: subId ? { id: subId } : null })).length;
+      if (role === 'member' && isReportingWeek && remainingPending === 0 && !weeklyPlans[currentUser]?.[todayWeek]) {
         showToast(`✅ 本週任務已全數回報，請接著填寫「下週預計工作」`);
         setShowWeeklyPlanModal(true);
       } else {
@@ -1352,18 +1504,18 @@ function App() {
   };
 
   // 主管調整打卡分數(0.3/0.5/0.8/0.9/1)
-  const handleUpdateScore = async (taskId, score) => {
+  const handleUpdateScore = async (taskId, subId, score) => {
     try {
       await apiPost('/api/weekly-log/score', {
-        taskCode: taskId, year: scheduleYear, week: currentWeek, score,
+        taskCode: taskId, subId: subId ?? null, year: scheduleYear, week: currentWeek, score,
         actor: currentUser, actorRole: role
       });
-      setTaskLogs(prev => {
-        const log = prev[taskId]?.[currentWeek];
+      const key = subId ?? taskId;
+      (subId ? setSubLogs : setTaskLogs)(prev => {
+        const log = prev[key]?.[currentWeek];
         if (!log) return prev;
-        return { ...prev, [taskId]: { ...prev[taskId], [currentWeek]: { ...log, score } } };
+        return { ...prev, [key]: { ...prev[key], [currentWeek]: { ...log, score } } };
       });
-      setSelectedTaskInfo(prev => prev?.weekLog ? { ...prev, weekLog: { ...prev.weekLog, score } } : prev);
       showToast(`✅ 分數已調整為 ${score} 分`);
     } catch (e) {
       showToast('❌ 調整失敗：' + (e.message || '無法連線資料庫'));
@@ -1385,6 +1537,70 @@ function App() {
     } catch (e) {
       showToast('❌ 更新失敗：' + (e.message || '無法連線資料庫'));
     }
+  };
+
+  // --- 子區間(遷移 18):新增/修改/刪除。主管與專案負責人皆可(權限在 SP 內檢查)。 ---
+  // 存檔後同時更新 projects 與 selectedTaskInfo.task:彈窗拿的是開窗當下的 task 快照,不更新它的話
+  // 清單要關窗再開才看得到剛加的那筆。
+  // ⚠ updater 必須是純函式,對兩個 state 各自的 prev 分別套用:不可先用閉包裡的 projects 算一份再塞給兩邊——
+  //    刪除 toast 的「復原」是 10 秒後才按,那時閉包裡的 projects 已經是舊的(輪詢可能刷新過),會把別人的變更蓋掉。
+  const applySubsToState = (projId, taskId, updater) => {
+    setProjects(prev => prev.map(p => p.id !== projId ? p
+      : { ...p, tasks: p.tasks.map(t => t.id === taskId ? { ...t, subs: updater(t.subs || []) } : t) }));
+    setSelectedTaskInfo(prev => prev && prev.task.id === taskId ? { ...prev, task: { ...prev.task, subs: updater(prev.task.subs || []) } } : prev);
+  };
+  const sortSubs = (subs) => [...subs].sort((a, b) => a.start - b.start || a.end - b.end || a.id - b.id);   // 與 bootstrap 同序(起週→迄週)
+  const handleUpsertSub = async (projId, taskId, sub) => {
+    // 回傳 true/false 讓彈窗決定要不要清空「新增」表單;錯誤訊息用 toast(SP 的 RAISERROR 會照原文回來)
+    try {
+      const res = await apiPost('/api/task/sub', {
+        subId: sub.id ?? null, taskCode: taskId, name: sub.name, start: sub.start, end: sub.end,
+        actor: currentUser, actorRole: role
+      });
+      const saved = { id: sub.id ?? res.subId, name: sub.name, start: sub.start, end: sub.end };
+      applySubsToState(projId, taskId, subs => sortSubs(sub.id ? subs.map(s => s.id === sub.id ? saved : s) : [...subs, saved]));
+      showToast(sub.id ? '✅ 子區間已更新' : `✅ 已新增子區間「${sub.name}」`);
+      return true;
+    } catch (e) {
+      showToast('❌ 儲存失敗：' + (e.message || '無法連線資料庫'));
+      return false;
+    }
+  };
+  const handleDeleteSub = (projId, taskId, sub) => {
+    // 自遷移 20 起子區間底下掛著回報紀錄:確認訊息要講清楚有幾筆、有紀錄時只有主管能刪(SP 也擋),
+    // 且刪除後給 10 秒「↩ 復原」(與計畫區間一致)。
+    const logCount = Object.keys(subLogs[sub.id] || {}).length;
+    if (logCount > 0 && role !== 'manager') { showToast('❌ 此子區間已有回報紀錄，僅主管可刪除'); return; }
+    // ConfirmModal 是 z-[150],疊在打卡彈窗(z-[100])之上,可直接從彈窗內觸發
+    setConfirmInfo({
+      title: '刪除子區間',
+      message: `確定要刪除子區間「${sub.name}」(W${sub.start}–W${sub.end})嗎？\n` +
+        (logCount > 0 ? `此子區間已有 ${logCount} 筆週回報，刪除後這些回報將不再顯示。\n` : '') +
+        '（軟刪除，10 秒內可按「復原」，之後可由資料庫還原）',
+      onConfirm: async () => {
+        setConfirmInfo(null);
+        try {
+          await apiPost('/api/task/sub/delete', { subId: sub.id, actor: currentUser, actorRole: role });
+          applySubsToState(projId, taskId, subs => subs.filter(s => s.id !== sub.id));
+          showToast(`✅ 子區間「${sub.name}」已刪除`, {
+            action: {
+              label: '復原',
+              onClick: async () => {
+                try {
+                  await apiPost('/api/task/sub/restore', { subId: sub.id, actor: currentUser, actorRole: role });
+                  applySubsToState(projId, taskId, subs => sortSubs([...subs.filter(s => s.id !== sub.id), sub]));
+                  showToast('✅ 子區間已復原');
+                } catch (e) {
+                  showToast('❌ 復原失敗：' + (e.message || '無法連線資料庫'));
+                }
+              }
+            }
+          });
+        } catch (e) {
+          showToast('❌ 刪除失敗：' + (e.message || '無法連線資料庫'));
+        }
+      }
+    });
   };
 
   // --- 主管：專案 新增/修改/刪除 + 區間新增 + 拖曳排序 ---
@@ -1411,7 +1627,7 @@ function App() {
   // 是否有彈窗/面板開啟中——輪詢暫停與鍵盤快捷鍵共用同一份判斷,兩邊才不會各自漂移。
   // ⚠ 團隊總結看板(showWeeklyReport)刻意不列入:它是唯讀的側邊疊加面板,不是輸入型視窗。
   //   快捷鍵要讓主管邊看看板邊用 ←→/H 平移甘特圖;輪詢更是反過來——講評時本來就希望看到成員陸續回報進來。
-  const isAnyModalOpen = !!(confirmInfo || commentTarget || selectedTaskInfo || deliverableProj || editingProject || addingInterval || showExtraNoteModal || showWeeklyPlanModal || showPendingPanel || showRetroPanel || showWeekEditPanel || showAuditPanel || showMemberPanel || showAccessPanel || showUsagePanel || showAdminMenu || showDeadlinePanel);
+  const isAnyModalOpen = !!(confirmInfo || commentTarget || selectedTaskInfo || deliverableProj || editingProject || addingInterval || showExtraNoteModal || showWeeklyPlanModal || showPendingPanel || showRetroPanel || showWeekEditPanel || showAuditPanel || showMemberPanel || showAccessPanel || showUsagePanel || showAdminMenu || showDisplayMenu || showDeadlinePanel);
 
   // 多人共用時每 60 秒靜默刷新,讓其他人的變更自動出現(失敗靜默忽略,下輪再試)。
   // 暫停條件有兩個:
@@ -1465,6 +1681,7 @@ function App() {
           } else closer();
         };
         if (showAdminMenu) { setShowAdminMenu(false); e.preventDefault(); return; }
+        if (showDisplayMenu) { setShowDisplayMenu(false); e.preventDefault(); return; }
         if (confirmInfo) { setConfirmInfo(null); e.preventDefault(); return; }
         if (commentTarget) { closeGuard(() => setCommentTarget(null)); e.preventDefault(); return; }
         if (selectedTaskInfo) { closeGuard(() => setSelectedTaskInfo(null)); e.preventDefault(); return; }
@@ -1512,7 +1729,7 @@ function App() {
     };
     window.addEventListener('keydown', handler, true);   // capture phase
     return () => window.removeEventListener('keydown', handler, true);
-  }, [currentUser, weekW, isOverview, isResults, isAnyModalOpen, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showUsagePanel, showAdminMenu, showDeadlinePanel, goToCurrentWeek, closeWeeklyReport]);
+  }, [currentUser, weekW, isOverview, isResults, isAnyModalOpen, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showUsagePanel, showAdminMenu, showDisplayMenu, showDeadlinePanel, goToCurrentWeek, closeWeeklyReport]);
 
   const existingCategories = useMemo(
     () => [...new Set(projects.map(p => p.category).filter(Boolean))].sort(),
@@ -1520,8 +1737,8 @@ function App() {
   );
 
   // 搜尋/類型篩選會隱藏同成員內的部分專案列,此時拖曳落點會與畫面不一致,故暫停拖曳排序
-  // pendingOnly 也算:它同樣會隱藏同一位成員底下的部分專案列,拖曳落點會與畫面對不上
-  const isFilteringRows = searchText.trim() !== '' || typeFilter.size > 0 || pendingOnly;
+  // statusFilter 也算:它同樣會隱藏同一位成員底下的部分專案列,拖曳落點會與畫面對不上
+  const isFilteringRows = searchText.trim() !== '' || typeFilter.size > 0 || statusFilter !== null;
 
   const handleSaveProject = async (form) => {
     try {
@@ -1695,11 +1912,11 @@ function App() {
     if (searchText.trim()) list.push({ key: 'search', label: `搜尋「${searchText.trim()}」`, clearLabel: '清除搜尋', clear: () => setSearchText('') });
     if (typeFilter.size > 0) list.push({ key: 'type', label: `類型 ${[...typeFilter].map(k => String(k).toUpperCase()).join('、')}`, clearLabel: '清除類型', clear: () => setTypeFilter(new Set()) });
     if (ownerFilter !== ownerDefault) list.push({ key: 'owner', label: `成員「${ownerFilter === 'all' ? '全部成員' : ownerFilter}」`, clearLabel: '清除成員', clear: () => setOwnerFilter(ownerDefault) });
-    if (pendingOnly) list.push({ key: 'pending', label: '只看未回報', clearLabel: '清除「只看未回報」', clear: () => setPendingOnly(false) });
+    if (statusFilter) list.push({ key: 'status', label: `只看${STATUS_FILTER_LABEL[statusFilter]}`, clearLabel: `清除「只看${STATUS_FILTER_LABEL[statusFilter]}」`, clear: () => setStatusFilter(null) });
     return list;
-  }, [searchText, typeFilter, ownerFilter, ownerDefault, pendingOnly]);
+  }, [searchText, typeFilter, ownerFilter, ownerDefault, statusFilter]);
   const clearAllFilters = () => {
-    setSearchText(''); setTypeFilter(new Set()); setOwnerFilter(ownerDefault); setPendingOnly(false);
+    setSearchText(''); setTypeFilter(new Set()); setOwnerFilter(ownerDefault); setStatusFilter(null);
   };
 
   // --- 篩選 ---
@@ -1708,16 +1925,25 @@ function App() {
     return projects.filter(p => {
       if (ownerFilter !== 'all' && p.owner !== ownerFilter) return false;   // 三個檢視共用的成員下拉
       if (typeFilter.size > 0 && !typeFilter.has(p.type)) return false;
-      // 「未回報」晶片的篩選:只留下本週有排定、但還沒回報的專案。
-      // 主管每週的核心動作就是「誰還沒交」——原本看到「未回報 18」之後,只能自己在 69 列裡找紅框。
-      if (pendingOnly && !p.tasks.some(t => t.start <= currentWeek && t.end >= currentWeek && !taskLogs[t.id]?.[currentWeek])) return false;
+      // 概況列狀態晶片的篩選:只留下本週有排定、且至少一個回報單位屬於該狀態的專案(子區間模式下逐單位看)。
+      // 主管每週的核心動作就是「誰還沒交」「誰這週沒做」——原本看到「未回報 18」之後,只能自己在 69 列裡找紅框。
+      // 分類走 unitMatchesStatus(與 weekStats 同一套),晶片數字與篩出的列才對得起來。
+      if (statusFilter && !p.tasks.some(t => t.start <= currentWeek && t.end >= currentWeek && weekUnits(t, currentWeek, taskLogs, subLogs).units.some(u => unitMatchesStatus(u, statusFilter)))) return false;
       if (kw) {
-        const hay = `${p.name} ${p.category} ${p.owner} ${p.tasks.map(t => t.name).join(' ')}`.toLowerCase();
+        const hay = `${p.name} ${p.category} ${p.owner} ${p.tasks.map(t => `${t.name} ${(t.subs || []).map(s => s.name).join(' ')}`).join(' ')}`.toLowerCase();
         if (!hay.includes(kw)) return false;
       }
       return true;
     });
-  }, [projects, searchText, typeFilter, ownerFilter, pendingOnly, currentWeek, taskLogs]);
+  }, [projects, searchText, typeFilter, ownerFilter, statusFilter, currentWeek, taskLogs, subLogs]);
+  // 關鍵字命中「子區間名稱」的專案 id:這些專案要暫時視為展開(見 isSubExpanded),否則收合狀態下
+  // 搜「驗證」跑出一個名稱裡沒有「驗證」的專案,使用者只會覺得搜尋壞了。
+  // 只是暫時的顯示狀態,不寫進 gantt_prefs——清掉搜尋就回到原本的偏好。
+  const subSearchHits = useMemo(() => {
+    const kw = searchText.trim().toLowerCase();
+    if (!kw) return new Set();
+    return new Set(projects.filter(p => p.tasks.some(t => (t.subs || []).some(s => s.name.toLowerCase().includes(kw)))).map(p => p.id));
+  }, [projects, searchText]);
 
   // 主管未啟用搜尋/類型篩選時，沒有專案的成員(如剛加入的新同仁)也要顯示群組列,才能為其新增專案
   const groupedProjects = useMemo(() =>
@@ -1726,14 +1952,31 @@ function App() {
         (role === 'manager' && !isFilteringRows && (ownerFilter === 'all' || ownerFilter === g.owner)))
   , [filteredProjects, users, role, isFilteringRows, ownerFilter]);
 
-  // 排程到期提醒:任務進行中(以「實際本週」計)且 剩餘 ≤2 週 或 時程已過 ≥70%
+  // 工具列「顯示 ▾」的項目:成員群組的展開/收合只在畫面上有 ≥2 個群組時才列(成員預設只看自己＝一個群組,
+  // 「收合」等於把整張表收掉,沒有意義);子區間兩項只在資料裡真的有子區間時列。一項都沒有 → 整顆鈕不顯示。
+  const displayMenuItems = [
+    ...(groupedProjects.length >= 2 ? [
+      { label: '展開全部成員群組', run: () => setCollapsedOwners(new Set()) },
+      { label: '收合全部成員群組', run: () => setCollapsedOwners(new Set(users)) }
+    ] : []),
+    ...(hasAnySubs ? [
+      { label: '展開全部子區間', run: () => setAllSubExpanded(true), sep: true },
+      { label: '收合全部子區間', run: () => setAllSubExpanded(false) }
+    ] : [])
+  ];
+
+  // 排程到期提醒:任務進行中(以「實際本週」計)且 剩餘 ≤2 週,或「時程已過 ≥70% **且** 剩餘 ≤ DEADLINE_RATIO_MAX_REMAIN 週」。
+  // ⚠ 70% 規則要配剩餘週數上限(2026-09-12 修):原本只看比例,整年 52 週的區間在 9 月(71%)、剩 16 週就被標成
+  //   「即將到期」——實測本週 18 條進行中 7 條被標示,其中 4 條是這種整年區間、2 條剩 7 週,真正快到期的只有 1 條。
+  //   「即將」的語意是剩下的時間不多,所以比例之外一定要有絕對週數;4 週＝一個月,主管盯得住的範圍。
   const isTaskDeadlineSoon = useCallback((task) => {
+    if (!isCurrentYear) return false;   // 別的年度整年都是過去/未來,沒有「即將」可言(否則去年 W53 結束的區間會一直亮 ⏰)
     if (task.start > todayWeek || task.end < todayWeek) return false;
     const span = task.end - task.start + 1;
     const remain = task.end - todayWeek + 1;                 // 含本週
     const elapsed = (todayWeek - task.start + 1) / span;     // 已過比例
-    return remain <= 2 || elapsed >= 0.7;
-  }, [todayWeek]);
+    return remain <= 2 || (remain <= DEADLINE_RATIO_MAX_REMAIN && elapsed >= 0.7);
+  }, [todayWeek, isCurrentYear]);
 
   // 即將到期清單(依剩餘週數排序,供頂部晶片點開的面板與統計數字共用)
   const deadlineTasks = useMemo(() => {
@@ -1754,14 +1997,18 @@ function App() {
   // 107 個甘特條原本各自 tabIndex=0,鍵盤使用者要按 107 次 Tab 才穿得過甘特區。
   // 改成整區只留一個 Tab 停留點(目前聚焦過的那條,沒有就是第一條),進去之後用 ↑↓ 移動。
   // 順序直接照渲染順序算(收合的成員群組不入列),與畫面上看到的一致。
+  // 子區間自遷移 20 起是打卡入口,子條也要進 roving 群組(id 加 's' 前綴與父條區隔);順序＝畫面順序(專案列的父條 → 該專案的子列)
   const ganttBarTaskIds = useMemo(() => {
     const ids = [];
     groupedProjects.forEach(g => {
       if (collapsedOwners.has(g.owner)) return;
-      g.projects.forEach(p => p.tasks.forEach(t => ids.push(t.id)));
+      g.projects.forEach(p => {
+        p.tasks.forEach(t => ids.push(t.id));
+        if (isSubExpanded(p.id)) p.tasks.forEach(t => (t.subs || []).forEach(s => ids.push(`s${s.id}`)));
+      });
     });
     return ids;
-  }, [groupedProjects, collapsedOwners]);
+  }, [groupedProjects, collapsedOwners, isOverview, subCollapsedWeek, subExpandedOverview, subSearchHits]);   // eslint-disable-line react-hooks/exhaustive-deps
   // ⚠ 存成字串:onRove 是從 DOM 的 data-roving-id 讀回來的(字串),onFocus 給的是原始 id(數字),
   //    兩條路徑都會寫進這個 state,故一律以字串比較,避免 32 !== '32' 造成 tab stop 找不到目標。
   const [rovingTaskId, setRovingTaskId] = useState(null);
@@ -1775,84 +2022,90 @@ function App() {
   //   標題會同步顯示範圍(全隊 / 成員名),使用者不必用猜的。
   // ⚠ 但**不吃搜尋與類型篩選**:那兩個是臨時的「找資料」動作,概況是「這週該做的事完成多少」的固定基準——
   //   跟著關鍵字一起跳動的話,邊打字邊變的數字沒有任何意義。
+  // ⚠ 一律以「回報單位」計(weekUnits):子區間模式下一條計畫區間＝N 個單位,概況的「x/y 已回報」與看板、待回報徽章同一口徑
   const weekStats = useMemo(() => {
     let active = 0, reported = 0, executed = 0, monitor = 0, notExec = 0;
     projects.forEach(p => {
       if (ownerFilter !== 'all' && p.owner !== ownerFilter) return;
       p.tasks.forEach(t => {
         if (t.start <= currentWeek && t.end >= currentWeek) {
-          active++;
-          const log = taskLogs[t.id]?.[currentWeek];
-          if (log) {
-            reported++;
+          const wu = weekUnits(t, currentWeek, taskLogs, subLogs);
+          active += wu.total;
+          reported += wu.reported;
+          wu.units.forEach(({ log }) => {
+            if (!log) return;
             if (log.status === 'not_executed') notExec++;
             else if (log.status === 'monitor') monitor++;
             else executed++;
-          }
+          });
         }
       });
     });
     return { active, reported, executed, monitor, notExec, pending: active - reported };
-  }, [projects, taskLogs, currentWeek, ownerFilter]);
+  }, [projects, taskLogs, subLogs, currentWeek, ownerFilter]);
 
-  const myPendingTasks = useMemo(() => {
-    if (role !== 'member') return [];
-    const list = [];
+  // 成員自己在某週的回報單位清單:pending＝還沒交的單位、completed＝已交的單位(每筆 {proj, task, sub, log},sub 為 null＝計畫區間本身)
+  const myUnitsAt = useCallback((week) => {
+    const pending = [], completed = [];
+    if (role !== 'member') return { pending, completed };
     projects.filter(p => p.owner === currentUser).forEach(p => p.tasks.forEach(t => {
-      if (t.start <= todayWeek && t.end >= todayWeek && !taskLogs[t.id]?.[todayWeek]) {
-        list.push({ proj: p, task: t });
+      if (t.start <= week && t.end >= week) {
+        weekUnits(t, week, taskLogs, subLogs).units.forEach(({ sub, log }) => {
+          (log ? completed : pending).push({ proj: p, task: t, sub, log });
+        });
       }
     }));
-    return list;
-  }, [projects, taskLogs, todayWeek, role, currentUser]);
+    return { pending, completed };
+  }, [projects, taskLogs, subLogs, role, currentUser]);
+  // 「本週」只存在於今年:看別的年度時待回報清單一律空(徽章不催、回報中心不開)
+  const myUnitsToday = useMemo(() => isCurrentYear ? myUnitsAt(todayWeek) : NO_UNITS, [myUnitsAt, todayWeek, isCurrentYear]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const myPendingTasks = myUnitsToday.pending;
+  const myCompletedTasks = myUnitsToday.completed;
 
-  const myCompletedTasks = useMemo(() => {
-    if (role !== 'member') return [];
-    const list = [];
-    projects.filter(p => p.owner === currentUser).forEach(p => p.tasks.forEach(t => {
-      if (t.start <= todayWeek && t.end >= todayWeek && taskLogs[t.id]?.[todayWeek]) {
-        list.push({ proj: p, task: t, log: taskLogs[t.id][todayWeek] });
-      }
-    }));
-    return list;
-  }, [projects, taskLogs, todayWeek, role, currentUser]);
-
-  // 補登面板用:檢視中週次(非本週)的待打卡/已打卡清單(成員;需主管開放補登)
-  const myRetroPendingTasks = useMemo(() => {
-    if (role !== 'member' || currentWeek === todayWeek) return [];
-    const list = [];
-    projects.filter(p => p.owner === currentUser).forEach(p => p.tasks.forEach(t => {
-      if (t.start <= currentWeek && t.end >= currentWeek && !taskLogs[t.id]?.[currentWeek]) {
-        list.push({ proj: p, task: t });
-      }
-    }));
-    return list;
-  }, [projects, taskLogs, currentWeek, todayWeek, role, currentUser]);
-
-  const myRetroCompletedTasks = useMemo(() => {
-    if (role !== 'member' || currentWeek === todayWeek) return [];
-    const list = [];
-    projects.filter(p => p.owner === currentUser).forEach(p => p.tasks.forEach(t => {
-      if (t.start <= currentWeek && t.end >= currentWeek && taskLogs[t.id]?.[currentWeek]) {
-        list.push({ proj: p, task: t, log: taskLogs[t.id][currentWeek] });
-      }
-    }));
-    return list;
-  }, [projects, taskLogs, currentWeek, todayWeek, role, currentUser]);
+  // 補登面板用:檢視中週次(非本週、且已經過去)的待打卡/已打卡清單(成員;需主管開放補登)
+  const myUnitsRetro = useMemo(() => (isReportingWeek || isFutureWeek) ? NO_UNITS : myUnitsAt(currentWeek), [myUnitsAt, currentWeek, isReportingWeek, isFutureWeek]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const myRetroPendingTasks = myUnitsRetro.pending;
+  const myRetroCompletedTasks = myUnitsRetro.completed;
 
   // 「下週預計工作」也是強制回報項目:未填寫時計入待回報數,回報完最後一項任務會自動跳出填寫視窗
-  const planPendingThisWeek = role === 'member' && !!currentUser && !weeklyPlans[currentUser]?.[todayWeek];
+  const planPendingThisWeek = role === 'member' && !!currentUser && isCurrentYear && !weeklyPlans[currentUser]?.[todayWeek];
   const totalPendingCount = myPendingTasks.length + (planPendingThisWeek ? 1 : 0);
 
-  const showTooltip = (e, proj, task) => {
+  // 甘特 tooltip 的「位置」不進 state(2026-09-12 修):App 沒有任何 memo 邊界,tooltip 的 x/y 放在 state 裡
+  // 等於每次 mousemove 都把 77 列 × 53 格(4,600 個 div)整張重繪,實測每次 7–18ms,投影筆電滑過甘特條會掉幀。
+  // 內容(哪條區間、本週狀態)仍走 state(進出一條才換一次);座標存 ref、mousemove 直接改 tooltip 節點的 style,零重繪。
+  const tooltipElRef = useRef(null);
+  const tooltipPosRef = useRef({ x: 0, y: 0 });
+  const placeTooltip = (x, y) => {
+    tooltipPosRef.current = { x, y };
+    const el = tooltipElRef.current;
+    if (!el) return;
+    el.style.left = `${Math.min(x + 14, window.innerWidth - 300)}px`;
+    el.style.top = `${Math.min(y + 14, window.innerHeight - 200)}px`;
+  };
+  const showTooltip = (e, proj, task, sub = null) => {
     const weekLog = taskLogs[task.id]?.[currentWeek];
     const history = Object.entries(taskLogs[task.id] || {})
       .filter(([w]) => Number(w) !== currentWeek)
       .sort((a, b) => Number(a[0]) - Number(b[0]));
-    setTooltip({ x: e.clientX, y: e.clientY, proj, task, weekLog, history });
+    // 子區間模式(該週回報單位＝子區間)時列出每個子區間的回報狀態
+    const wu = weekUnits(task, currentWeek, taskLogs, subLogs);
+    // 滑的是子條(2026-09-13):多帶這條子區間自己的本週紀錄與歷史(subLogs),父層資訊照樣列出當上下文
+    const subInfo = sub ? {
+      sub,
+      isUnit: wu.mode === 'sub' && wu.units.some(u => u.sub.id === sub.id),   // 本週的回報單位之一
+      log: SUB_CHECKIN ? subLogs[sub.id]?.[currentWeek] : undefined,
+      history: !SUB_CHECKIN ? [] : Object.entries(subLogs[sub.id] || {})
+        .filter(([w]) => Number(w) !== currentWeek && Number(w) >= sub.start && Number(w) <= sub.end)
+        .sort((a, b) => Number(a[0]) - Number(b[0])),
+    } : null;
+    placeTooltip(e.clientX, e.clientY);
+    setTooltip({ proj, task, weekLog, history, wu, subInfo });
   };
-  const moveTooltip = (e) => setTooltip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
+  const moveTooltip = (e) => placeTooltip(e.clientX, e.clientY);
   const hideTooltip = () => setTooltip(null);
+  // 節點掛上來的當下就套用最後一次的座標(setTooltip 之後才有節點可以改)
+  const tooltipRefCb = (el) => { tooltipElRef.current = el; if (el) placeTooltip(tooltipPosRef.current.x, tooltipPosRef.current.y); };
 
   // 瀏覽權限卡控:檢查完成前顯示載入畫面;卡控啟用且未通過 → 整頁無權限畫面(不顯示登入與任何資料)
   // 逾時:給錯誤畫面＋重試,不要無限轉圈(原本使用者唯一的出路是自己想到按 Ctrl+F5)
@@ -1865,7 +2118,7 @@ function App() {
   }
   if (!accessCheck) return <div className="min-h-screen bg-slate-100 app-bg flex flex-col"><LoadingScreen /></div>;
   if (accessCheck.enabled && !accessCheck.allowed) {
-    return <AccessDeniedScreen empId={empId} reason={accessCheck.reason} person={accessCheck.person} />;
+    return <AccessDeniedScreen empId={empId} reason={accessCheck.reason} person={accessCheck.person} siteTitle={siteTitle} />;
   }
 
   return (
@@ -1879,7 +2132,7 @@ function App() {
             <div className="bg-white/10 p-1.5 rounded-lg border border-white/20">
               <svg className="w-5 h-5" style={{ color: GOLD }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" /></svg>
             </div>
-            <span className="text-base font-bold tracking-wide">MSD 專案追蹤總表</span>
+            <span className="text-base font-bold tracking-wide">{siteTitle}</span>
           </div>
 
           {/* 成果清單是「全年度」產出總表,與週次無關 → 系統週數選擇器隱藏(切回週檢視/年度總覽才出現) */}
@@ -1911,10 +2164,24 @@ function App() {
                     className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold transition ${currentWeek >= todayWeek ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-white/10 hover:bg-white/30'}`} aria-label="檢視後一週" title="檢視後一週">›</button>
                 </div>
               )}
-              {role === 'member' && isViewingPast && (
+              {/* 非本年度:整年沒有「本週」,回報入口全部收起(兩種身分都一樣);晶片講清楚為什麼鈕不見了,點了切回今年 */}
+              {!isCurrentYear && (
+                <button onClick={goToCurrentWeek} title={`正在檢視 ${scheduleYear} 年度（${scheduleYear > todayYear ? '尚未開始' : '已結束'}），沒有本週可回報；點擊切回 ${todayYear} 年度的本週`}
+                  className="ml-2 flex items-center bg-yellow-500/90 hover:bg-yellow-400 text-slate-900 text-[10px] font-bold px-2 py-0.5 rounded-full transition">
+                  📅 {scheduleYear} 非本年度 · 僅檢視 · 回到 {todayYear} 年
+                </button>
+              )}
+              {isCurrentYear && role === 'member' && isViewingPast && (
                 <button onClick={goToCurrentWeek}
                   className="ml-2 flex items-center bg-yellow-500/90 hover:bg-yellow-400 text-slate-900 text-[10px] font-bold px-2 py-0.5 rounded-full transition">
                   🔒 唯讀檢視中 · 返回本週 W{String(todayWeek).padStart(2, '0')}
+                </button>
+              )}
+              {/* 主管切到未來週:可看排程,但所有回報／回覆入口都收起(不開放預先打卡,後端同樣擋);這顆晶片講清楚為什麼鈕不見了 */}
+              {isCurrentYear && role === 'manager' && isFutureWeek && (
+                <button onClick={goToCurrentWeek} title={`W${String(currentWeek).padStart(2, '0')} 尚未到，僅供檢視排程；點擊返回本週`}
+                  className="ml-2 flex items-center bg-yellow-500/90 hover:bg-yellow-400 text-slate-900 text-[10px] font-bold px-2 py-0.5 rounded-full transition">
+                  📅 未來週次 · 僅檢視 · 返回本週 W{String(todayWeek).padStart(2, '0')}
                 </button>
               )}
             </div>
@@ -1945,7 +2212,7 @@ function App() {
             {/* 以下三個都是「編輯當週回報」入口,兩種情況一律隱藏:
                 ①成果清單(全年度產出總表,與週次無關)
                 ②團隊總結看板開啟時——當下是「檢視本週已完成工作」,不是編輯情境,擺著只會讓主管誤點 */}
-            {!isResults && !showWeeklyReport && role === 'member' && allowRetroCheckin && currentWeek !== todayWeek && (
+            {!isResults && !showWeeklyReport && role === 'member' && allowRetroCheckin && !isReportingWeek && !isFutureWeek && (
               // 主管開放補登時:成員檢視非當週可直接修改該週回報(任務打卡/非專案/下週預計;主管回覆不可異動)
               <button onClick={() => setShowRetroPanel(true)}
                 className="bg-amber-700/80 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-md transition flex items-center gap-1 border border-amber-400/80"
@@ -1953,8 +2220,9 @@ function App() {
                 🕘 修改 W{String(currentWeek).padStart(2, '0')} 回報
               </button>
             )}
-            {!isResults && !showWeeklyReport && role === 'member' && (
+            {!isResults && !showWeeklyReport && role === 'member' && isCurrentYear && (
               // 本週回報的三件事(任務打卡/下週預計/非專案事項)合併為單一入口;紅點=未回報任務+未填下週預計(非專案為選填不計)
+              // 非本年度整顆收起:那裡沒有「本週」
               <button onClick={() => setShowPendingPanel(true)}
                 className="relative bg-amber-500 hover:bg-amber-600 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold shadow-md transition flex items-center gap-1.5 border border-amber-400">
                 <span>📋 本週回報中心</span>
@@ -1963,9 +2231,9 @@ function App() {
                 )}
               </button>
             )}
-            {!isResults && !showWeeklyReport && role === 'manager' && (
+            {!isResults && !showWeeklyReport && role === 'manager' && !isFutureWeek && (
               <>
-                {/* 主管:檢視中週次的回報編輯入口(代成員補登/修正任務打卡、非專案、下週預計,並可編輯主管回覆) */}
+                {/* 主管:檢視中週次的回報編輯入口(代成員補登/修正任務打卡、非專案、下週預計,並可編輯主管回覆);未來週不開放 */}
                 <button onClick={() => setShowWeekEditPanel(true)}
                   className="bg-amber-700/80 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-md transition flex items-center gap-1 border border-amber-400/80"
                   title={`編輯 W${String(currentWeek).padStart(2, '0')} 各成員回報：代成員補登/修正任務打卡、非專案事項、下週預計工作，並可編輯主管回覆`}>
@@ -1990,7 +2258,7 @@ function App() {
                   <button onClick={() => setShowAdminMenu(v => !v)}
                     aria-expanded={showAdminMenu} aria-haspopup="true"
                     className={`px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20 text-white ${showAdminMenu ? 'bg-white/25' : 'bg-white/10 hover:bg-white/20'}`}
-                    title="管理功能：成員管理、瀏覽權限、使用統計、異動紀錄">
+                    title="管理功能：歷史補登開關、成員管理、瀏覽權限、使用統計、異動紀錄">
                     ⚙️ 管理 {showAdminMenu ? '▴' : '▾'}
                   </button>
                   {showAdminMenu && (
@@ -1999,6 +2267,14 @@ function App() {
                       <div className="fixed inset-0 z-[60]" onClick={() => setShowAdminMenu(false)}></div>
                       <div className="absolute right-0 top-full mt-1.5 z-[70] w-44 bg-white rounded-xl shadow-2xl border border-slate-300 py-1.5 overflow-hidden">
                         {[
+                          // 補登總開關(2026-09-13 從工具列移進來):改全體寫入權限的系統設定,放在第一項並用琥珀色標示 ON 狀態。
+                          // 關閉的入口另有兩處:此處、以及開啟時畫面上的琥珀橫幅「關閉歷史補登」。
+                          // ⚠ 標籤寫「動作」、小字寫「現況」(2026-09-13 使用者問):原本標籤是「歷史補登:僅限當週」這種狀態描述,
+                          //   點下去卻做相反的事,其他四項都是「點了會去哪」,只有這項要先讀小字才知道是開還是關。
+                          //   名稱全站統一叫「歷史補登」(橫幅、toast 原本叫「豁免期」「調正歷史進度」,同一件事三個名字)。
+                          { icon: allowRetroCheckin ? '🔒' : '🔓', label: allowRetroCheckin ? '關閉歷史補登' : '開放歷史補登',
+                            desc: allowRetroCheckin ? '目前：開放中，全體可補登歷史週次' : '目前：僅限當週回報', open: toggleRetroCheckin,
+                            cls: allowRetroCheckin ? 'bg-amber-100 hover:bg-amber-200' : '' },
                           { icon: '👥', label: '成員管理', desc: '新增/移除/改名', open: () => setShowMemberPanel(true) },
                           { icon: '🔐', label: '瀏覽權限', desc: '部門/工號卡控', open: () => setShowAccessPanel(true) },
                           { icon: '📈', label: '使用統計', desc: '登入次數/使用率', open: () => setShowUsagePanel(true) },
@@ -2006,7 +2282,7 @@ function App() {
                         ].map(item => (
                           <button key={item.label}
                             onClick={() => { setShowAdminMenu(false); item.open(); }}
-                            className="w-full text-left px-3.5 py-2 hover:bg-slate-100 transition flex items-center gap-2.5">
+                            className={`w-full text-left px-3.5 py-2 transition flex items-center gap-2.5 ${item.cls || 'hover:bg-slate-100'}`}>
                             <span className="text-base">{item.icon}</span>
                             <span className="min-w-0">
                               <span className="block text-xs font-bold text-slate-800">{item.label}</span>
@@ -2023,6 +2299,16 @@ function App() {
                 <div className="font-bold text-sm">{currentUser}</div>
                 <div className="text-[10px] text-white/80">{role === 'manager' ? '主管' : '成員'}{empId ? ` · 工號 ${empId}` : ''}</div>
               </div>
+              {/* 使用手冊(2026-09-13):手冊隨 wwwroot 部署、從這裡開新分頁——之前寫了 13 章手冊卻沒有任何入口,使用者根本不知道有這份。
+                  放 header 帳號區而不放 ⚙️ 管理:成員也要看得到(⚙️ 只有主管有)。帶 role 讓手冊直接停在該身分的章節、
+                  帶 theme 與系統當下主題一致(深色系統跳出一頁白底很刺眼)。是連結不是按鈕(開新分頁),故用 <a>;
+                  無文字 → aria-label 是唯一可及名稱。SVG 用 currentColor,與旁邊登出鈕同一套寫法。 */}
+              <a href={`${API_BASE}/${encodeURIComponent('使用者手冊.html')}?role=${role === 'manager' ? 'manager' : 'member'}&theme=${isDark ? 'dark' : 'light'}`}
+                target="_blank" rel="noopener noreferrer"
+                className="p-1.5 hover:bg-white/20 rounded-lg transition text-white/80 hover:text-white bg-white/5 w-8 h-8 flex items-center justify-center"
+                aria-label="開啟使用手冊（新分頁）" title="使用手冊（開新分頁）">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+              </a>
               <button onClick={() => setIsDark(v => !v)} className="p-1.5 hover:bg-white/20 rounded-lg transition text-white/80 hover:text-white bg-white/5 text-sm leading-none w-8 h-8 flex items-center justify-center" aria-label={isDark ? '切換為淺色模式' : '切換為深色模式'} title={isDark ? '切換為淺色模式' : '切換為深色模式'}>
                 {isDark ? '☀️' : '🌙'}
               </button>
@@ -2039,7 +2325,7 @@ function App() {
       ) : dataError ? (
         <ErrorScreen message={dataError} onRetry={loadBootstrap} />
       ) : !currentUser ? (
-        <LoginScreen onLogin={handleLogin} users={users} year={scheduleYear} empId={empId} />
+        <LoginScreen onLogin={handleLogin} users={users} year={scheduleYear} empId={empId} siteName={siteName} />
       ) : (
         // 主內容區在看板開啟時整塊內縮(讓出的寬度給看板),工具列與甘特都只跨左半邊:
         // ①「週檢視/年度總覽/密度」那排會待在甘特正上方,不會飄到看板頭上
@@ -2067,9 +2353,9 @@ function App() {
           ) : (
             <div className={`py-2 border-b border-slate-300 bg-gradient-to-r from-slate-50 to-white flex items-center text-xs overflow-x-auto ${ultraTightStatsBar ? 'px-2 gap-2 gap-y-1 flex-wrap' : 'px-4 gap-3'}`}>
               {/* 統計範圍要寫出來:這排數字現在跟著成員下拉走,標題不講清楚就會變成「同一個字看到兩組數字」 */}
+              {/* 不重複月份:header 的週數選擇器已經寫著 2026/09,同一畫面兩次是噪音(2026-09-13) */}
               <div className="flex items-center flex-shrink-0">
                 <span className="font-black text-slate-900 text-sm">W{String(currentWeek).padStart(2, '0')}</span>
-                <span className="text-slate-600 ml-1 text-[10px]">{weekToMonth(currentWeek, months)}</span>
                 <span className="ml-1 text-[10px] font-bold text-slate-700">{ownerFilter === 'all' ? '全隊' : ownerFilter}概況</span>
               </div>
               {/* 回報率進度條 */}
@@ -2083,19 +2369,28 @@ function App() {
               {/* 狀態分佈＋即將到期:看板開啟時整區收起(連前面的分隔線一起,否則會留下孤立的豎線)。
                   看板裡每位成員的分段條已把同一組狀態拆得更細,全隊加總屬重複資訊;
                   「⏰即將到期」會開另一個面板、跳出「檢視本週」的情境,講評當下不需要。 */}
-              {/* 看板開啟時整區收起,但「未回報」若正在篩選中必須留著(否則使用者看到清單只剩幾列、
+              {/* 看板開啟時整區收起,但正在篩選中的那顆晶片必須留著(否則使用者看到清單只剩幾列、
                   卻找不到任何地方可以取消)——沿用工具列既有的「有殘留條件就保留該顆＋可清除」規則 */}
-              {(!showWeeklyReport || pendingOnly) && (
+              {(!showWeeklyReport || statusFilter) && (
                 <>
                   <div className="h-6 border-l border-slate-300 flex-shrink-0"></div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {!tightStatsBar && <StatChip label="有執行" value={weekStats.executed} className="bg-green-100 text-green-800 border-green-400" />}
-                    {!tightStatsBar && <StatChip label="Monitor" value={weekStats.monitor} className="bg-sky-100 text-sky-800 border-sky-400" />}
-                    {!tightStatsBar && <StatChip label="未執行" value={weekStats.notExec} className="bg-slate-200 text-slate-700 border-slate-400" />}
-                    <StatChip label="未回報" value={weekStats.pending}
+                    {/* 四顆都是可切換的篩選鈕(2026-09-13;原本只有「未回報」能點,旁邊三顆長得一樣卻只是數字,使用者會去點)。
+                        單選:點另一顆＝換條件、點同一顆＝取消。這三顆同時兼任圖例(右側圖例只在它們收起時才補畫三個色點),title 講清楚色義 */}
+                    {(statusChipsVisible || statusFilter === 'executed') && <StatChip label="有執行" value={weekStats.executed} className="bg-green-100 text-green-800 border-green-400" ringClass="ring-green-700"
+                      onToggle={() => toggleStatusFilter('executed')} active={statusFilter === 'executed'}
+                      title={statusFilter === 'executed' ? '取消篩選，顯示全部專案' : '只顯示本週回報「有執行」的專案；甘特條上該週的綠色點＝有執行'} />}
+                    {(statusChipsVisible || statusFilter === 'monitor') && <StatChip label="Monitor" value={weekStats.monitor} className="bg-sky-100 text-sky-800 border-sky-400" ringClass="ring-sky-700"
+                      onToggle={() => toggleStatusFilter('monitor')} active={statusFilter === 'monitor'}
+                      title={statusFilter === 'monitor' ? '取消篩選，顯示全部專案' : '只顯示本週回報「Monitor（例行監控）」的專案；甘特條上該週的藍色點＝Monitor'} />}
+                    {(statusChipsVisible || statusFilter === 'not_executed') && <StatChip label="未執行" value={weekStats.notExec} className="bg-slate-200 text-slate-700 border-slate-400" ringClass="ring-slate-600"
+                      onToggle={() => toggleStatusFilter('not_executed')} active={statusFilter === 'not_executed'}
+                      title={statusFilter === 'not_executed' ? '取消篩選，顯示全部專案' : '只顯示本週回報「未執行」的專案（有回報、但本週沒做＝要追原因）；甘特條上該週的灰色點＝未執行'} />}
+                    {/* 「未回報」窄螢幕也常駐(它是催報的行動項);看板開啟時同樣只在自己篩選中才留 */}
+                    {(!showWeeklyReport || pendingOnly) && <StatChip label="未回報" value={weekStats.pending}
                       className={weekStats.pending > 0 ? 'bg-yellow-100 text-yellow-800 border-yellow-500' : 'bg-slate-100 text-slate-500 border-slate-300'}
-                      onToggle={() => setPendingOnly(v => !v)} active={pendingOnly}
-                      title={pendingOnly ? '取消篩選，顯示全部專案' : '只顯示本週尚未回報的專案'} />
+                      onToggle={() => toggleStatusFilter('pending')} active={pendingOnly}
+                      title={pendingOnly ? '取消篩選，顯示全部專案' : '只顯示本週尚未回報的專案（要催）'} />}
                     {!showWeeklyReport && <button onClick={() => setShowDeadlinePanel(true)} title="點擊檢視即將到期清單"
                       className={`flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border transition ${deadlineTasks.length > 0 ? 'bg-orange-100 text-orange-800 hover:bg-orange-200 border-orange-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 border-slate-300'}`}>
                       <span className="font-medium text-[11px]">⏰ 即將到期</span>
@@ -2110,9 +2405,22 @@ function App() {
                   「⏰即將到期」不放圖例(左側同名按鈕已表達,避免同列重複出現) */}
               <div className="flex-shrink-0 flex items-center gap-2 text-[11px] text-slate-600 border border-slate-300 rounded-lg bg-white ctl-raised px-2 py-0.5">
                 <span className="flex items-center" title="黃色斜紋條＝計畫區間(排定的起訖週)"><span className="w-3 h-2.5 mr-1 rounded-sm border" style={{ backgroundImage: 'repeating-linear-gradient(45deg,#FFF6D6,#FFF6D6 3px,#FDEDB8 3px,#FDEDB8 6px)', borderColor: '#B45309' }}></span>計畫</span>
-                <span className="flex items-center" title="綠色＝該週回報「有執行」"><span className="w-2.5 h-2.5 bg-green-700 mr-1 rounded-sm"></span>有執行</span>
-                <span className="flex items-center" title="藍色＝該週回報「Monitor(例行監控)」"><span className="w-2.5 h-2.5 bg-sky-700 mr-1 rounded-sm"></span>Monitor</span>
-                <span className="flex items-center" title="灰色＝該週回報「未執行」"><span className="w-2.5 h-2.5 bg-slate-500 mr-1 rounded-sm"></span>未執行</span>
+                {/* 子區間(遷移 18):與甘特子條同色(行內固定色)。標籤精簡,完整說明放 title。
+                    只在畫面上真的有子區間時才出現:圖例解釋的是「看得到的東西」,一個都沒有時多一格只是佔寬
+                    (這格 57px 會讓 1024＋看板的概況列從一行變兩行;有子區間時寧可兩行也不要橫向捲軸)。 */}
+                {hasAnySubs && (
+                  <span className="flex items-center" title="青綠斜紋條＝計畫區間底下的子區間(階段,可重疊;與黃色的計畫區間明確分色)。滑過條可看未開始／進行中／已結束"><span className="w-3 h-2.5 mr-1 rounded-sm border" style={{ backgroundImage: 'repeating-linear-gradient(45deg,#CCFBF1,#CCFBF1 3px,#BDF7EC 3px,#BDF7EC 6px)', borderColor: 'rgba(15,118,110,0.75)' }}></span>子區間</span>
+                )}
+                {/* 三個狀態色**只在左側的統計晶片收起時**才列(2026-09-13 去重):晶片本身就是同色系的
+                    「有執行 1／Monitor 0／未執行 2」,同一列再畫一次三個色點是 250px 的重複資訊。
+                    「❗待回報」不在此列——它解釋的是甘特條的紅框(形狀),晶片那顆黃色「未回報」是計數,兩者長得不一樣。 */}
+                {!statusChipsVisible && (
+                  <>
+                    <span className="flex items-center" title="綠色＝該週回報「有執行」"><span className="w-2.5 h-2.5 bg-green-700 mr-1 rounded-sm"></span>有執行</span>
+                    <span className="flex items-center" title="藍色＝該週回報「Monitor(例行監控)」"><span className="w-2.5 h-2.5 bg-sky-700 mr-1 rounded-sm"></span>Monitor</span>
+                    <span className="flex items-center" title="灰色＝該週回報「未執行」"><span className="w-2.5 h-2.5 bg-slate-500 mr-1 rounded-sm"></span>未執行</span>
+                  </>
+                )}
                 <span className="flex items-center" title="紅框＋❗＝本週排定但尚未回報的任務"><span className="w-3 h-2.5 mr-1 rounded-sm border-2 border-red-400 bg-white"></span>❗待回報</span>
                 {/* 鍵盤快捷鍵提示:常駐小字(輔助資訊直接顯示原則),完整說明放 title;
                     看板開啟**或視窗本身太窄**時收起讓出寬度(見 tightStatsBar)
@@ -2156,8 +2464,8 @@ function App() {
                   return (
                     <button key={key} onClick={() => toggleTypeFilter(key)}
                       className={`px-1.5 py-0.5 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white ctl-raised text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`}
-                      title={meta.label}>
-                      {key}·{meta.label}
+                      title={`${key}・${meta.label}`} aria-label={`${on ? '取消篩選' : '篩選'} ${key} ${meta.label}`}>
+                      {key} {meta.short}
                     </button>
                   );
                 })}
@@ -2181,7 +2489,7 @@ function App() {
             <div className="flex-1"></div>
 
             <select value={scheduleYear}
-              onChange={e => { const y = parseInt(e.target.value); setScheduleYear(y); setCurrentWeek(getTodayWeek(y)); }}
+              onChange={e => setScheduleYear(parseInt(e.target.value))}   // 系統週由 refreshData 在該年度載入後切到本週並置中(那時才知道該年有幾週)
               title="切換排程年度(年度資料由 DB 的 ScheduleWeeks 決定)"
               className="border border-slate-300 rounded-lg px-2 py-1 outline-none bg-white ctl-raised font-bold text-slate-700">
               {(years.length ? years : [scheduleYear]).map(y => <option key={y} value={y}>{y} 年度</option>)}
@@ -2206,13 +2514,13 @@ function App() {
               <button onClick={() => {
                   if (showWeeklyReport) {
                     setShowWeeklyReport(false);
-                    setHighlightedTaskId(null);
+                    clearHighlight();
                     setCollapsedOwners(new Set());
                     setOwnerFilter(defaultOwnerFilter(role, currentUser));   // 清掉看板高亮造成的單一成員聚焦
                   }
                   // 「本週未回報」在全年度產出總表沒有意義,切過去一併清掉;
                   // 不清的話清單會莫名只剩幾列,而該檢視根本沒有那顆晶片可以取消(與 ownerFilter 的還原同理)
-                  setPendingOnly(false);
+                  setStatusFilter(null);
                   setIsOverview(false); setIsResults(true);
                 }}
                 className={`px-2 py-1 font-bold transition ${isResults ? 'text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
@@ -2222,9 +2530,14 @@ function App() {
             </div>
             {/* 年度總覽也要有:它同樣有週次列、當週高亮與紅線,點到 W15 後若沒有這顆,
                 只能用 header 的 ‹ › 一週一週按回來(H 快捷鍵沒人知道)。成果清單無週次概念故仍不顯示。 */}
+            {/* 已經在本週時改成白底外框(2026-09-13):深色實心緊貼在檢視切換右邊,看起來像第四個被選中的分頁;
+                深淺本身就在講「你現在不在本週」。⚠ 不 disabled、不隱藏:橫向捲遠之後它仍是「重新置中」的入口。
+                ⚠ 不加 transition:兩態切換發生在「切週」當下不需要動畫,且嵌入式/背景分頁環境 transition 可能不推進,
+                實測切到 W36 後底色永遠停在起始的白色、字也停在 slate-700(class 已是 text-white)。 */}
             {!isResults && (
-              <button onClick={goToCurrentWeek} title={`回到本週 W${String(todayWeek).padStart(2, '0')} 並置中（快捷鍵 H）`}
-                className="flex items-center text-white px-2 py-1 rounded-lg font-bold shadow-sm transition hover:opacity-90" style={{ backgroundColor: BRAND_BTN }}>
+              <button onClick={goToCurrentWeek} title={isCurrentYear ? (isReportingWeek ? `已在本週 W${String(todayWeek).padStart(2, '0')}，點擊重新置中（快捷鍵 H）` : `回到本週 W${String(todayWeek).padStart(2, '0')} 並置中（快捷鍵 H）`) : `切回 ${todayYear} 年度的本週（快捷鍵 H）`}
+                className={`flex items-center px-2 py-1 rounded-lg font-bold ${isReportingWeek ? 'bg-white ctl-raised text-slate-700 border border-slate-300 hover:bg-slate-100' : 'text-white shadow-sm hover:opacity-90'}`}
+                style={isReportingWeek ? {} : { backgroundColor: BRAND_BTN }}>
                 <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                 回到本週
               </button>
@@ -2235,39 +2548,52 @@ function App() {
                 {isCompact ? '寬鬆模式' : '緊湊模式'}
               </button>
             )}
-            {/* 補登總開關:成果清單與看板開啟時都隱藏。這顆是改寫入權限的系統設定(誤點會直接對全體開放
-                歷史補登,下方還會多一整條琥珀警示列),而它管的是「當週打卡」——成果清單是全年度產出總表、
-                看板是唯讀講評情境,兩者都與當週寫入權限無關 */}
-            {role === 'manager' && !isResults && !showWeeklyReport && (
-              // 長文字縮短:完整說明放 title;開啟時下方另有整條琥珀色警示列,資訊不會漏
-              <button onClick={toggleRetroCheckin}
-                className={`px-2 py-1 rounded-lg font-bold border shadow-sm transition flex items-center gap-1 ${allowRetroCheckin ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600' : 'bg-slate-100 ctl-raised hover:bg-slate-200 text-slate-700 border-slate-300'}`}
-                title={allowRetroCheckin ? '目前開放全體成員回報/調正今年度的所有歷史週次紀錄，點擊關閉' : '目前成員僅能回報當週，點擊開放歷史補登'}>
-                <span>{allowRetroCheckin ? '🔓 補登 ON' : '🔒 僅限當週'}</span>
-              </button>
-            )}
-            {/* 展開/收合只作用於甘特圖的成員群組列,成果清單(單一平面表)用不到 → 隱藏 */}
-            {!isResults && (
+            {/* 補登總開關「🔒 僅限當週／🔓 補登 ON」已於 2026-09-13 移進 header 的 ⚙️ 管理選單:它是改全體寫入權限的
+                系統設定、一年按不到幾次,原本是工具列上唯一的系統設定、混在檢視切換旁容易誤點。
+                開啟後下方整條琥珀橫幅照舊出現、橫幅裡就有「關閉歷史補登」→ 狀態與關閉入口都還在原地,只有「開啟」進了選單。 */}
+            {/* 「顯示 ▾」下拉(2026-09-13):原本是「展開｜收合」＋「子區間 ▾｜▸」四顆文字鈕＋兩條分隔線＝150px,
+                1366 寬時整條工具列溢出 114px 吐橫向捲軸。四個動作都是低頻的「整張表一次展開/收合」,收進一顆下拉。
+                只作用於甘特圖的群組列/子列,成果清單(單一平面表)用不到 → 隱藏。
+                ⚠ 工具列是 overflow-x-auto 容器,absolute 選單會被裁掉 → 選單用 fixed 定位,座標在點開當下從按鈕算 */}
+            {!isResults && displayMenuItems.length > 0 && (
               <>
                 <div className="h-5 w-px bg-slate-300/80 mx-1 flex-shrink-0"></div>
-                {/* px-1.5 py-1 是為了把 22×17 的文字鈕撐到 ≥24×24(WCAG 2.5.8);
-                    工具列本來就有更高的元件(緊湊模式 27px),所以這排不會因此變高 */}
-                <button onClick={() => setCollapsedOwners(new Set())} title="展開全部成員群組" className="text-blue-600 hover:text-blue-800 font-medium px-1.5 py-1 rounded">展開</button>
-                <span className="text-slate-500" aria-hidden="true">|</span>
-                <button onClick={() => setCollapsedOwners(new Set(users))} title="收合全部成員群組" className="text-blue-600 hover:text-blue-800 font-medium px-1.5 py-1 rounded">收合</button>
+                <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setDisplayMenuPos({ top: r.bottom + 6, right: window.innerWidth - r.right }); setShowDisplayMenu(v => !v); }}
+                  aria-expanded={showDisplayMenu} aria-haspopup="true"
+                  title="一次展開／收合全部成員群組或子區間"
+                  className={`px-2 py-1 rounded-lg border font-medium transition ${showDisplayMenu ? 'bg-slate-200 border-slate-400 text-slate-800' : 'bg-white ctl-raised border-slate-300 text-slate-700 hover:bg-slate-50'}`}>
+                  顯示 {showDisplayMenu ? '▴' : '▾'}
+                </button>
               </>
             )}
           </div>
+          {/* 「顯示 ▾」的選單本體放在工具列**外面**:工具列是 z-30 的 stacking context,裡面的 fixed z-[70]
+              會被壓在 z-30 這一層、蓋不過甘特的 sticky 表頭(z-50),實測選單被月份列吃掉一半。fixed 定位不吃樹的位置。 */}
+          {showDisplayMenu && (
+            <>
+              {/* 選單無輸入內容,點外關閉不會遺失資料(與 ⚙️ 管理選單同一個例外) */}
+              <div className="fixed inset-0 z-[60]" onClick={() => setShowDisplayMenu(false)}></div>
+              <div className="fixed z-[70] w-44 bg-white rounded-xl shadow-2xl modal-card border border-slate-300 py-1.5 overflow-hidden" style={{ top: displayMenuPos.top, right: displayMenuPos.right }} role="menu">
+                {displayMenuItems.map((item, i) => (
+                  <button key={item.label} role="menuitem"
+                    onClick={() => { setShowDisplayMenu(false); item.run(); }}
+                    className={`w-full text-left px-3.5 py-2 text-xs font-medium text-slate-800 hover:bg-slate-100 transition ${item.sep && i > 0 ? 'border-t border-slate-200 mt-1 pt-2.5' : ''}`}>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
           {allowRetroCheckin && (
             <div className="bg-amber-50 border-b border-amber-300 px-4 py-2 flex items-center justify-between text-xs text-amber-900 font-bold z-30">
               <div className="flex items-center gap-2">
                 <span className="text-sm">⚠️</span>
-                <span>系統已開啟「全體成員歷史進度補登與調正」豁免期：目前可對 W{String(todayWeek).padStart(2, '0')} 以前之所有歷史週次進行任務與非專案回報。</span>
+                <span>系統已開放「歷史補登」：全體成員目前可對 W{String(todayWeek).padStart(2, '0')} 以前之所有歷史週次進行任務與非專案回報。</span>
               </div>
               {role === 'manager' && (
                 <button onClick={toggleRetroCheckin} className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold shadow-sm transition">
-                  關閉豁免期
+                  關閉歷史補登
                 </button>
               )}
             </div>
@@ -2291,12 +2617,16 @@ function App() {
                 onClearAllFilters={clearAllFilters}
               />
             ) : (
-              <>
+              <div className="relative" style={{ display: 'grid', gridTemplateColumns: isOverview ? '100%' : 'max-content' }}>
               {/* 凍結欄「遮罩層」:單一不透明實色蓋住整個左側凍結區,z 介於甘特條(10)與凍結格(30)之間,
-                  徹底杜絕捲動時甘特條從欄位縫隙透出的次像素滲色(高度用負 margin 抵銷,不佔版面/不撐長捲軸) */}
+                  徹底杜絕捲動時甘特條從欄位縫隙透出的次像素滲色。
+                  ⚠ 高度必須「剛好等於表格」(2026-09-13 修):原本是 height:100000 ＋ margin-bottom:-100000,
+                  負 margin 只抵銷版面位置、**不抵銷捲動溢出**——容器 scrollHeight 實測就是 100000,群組全收合時滾輪一動整張表
+                  就被捲出畫面。現行＝遮罩與表格放同一個 grid 格(grid-area 1/1),遮罩自然被拉到與表格等高,零額外捲動。
+                  週檢視表格有固定寬(比容器寬)→ 欄用 max-content;總覽表格 width:100% → 欄用 100%。 */}
               <div aria-hidden="true" className="sticky left-0 z-20 pointer-events-none"
-                style={{ width: frozenW, height: 100000, marginBottom: -100000, background: 'var(--frozen-bg)' }}></div>
-              <table className="border-collapse bg-white" style={{ tableLayout: 'fixed', width: isOverview ? '100%' : frozenW + weeksTotal * weekW }}>
+                style={{ gridArea: '1 / 1', justifySelf: 'start', width: frozenW, background: 'var(--frozen-bg)' }}></div>
+              <table className="border-collapse bg-white" style={{ gridArea: '1 / 1', tableLayout: 'fixed', width: isOverview ? '100%' : frozenW + weeksTotal * weekW }}>
               <colgroup>
                 {!isOverview && <col style={{ width: 28 }} />}
                 {!isOverview && <col style={{ width: 42 }} />}
@@ -2356,7 +2686,7 @@ function App() {
                         <div className="font-bold text-slate-700">
                           W{String(currentWeek).padStart(2, '0')} {ownerFilter === 'all' ? '全隊' : ownerFilter}已全數回報，沒有待追蹤的項目。
                         </div>
-                        <button onClick={() => setPendingOnly(false)}
+                        <button onClick={() => setStatusFilter(null)}
                           className="px-3 py-1 rounded-lg bg-white border border-slate-400 font-bold text-slate-700 hover:bg-slate-100 transition">
                           顯示全部專案
                         </button>
@@ -2370,8 +2700,9 @@ function App() {
                   let gActive = 0, gReported = 0;
                   group.projects.forEach(p => p.tasks.forEach(t => {
                     if (t.start <= currentWeek && t.end >= currentWeek) {
-                      gActive++;
-                      if (taskLogs[t.id]?.[currentWeek]) gReported++;
+                      const wu = weekUnits(t, currentWeek, taskLogs, subLogs);   // 以回報單位計(子區間各算一個)
+                      gActive += wu.total;
+                      gReported += wu.reported;
                     }
                   }));
                   return (
@@ -2418,11 +2749,26 @@ function App() {
                         </td>
                       </tr>
 
-                      {!isCollapsed && group.projects.map((proj, idx) => (
-                        <tr key={proj.id} data-proj-row={proj.id}
-                          onDragOver={role === 'manager' && dragState && dragState.owner === group.owner ? (e) => { e.preventDefault(); if (dragOverId !== proj.id) setDragOverId(proj.id); } : undefined}
-                          onDrop={role === 'manager' && dragState ? (e) => { e.preventDefault(); handleReorderProjects(group.owner, dragState.id, proj.id); setDragState(null); setDragOverId(null); } : undefined}
-                          className={`group/row border-b border-slate-300 transition-colors ${dragOverId === proj.id && dragState && dragState.id !== proj.id ? 'border-t-2 border-t-blue-500' : ''} ${dragState && dragState.id === proj.id ? 'opacity-40' : ''}`}>
+                      {!isCollapsed && group.projects.map((proj, idx) => {
+                        // 子區間(遷移 18):掛在各計畫區間底下、可重疊,展開時以「縮排子列」逐條畫在專案列下方。
+                        // 一個子區間一列(不擠進父條、也不自動堆疊泳道):重疊區間自然成階梯、名稱在凍結欄一定讀得到。
+                        const subEntries = proj.tasks.flatMap(task => (task.subs || []).map(sub => ({ task, sub })));
+                        const subCount = subEntries.length;
+                        const subExpanded = subCount > 0 && isSubExpanded(proj.id);
+                        // 同一專案有兩條以上計畫區間都帶子區間時,子列名稱前再標父區間名,否則只靠底帶就分得出
+                        const tasksWithSubs = proj.tasks.filter(t => (t.subs || []).length > 0).length;
+                        // 拖曳排序的放下目標:專案列與它底下的子列共用同一組 handler(目標一律是 proj.id)。
+                        // ⚠ 子列在拖曳中**不能藏起來**:上方若有十幾列子區間,一開始拖整張表突然縮短,
+                        //   游標下的目標會跳成另一個專案(實際踩到)。保留子列、落在子列上=落在父專案上,版面才不動。
+                        const rowDragOver = role === 'manager' && dragState && dragState.owner === group.owner ? (e) => { e.preventDefault(); if (dragOverId !== proj.id) setDragOverId(proj.id); } : undefined;
+                        const rowDrop = role === 'manager' && dragState ? (e) => { e.preventDefault(); handleReorderProjects(group.owner, dragState.id, proj.id); setDragState(null); setDragOverId(null); } : undefined;
+                        const isDragSource = !!dragState && dragState.id === proj.id;
+                        return (
+                        <React.Fragment key={proj.id}>
+                        <tr data-proj-row={proj.id}
+                          onDragOver={rowDragOver}
+                          onDrop={rowDrop}
+                          className={`group/row border-b border-slate-300 transition-colors ${dragOverId === proj.id && dragState && !isDragSource ? 'border-t-2 border-t-blue-500' : ''} ${isDragSource ? 'opacity-40' : ''}`}>
                           {!isOverview && <td className={`text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ width: 28, minWidth: 28, maxWidth: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}>{idx + 1}</td>}
                           {!isOverview && <td className={`text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ width: 42, minWidth: 42, maxWidth: 42, left: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}>{proj.category}</td>}
                           {/* --- 嚴格設定 100% 純實色背景與絕對寬度，防止橫向捲動時甘特條穿透或重疊 --- */}
@@ -2444,6 +2790,17 @@ function App() {
                               <div className={`flex-shrink-0 px-1.5 py-0.5 mr-2 text-[9px] font-bold rounded-sm border ${PROJECT_TYPES[proj.type].chip}`}>{proj.type.toUpperCase()}</div>
                               {/* 範本 B:專案名稱近全黑+加粗,寬鬆模式 15px(預設)/緊湊 13px/總覽 12.5px */}
                               <span className={`flex-1 min-w-0 truncate font-semibold text-slate-900 ${isOverview ? 'text-[12.5px]' : isCompact ? 'text-[13px]' : 'text-[15px]'}`} title={proj.nid ? `${proj.name}\nNID：${proj.nid}` : proj.name}>{proj.name}</span>
+                              {/* 子區間展開/收合鈕:只有帶子區間的專案才出現,放在名稱**後面**(放前面會讓有/無子區間的列
+                                  類型晶片錯位)。-my-1 抵銷 py-1,列高不變、熱區 ≥24px。 */}
+                              {subCount > 0 && (
+                                <button onClick={(e) => { e.stopPropagation(); toggleSubExpanded(proj.id); }}
+                                  aria-expanded={subExpanded} aria-label={`${subExpanded ? '收合' : '展開'}子區間（${subCount} 個）`}
+                                  disabled={subSearchHits.has(proj.id)}
+                                  title={subSearchHits.has(proj.id) ? `搜尋命中此專案的子區間，已自動展開（清除搜尋後可收合）` : `${subCount} 個子區間，點擊${subExpanded ? '收合' : '展開'}`}
+                                  className="flex-shrink-0 ml-1 -my-1 px-1.5 py-1 rounded-full text-[10px] font-bold leading-none whitespace-nowrap bg-sky-100 text-sky-800 border border-sky-300 hover:bg-sky-200 transition disabled:cursor-default">
+                                  <span aria-hidden="true">{subExpanded ? '▾' : '▸'}</span> {subCount}
+                                </button>
+                              )}
                               {/* 具體產出項目(專案執行完畢後的成果)入口:已填=實色,未填=淡色;負責人與主管可編輯,其他人唯讀 */}
                               {/* 熱區:原本只有 16×12(WCAG 2.5.8 要 24×24)。垂直用 -my-1.5/py-1.5 撐開並抵銷,
                                   列高完全不變;水平改用 px-1 取代原本的 ml-1(左內距同時當作與名稱的間隔),
@@ -2493,10 +2850,16 @@ function App() {
                             {proj.tasks.map(task => {
                               const isActiveThisWeek = task.start <= currentWeek && task.end >= currentWeek;
                               const weekLog = taskLogs[task.id]?.[currentWeek];
-                              const isPending = role === 'member' && proj.owner === currentUser && isActiveThisWeek && !weekLog;
+                              // 回報單位(遷移 20):該週有進行中的子區間就以子區間為單位,父條只做彙總顯示
+                              const wu = weekUnits(task, currentWeek, taskLogs, subLogs);
+                              // 紅框＋❗畫在「回報單位」上(2026-09-13 使用者決定):子區間模式且子列展開時,待回報的是子區間、
+                              // 紅框只框子條(各自 subPending),父條不框——否則父條與子條同時亮紅,分不出到底哪條要打卡。
+                              // 子列收合時子條看不到,父條就得代為承接(維持彙總判斷),否則收合狀態下待回報訊號整個消失。
+                              const isPending = role === 'member' && proj.owner === currentUser && isActiveThisWeek && wu.reported < wu.total
+                                && !(wu.mode === 'sub' && subExpanded);
                               const deadlineSoon = isTaskDeadlineSoon(task);   // 剩 ≤2 週或已過 70% 時程 → 橘框 + ⏰(未回報紅框優先)
 
-                              const isHighlighted = task.id === highlightedTaskId;   // 團隊看板點回報格時的暫時提示
+                              const isHighlighted = task.id === highlightedTaskId && highlightedSubId == null;   // 團隊看板點回報格時的暫時提示(點的是子區間的卡就只亮子條)
                               const barClass = 'text-[#0f172a]';   // 計畫條底永遠是淺奶油色,文字固定深色(不受深色模式覆寫),投影高對比
                               const barStyle = isHighlighted ? {
                                 backgroundImage: 'repeating-linear-gradient(45deg, #DBEAFE, #DBEAFE 6px, #BFDBFE 6px, #BFDBFE 12px)',   // 淺藍高亮(僅提示用)
@@ -2510,7 +2873,15 @@ function App() {
 
                               const leftPercent = (task.start - 1) * (100 / weeksTotal);
                               const widthPercent = (task.end - task.start + 1) * (100 / weeksTotal);
-                              const logs = taskLogs[task.id] || {};
+                              // 父條上每週的色點:父層自己的紀錄照舊;子區間模式的週改畫彙總(全交＝最積極的狀態、部分＝琥珀 partial)
+                              const dots = [];
+                              for (let wn = task.start; wn <= task.end; wn++) {
+                                const st = unitsDotStatus(weekUnits(task, wn, taskLogs, subLogs));
+                                if (st) dots.push({ wn, st });
+                              }
+                              const weekLabel = !isActiveThisWeek ? '非本週區間'
+                                : wu.mode === 'sub' ? `子區間 ${wu.reported}/${wu.total} 已回報`
+                                : weekLog ? (STATUS_META[weekLog.status]?.label || '已回報') : '尚未回報';
 
                               return (
                                 <React.Fragment key={task.id}>
@@ -2518,8 +2889,8 @@ function App() {
                                       名稱要自己組:條上只畫得下截斷的文字,讀螢幕器需要「專案-計畫-週次區間-本週狀態」完整資訊。 */}
                                   <div
                                     {...clickable(
-                                      () => { setHighlightedTaskId(null); setSelectedTaskInfo({ proj, task, isActiveThisWeek, weekLog }); },
-                                      `${proj.owner} ${proj.name}｜${task.name}｜W${String(task.start).padStart(2, '0')}–W${String(task.end).padStart(2, '0')}｜W${String(currentWeek).padStart(2, '0')} ${weekLog ? STATUS_META[weekLog.status]?.label || '已回報' : isActiveThisWeek ? '尚未回報' : '非本週區間'}`,
+                                      () => { clearHighlight(); setSelectedTaskInfo({ proj, task, sub: null, origin: 'gantt' }); },
+                                      `${proj.owner} ${proj.name}｜${task.name}｜W${String(task.start).padStart(2, '0')}–W${String(task.end).padStart(2, '0')}｜W${String(currentWeek).padStart(2, '0')} ${weekLabel}`,
                                       { roving: { active: String(task.id) === String(activeRovingTaskId), group: 'gantt-bar', id: task.id, onRove: setRovingTaskId } }
                                     )}
                                     onFocus={() => setRovingTaskId(task.id)}
@@ -2529,30 +2900,33 @@ function App() {
                                     className={`absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 border rounded-sm shadow-sm ${barClass} ${isHighlighted ? 'ring-2 ring-blue-500 ring-offset-1 z-20' : isPending ? 'ring-2 ring-red-400 ring-offset-1 z-10' : deadlineSoon ? 'ring-2 ring-orange-400 ring-offset-1 z-10' : 'z-10'}`}
                                     style={{ left: `${leftPercent}%`, width: `${widthPercent}%`, top: isOverview ? 4 : 4, bottom: isOverview ? 4 : isCompact ? 8 : 10, ...barStyle }}>
                                     
-                                    {Object.entries(logs).map(([w, log]) => {
-                                      const wn = Number(w);
-                                      if (!log || wn < task.start || wn > task.end) return null;
+                                    {/* ⚠ 收合時**不要**在父條上畫子區間縮圖(2026-09-13 做過一版、同日拆掉):曾在父條頂端畫每個子區間
+                                        一段 3px teal 細帶,想讓年度總覽(預設收合)不展開也看得到子排程。使用者收合後看到「計畫區間
+                                        怎麼變成這樣」——子區間 W06–W48 幾乎與父條等長時,那條細帶讀起來是父條多了一道綠邊/壞掉,
+                                        不是「底下有子區間」。父條的樣式一律只有一種(與子條同一條規則),收合狀態靠 ▸ n 晶片與 tooltip
+                                        的子區間清單表達即可。 */}
+                                    {dots.map(({ wn, st }) => {
                                       const isCur = wn === currentWeek;
                                       return (
-                                        <div key={w}
-                                          className={`absolute bottom-0 pointer-events-none ${STATUS_META[log.status]?.dot || 'bg-blue-500'}`}
+                                        <div key={wn}
+                                          className={`absolute bottom-0 pointer-events-none ${st === 'partial' ? PARTIAL_DOT : STATUS_META[st]?.dot || 'bg-blue-500'}`}
                                           style={{
                                             left: `${((wn - task.start) / spanWeeks) * 100}%`,
                                             width: `${100 / spanWeeks}%`,
                                             height: isCur ? '5px' : '4px',
                                             opacity: isCur ? 0.95 : 0.75
-                                          }}
-                                          title={`W${w}: ${STATUS_META[log.status]?.label}${log.reporterRole === 'manager' ? ' (主管補登)' : ''}`}></div>
+                                          }}></div>
                                       );
                                     })}
                                     
-                                    {/* 年度總覽:條上不顯字(壓縮後塞不下),以色塊+tooltip 傳達;週檢視純粹顯示任務名稱 */}
-                                    {!isOverview && (
-                                      <span className={`relative z-10 truncate px-1.5 whitespace-nowrap ${isCompact ? 'text-[10px]' : 'text-[12px]'} ${textClass}`}
-                                        style={{ textShadow: '0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.75)' }}>
-                                        {isPending && '❗'}{deadlineSoon && '⏰'}{task.name}
-                                      </span>
-                                    )}
+                                    {/* 三種密度都在條上寫區間名稱(2026-09-13 起年度總覽也顯示):一列有 2~4 條時,凍結欄只有專案名、
+                                        不標字就分不出哪條是哪個階段。總覽塞不塞得下用真實資料算過——最短區間 3 週、8 成 ≥4 週,
+                                        1920 下 107/107 完整放得下、1366 開看板(週欄 12px)仍 79%,其餘靠 truncate 截斷、完整名稱在 tooltip。
+                                        總覽條內只有 14px 高,用 9px(與週次列同級)並把行高鎖 1 才不會撞到底部色點。 */}
+                                    <span className={`relative z-10 truncate whitespace-nowrap ${isOverview ? 'text-[9px] leading-none px-1' : isCompact ? 'text-[10px] px-1.5' : 'text-[12px] px-1.5'} ${textClass}`}
+                                      style={{ textShadow: '0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.75)' }}>
+                                      {isPending && '❗'}{deadlineSoon && '⏰'}{task.name}
+                                    </span>
                                   </div>
 
                                 </React.Fragment>
@@ -2560,25 +2934,129 @@ function App() {
                             })}
                           </td>
                         </tr>
-                      ))}
+
+                        {/* 子區間列:拖曳排序中照畫,掛同一組 rowDragOver/rowDrop(落在子列=落在父專案),
+                            被拖的專案其子列一併變淡、藍色目標線只畫在父列上。
+                            條的樣式不分階段(與父條一致,見 subBarStyle 說明);未開始/進行中/已結束只寫在 tooltip。
+                            不做時間百分比(時間過去≠做完);色點只在子區間打卡總開關開著時畫(見 subDots)。 */}
+                        {subExpanded && subEntries.map(({ task, sub }, subIdx) => {
+                          const subRowH = isOverview ? 16 : isCompact ? 22 : 26;
+                          const isLastSub = subIdx === subEntries.length - 1;
+                          // 名稱欄的樹狀導引線(2026-09-13,取代每列一個 └):10 筆子區間時每列都是 └ 會像每列都是最後一筆,
+                          // 父列捲出畫面後也不知道這幾列屬於誰、到哪結束。改成一條貫穿的直線,最後一列只畫到一半自然收成 └,
+                          // 群組結尾再把底線加粗一階(slate-300),與下一個專案列分開。純 CSS、不進 state。
+                          const subIndent = isOverview ? 16 : 40;
+                          const guideX = subIndent - 10;
+                          const phase = sub.end < todayWeek ? 'done' : sub.start > todayWeek ? 'future' : 'active';
+                          const phaseLabel = phase === 'done' ? '已結束' : phase === 'future' ? '未開始' : '進行中';
+                          // 條色與父條一樣走行內固定色(淺底深字,不受深色模式覆寫),投影高對比。
+                          // ⚠ 子條用 **teal(青綠)色系**、與父條的琥珀色明確分開(2026-09-13 使用者決定,推翻同日稍早的「沿用父條琥珀色」):
+                          //   同色系版實測「一眼望去看不出來是什麼」——子條與父條、奶油底帶全是黃的,只差深淺根本分不出層級。
+                          //   色相挑 teal 是因為圖上其他顏色都已有語意:琥珀＝計畫區間、藍＝看板高亮/按鈕、綠/天藍＝回報狀態色點、
+                          //   紅＝待回報/當週線、紫＝主管回覆;teal 沒人用,且與看板高亮的 #DBEAFE 藍分得開(點看板時只有那條變藍)。
+                          //   ⚠ **一種樣式、不分階段**(2026-09-13 使用者兩次回報後定案):斜紋 #CCFBF1/#BDF7EC＋1px rgba(15,118,110,.75) 框,
+                          //   與父條**完全同一種構造**(同紋距、同框粗細、同透明度)只換色相。之前依「今天」分三階段
+                          //   (未開始虛線／進行中實心→斜紋深框／已結束淡斜紋淡框),使用者看到上下兩個專案的子條顏色不同,
+                          //   直覺是「顏色不一致＝壞掉」而不是「一個進行中一個已結束」——父條本來就不分階段(W01 的區間到年底
+                          //   照樣奶油斜紋),子條單獨分只會多一套要學的語彙。階段資訊留在 tooltip 的 phaseLabel。
+                          //   ⚠ 也不用實心(更早一版是 #99F6E4 實心):全圖唯一一條實心飽和色會被讀成「進度填色/做完了」。
+                          //   ⚠ **暗條用 #BDF7EC 不用 #99F6E4**(2026-09-13 使用者:子條看起來比父條重、主從層次反了):兩條斜紋的亮度差
+                          //   父條只有 0.03(#FFF6D6/#FDEDB8)、子條原本 0.10(#CCFBF1/#99F6E4)＝3 倍,紋路太吵才顯得搶眼;
+                          //   亮條與邊框的深度本來就跟父條一樣。改 #BDF7EC 後 ΔL=0.05 與父條同量級。**不要整條調淺**:
+                          //   亮條 #CCFBF1(L .88)跟底下的奶油底帶(L≈.92)只差 .04,再淺就融進底帶;子條是打卡入口,變淡會像不能點。
+                          //   主從層次由 └ 縮排、子列位置、父區間底帶表達,顏色只要「不搶」就夠。
+                          //   對比:#0f172a 字在 #BDF7EC/#CCFBF1 上≈14+、teal-700 框對白底 5.5,投影 OK。
+                          const subHighlighted = sub.id === highlightedSubId;   // 看板點「這條子區間」的卡才亮這條(父條與其他子條不亮)
+                          const subBarStyle = subHighlighted
+                            ? { backgroundColor: '#DBEAFE', borderColor: '#2563EB', borderStyle: 'solid', borderWidth: 1.5 }
+                            : { backgroundImage: 'repeating-linear-gradient(45deg, #CCFBF1, #CCFBF1 6px, #BDF7EC 6px, #BDF7EC 12px)', borderColor: 'rgba(15,118,110,0.75)', borderStyle: 'solid' };
+                          // 子區間自遷移 20 起是回報單位:該週落在範圍內、父層那週沒有舊紀錄 → 這條子區間本週要打卡
+                          const subActiveThisWeek = sub.start <= currentWeek && sub.end >= currentWeek;
+                          const parentWu = weekUnits(task, currentWeek, taskLogs, subLogs);
+                          const subLog = subLogs[sub.id]?.[currentWeek];
+                          const subIsUnit = subActiveThisWeek && parentWu.mode === 'sub';
+                          const subPending = role === 'member' && proj.owner === currentUser && subIsUnit && !subLog;
+                          const rangeText = `W${String(sub.start).padStart(2, '0')}–W${String(sub.end).padStart(2, '0')}`;
+                          const subWeekLabel = subIsUnit ? (subLog ? STATUS_META[subLog.status]?.label || '已回報' : '尚未回報') : phaseLabel;
+                          const subTitle = `${task.name} › ${sub.name}（${rangeText}・${phaseLabel}）${subIsUnit ? `｜W${String(currentWeek).padStart(2, '0')} ${subWeekLabel}` : ''}`;
+                          const openSub = () => { clearHighlight(); setSelectedTaskInfo({ proj, task, sub, origin: 'gantt' }); };
+                          // 總開關關著時不畫子區間的色點(那時回報單位是父區間,色點畫在父條上;舊的子區間回報留在 DB 不顯示)
+                          const subDots = !SUB_CHECKIN ? [] : Object.entries(subLogs[sub.id] || {}).map(([w, l]) => ({ wn: Number(w), st: l.status })).filter(d => d.wn >= sub.start && d.wn <= sub.end);
+                          const subSpan = sub.end - sub.start + 1;
+                          const subRovingId = `s${sub.id}`;
+                          return (
+                            <tr key={`sub-${sub.id}`} data-sub-row={sub.id} onDragOver={rowDragOver} onDrop={rowDrop}
+                              className={`group/row border-b ${isLastSub ? 'border-slate-300' : 'border-slate-200'} ${isDragSource ? 'opacity-40' : ''}`}>
+                              {!isOverview && <td className="sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300" style={{ width: 28, minWidth: 28, maxWidth: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}></td>}
+                              {!isOverview && <td className="sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300" style={{ width: 42, minWidth: 42, maxWidth: 42, left: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}></td>}
+                              <td className="sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 p-0" style={{ width: nameW, minWidth: nameW, maxWidth: nameW, left: isOverview ? 0 : STICKY_LEAD_W, boxShadow: '2px 0 0 0 var(--frozen-bg), 4px 0 8px rgba(0,0,0,0.08)' }}>
+                                <div className="relative w-full h-full flex items-center overflow-hidden pr-2" style={{ paddingLeft: subIndent }}>
+                                  {/* 直線:非最後一列貫穿整列、最後一列只到一半;橫向短線接到名稱 */}
+                                  <div aria-hidden="true" className="absolute border-l border-slate-400 pointer-events-none" style={{ left: guideX, top: 0, bottom: isLastSub ? '50%' : 0 }}></div>
+                                  <div aria-hidden="true" className="absolute border-t border-slate-400 pointer-events-none" style={{ left: guideX, width: 7, top: '50%' }}></div>
+                                  {tasksWithSubs > 1 && (
+                                    <span className="flex-shrink-0 mr-1.5 px-1 rounded text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-300 truncate" style={{ maxWidth: 88 }} title={`所屬計畫區間：${task.name}`}>{task.name}</span>
+                                  )}
+                                  <span className={`flex-1 min-w-0 truncate text-slate-700 ${isOverview ? 'text-[11px]' : isCompact ? 'text-[11px]' : 'text-[12px]'}`} title={subTitle}>{sub.name}</span>
+                                </div>
+                              </td>
+                              <td colSpan={weeksTotal} className="p-0 relative" style={{ height: subRowH }}>
+                                <div className="absolute inset-0 flex pointer-events-none z-0">
+                                  {Array.from({ length: weeksTotal }).map((_, i) => (
+                                    <div key={i} className={`flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-50/70' : ''}`}></div>
+                                  ))}
+                                </div>
+                                {/* 父區間範圍的淡色底帶:子條落在帶子裡,一眼看出屬於哪條計畫區間 */}
+                                <div className="absolute top-0 bottom-0 z-0 pointer-events-none"
+                                  style={{ left: `${(task.start - 1) * (100 / weeksTotal)}%`, width: `${(task.end - task.start + 1) * (100 / weeksTotal)}%`, backgroundColor: 'var(--gantt-sub-band)' }}></div>
+                                <div className="absolute top-0 bottom-0 z-10 pointer-events-none" style={{ left: `${(currentWeek - 0.5) * (100 / weeksTotal)}%`, borderLeft: '2px solid rgba(220,38,38,0.55)' }}></div>
+                                {/* 點子條＝開啟彈窗並直接停在「這個子區間」的回報(遷移 20 起子區間是打卡入口,故與父條一樣進 roving 群組,↑↓ 可到)。
+                                    色點＝該子區間各週的回報;本週該交沒交 → 紅框＋❗(與父條同一套語彙)。 */}
+                                <div
+                                  {...clickable(openSub, `${proj.owner} ${proj.name}｜${subTitle}`,
+                                    { roving: { active: String(subRovingId) === String(activeRovingTaskId), group: 'gantt-bar', id: subRovingId, onRove: setRovingTaskId } })}
+                                  onFocus={() => setRovingTaskId(subRovingId)}
+                                  // hover 回饋與 tooltip 都比照父條(2026-09-13):子條是打卡入口,原本滑過去毫無反應、只有原生 title
+                                  // (延遲 1 秒、不顯示回報內容),使用者會覺得「父條會動、子條不會動＝不能點」。
+                                  // 原生 title 拿掉:自訂 tooltip 已涵蓋,兩個同時出現會疊在一起。
+                                  onMouseEnter={(e) => showTooltip(e, proj, task, sub)}
+                                  onMouseMove={moveTooltip}
+                                  onMouseLeave={hideTooltip}
+                                  className={`absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 border rounded-sm shadow-sm text-[#0f172a] ${subHighlighted ? 'ring-2 ring-blue-500 ring-offset-1 z-20' : subPending ? 'ring-2 ring-red-400 ring-offset-1 z-20' : 'z-10'}`}
+                                  style={{ left: `${(sub.start - 1) * (100 / weeksTotal)}%`, width: `${(sub.end - sub.start + 1) * (100 / weeksTotal)}%`, top: isOverview ? 3 : 4, bottom: isOverview ? 3 : 4, ...subBarStyle }}>
+                                  {subDots.map(({ wn, st }) => (
+                                    <div key={wn} className={`absolute bottom-0 pointer-events-none ${STATUS_META[st]?.dot || 'bg-blue-500'}`}
+                                      style={{ left: `${((wn - sub.start) / subSpan) * 100}%`, width: `${100 / subSpan}%`, height: wn === currentWeek ? '4px' : '3px', opacity: wn === currentWeek ? 0.95 : 0.75 }}></div>
+                                  ))}
+                                  {!isOverview && (
+                                    <span className={`relative z-10 truncate px-1.5 whitespace-nowrap font-medium ${isCompact ? 'text-[10px]' : 'text-[11px]'}`}>{subPending && '❗'}{sub.name}</span>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        </React.Fragment>
+                        );
+                      })}
                     </React.Fragment>
                   );
                 })}
               </tbody>
             </table>
-              </>
+              </div>
             )}
           </div>
           </div>
           {/* 團隊總結看板:右窗格(非 fixed 疊層),與左窗格並排,不會蓋到任何控制項 */}
           {showWeeklyReport && (
             <WeeklyReportDashboard
-              currentWeek={currentWeek} year={scheduleYear} users={users} projects={projects} taskLogs={taskLogs} extraNotes={extraNotes}
+              currentWeek={currentWeek} year={scheduleYear} users={users} projects={projects} taskLogs={taskLogs} subLogs={subLogs} extraNotes={extraNotes}
               weeklyPlans={weeklyPlans} weeklyComments={weeklyComments}
               extraNoteMeta={extraNoteMeta} weeklyPlanMeta={weeklyPlanMeta} weeklyCommentMeta={weeklyCommentMeta}
-              currentUser={currentUser} role={role} panelWidth={reportPanelW}
-              highlightedTaskId={highlightedTaskId} onHighlightTask={handleHighlightTask}
-              onEditComment={(userName) => setCommentTarget(userName)}
+              currentUser={currentUser} role={role} panelWidth={reportPanelW} todayWeek={todayWeek} isFutureWeek={isFutureWeek}
+              highlightedTaskId={highlightedTaskId} highlightedSubId={highlightedSubId} onHighlightTask={handleHighlightTask}
+              onEditComment={!isFutureWeek ? (userName) => setCommentTarget(userName) : undefined}
               onClose={closeWeeklyReport}
             />
           )}
@@ -2586,8 +3064,7 @@ function App() {
       )}
 
       {tooltip && (
-        <div className="fixed z-[200] pointer-events-none"
-          style={{ left: Math.min(tooltip.x + 14, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 300), top: Math.min(tooltip.y + 14, (typeof window !== 'undefined' ? window.innerHeight : 800) - 200) }}>
+        <div ref={tooltipRefCb} className="fixed z-[200] pointer-events-none">
           <div className="bg-slate-900/95 text-white rounded-lg shadow-xl px-3.5 py-3 text-xs max-w-xs border border-slate-700">
             <div className="font-bold text-[13px] mb-1 text-yellow-200">{tooltip.proj.name}</div>
             <div className="text-slate-400 mb-0.5">👤 {tooltip.proj.owner}　·　{tooltip.proj.category}</div>
@@ -2597,16 +3074,70 @@ function App() {
             <div className="text-slate-400">📅 {tooltip.task.name}</div>
             {tooltip.task.nid && <div className="text-slate-500">🔖 區間 NID：{tooltip.task.nid}</div>}
             <div className="text-slate-500">W{tooltip.task.start} – W{tooltip.task.end}（{weekToMonth(tooltip.task.start, months)} ~ {weekToMonth(tooltip.task.end, months)}）</div>
+            {/* 子區間清單:收合狀態下不必展開也看得到底下切了什麼、各到哪 */}
+            {(tooltip.task.subs || []).length > 0 && (
+              <div className="mt-1 pl-2 border-l border-slate-600 space-y-0.5">
+                {tooltip.task.subs.map(s => {
+                  const ph = s.end < todayWeek ? '已結束' : s.start > todayWeek ? '未開始' : '進行中';
+                  const isHovered = tooltip.subInfo?.sub.id === s.id;   // 滑的是子條時標出「就是這條」
+                  return (
+                    <div key={s.id} className={isHovered ? 'text-teal-200 font-bold' : ph === '進行中' ? 'text-sky-200' : 'text-slate-400'}>
+                      {isHovered ? '▸' : '└'} {s.name}　W{s.start}–W{s.end}・{ph}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {/* 滑的是子條:這條子區間自己的本週狀態＋歷史(與父條的區塊同一套版面,只是資料來自 subLogs) */}
+            {tooltip.subInfo && (() => {
+              const { sub, isUnit, log, history: subHistory } = tooltip.subInfo;
+              return (
+                <div className="mt-2 pt-2 border-t border-teal-700/70">
+                  <div className="font-bold text-teal-200 mb-0.5">└ {sub.name}</div>
+                  {log ? (
+                    <>
+                      <div className="font-bold">
+                        {STATUS_META[log.status]?.icon} 本週 W{currentWeek}：{STATUS_META[log.status]?.label}
+                        {log.reporterRole === 'manager' && <span className="ml-1 text-yellow-300 text-[11px]">✏️(主管補登)</span>}
+                      </div>
+                      {log.note && <div className="text-slate-400 whitespace-pre-wrap">{log.note}</div>}
+                      {log.docUrl && <div className="text-sky-300 mt-0.5">📎 已附文件連結</div>}
+                    </>
+                  ) : isUnit ? (
+                    <div className="text-amber-300">❗ 本週 W{currentWeek} 尚未回報</div>
+                  ) : (
+                    <div className="text-slate-500">{sub.end < todayWeek ? '已結束' : sub.start > todayWeek ? '未開始' : '本週非此子區間的回報單位'}</div>
+                  )}
+                  {subHistory.length > 0 && (
+                    <div className="mt-1 text-slate-500">
+                      歷史回報：{subHistory.map(([w, l]) => `W${w}${STATUS_META[l.status]?.icon || ''}`).join('　')}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {isTaskDeadlineSoon(tooltip.task) && (
               <div className="mt-1 text-orange-300 font-bold">
                 ⏰ 排程即將到期：剩 {tooltip.task.end - todayWeek + 1} 週
                 （時程已過 {Math.round(((todayWeek - tooltip.task.start + 1) / (tooltip.task.end - tooltip.task.start + 1)) * 100)}%）
               </div>
             )}
+            {/* 子區間模式:本週的回報單位是子區間,逐條列出各自的狀態(父層沒有自己的紀錄) */}
+            {tooltip.wu?.mode === 'sub' && (
+              <div className="mt-2 pt-2 border-t border-slate-700">
+                <div className="font-bold mb-0.5">本週 W{currentWeek}：子區間 {tooltip.wu.reported}/{tooltip.wu.total} 已回報</div>
+                {tooltip.wu.units.map(({ sub, log }) => (
+                  <div key={sub.id} className={`${log ? 'text-slate-300' : 'text-amber-300'} ${tooltip.subInfo?.sub.id === sub.id ? 'font-bold' : ''}`}>
+                    {tooltip.subInfo?.sub.id === sub.id ? '▸' : '└'} {sub.name}：{log ? `${STATUS_META[log.status]?.icon} ${STATUS_META[log.status]?.label}${log.note ? '－' + log.note : ''}` : '❗尚未回報'}
+                  </div>
+                ))}
+              </div>
+            )}
             {tooltip.weekLog && (
               <div className="mt-2 pt-2 border-t border-slate-700">
                 <div className="font-bold mb-0.5">
                   {STATUS_META[tooltip.weekLog.status]?.icon} 本週 W{currentWeek}：{STATUS_META[tooltip.weekLog.status]?.label}
+                  {tooltip.wu?.legacy && <span className="ml-1 text-slate-400 text-[11px]">（以計畫區間回報）</span>}
                   {tooltip.weekLog.reporterRole === 'manager' && <span className="ml-1 text-yellow-300 text-[11px]">✏️(主管補登)</span>}
                 </div>
                 {tooltip.weekLog.note && <div className="text-slate-400 whitespace-pre-wrap">{tooltip.weekLog.note}</div>}
@@ -2628,16 +3159,18 @@ function App() {
       {selectedTaskInfo && (
         <TaskModal
           info={selectedTaskInfo} role={role} currentUser={currentUser} currentWeek={currentWeek} todayWeek={todayWeek}
+          isReportingWeek={isReportingWeek} isFutureWeek={isFutureWeek}
           weeksTotal={weeksTotal} allowRetroCheckin={allowRetroCheckin}
-          logs={taskLogs[selectedTaskInfo.task.id] || {}}
+          logs={taskLogs[selectedTaskInfo.task.id] || {}} subLogs={subLogs}
           onClose={() => setSelectedTaskInfo(null)} onSaveLog={handleSaveLog} onUpdateTaskDetails={handleUpdateTaskDetails}
           onDeleteTask={handleDeleteTask} onUpdateScore={handleUpdateScore}
+          onUpsertSub={handleUpsertSub} onDeleteSub={handleDeleteSub}
         />
       )}
       {showExtraNoteModal && (
         <ExtraNoteModal
           currentWeek={currentWeek} initialNote={extraNotes[noteTargetUser || currentUser]?.[currentWeek] || ''}
-          readOnly={role !== 'manager' && isViewingPast && !allowRetroCheckin}
+          readOnly={isFutureWeek || (role !== 'manager' && isViewingPast && !allowRetroCheckin)} future={isFutureWeek}
           targetUser={noteTargetUser}
           meta={extraNoteMeta[noteTargetUser || currentUser]?.[currentWeek]}
           onClose={() => { setShowExtraNoteModal(false); setNoteTargetUser(null); }} onSave={handleSaveExtraNote}
@@ -2645,8 +3178,8 @@ function App() {
       )}
       {showWeeklyPlanModal && (
         <WeeklyPlanModal
-          currentWeek={currentWeek} initialNote={weeklyPlans[noteTargetUser || currentUser]?.[currentWeek] || ''}
-          readOnly={role !== 'manager' && isViewingPast && !allowRetroCheckin}
+          currentWeek={currentWeek} weeksTotal={weeksTotal} initialNote={weeklyPlans[noteTargetUser || currentUser]?.[currentWeek] || ''}
+          readOnly={isFutureWeek || (role !== 'manager' && isViewingPast && !allowRetroCheckin)} future={isFutureWeek}
           targetUser={noteTargetUser}
           meta={weeklyPlanMeta[noteTargetUser || currentUser]?.[currentWeek]}
           onClose={() => { setShowWeeklyPlanModal(false); setNoteTargetUser(null); }} onSave={handleSaveWeeklyPlan}
@@ -2659,19 +3192,15 @@ function App() {
           onSelect={(item) => {
             setShowDeadlinePanel(false);
             setScrollTargetWeek(Math.min(item.task.end, weeksTotal));   // 捲動定位到該任務結束週
-            setSelectedTaskInfo({
-              proj: item.proj, task: item.task,
-              isActiveThisWeek: item.task.start <= currentWeek && item.task.end >= currentWeek,
-              weekLog: taskLogs[item.task.id]?.[currentWeek]
-            });
+            setSelectedTaskInfo({ proj: item.proj, task: item.task, sub: null });
           }}
         />
       )}
-      {showPendingPanel && (
+      {showPendingPanel && isCurrentYear && (
         <PendingPanel
           pending={myPendingTasks}
           completed={myCompletedTasks}
-          currentWeek={todayWeek}
+          currentWeek={todayWeek} weeksTotal={weeksTotal}
           planPending={planPendingThisWeek}
           extraFilled={!!extraNotes[currentUser]?.[todayWeek]}
           planMeta={weeklyPlanMeta[currentUser]?.[todayWeek]}
@@ -2687,10 +3216,10 @@ function App() {
             setShowExtraNoteModal(true);
           }}
           onClose={() => setShowPendingPanel(false)}
-          onSelect={(item, log) => {
+          onSelect={(item) => {
             setShowPendingPanel(false);
             setCurrentWeek(todayWeek);
-            setSelectedTaskInfo({ proj: item.proj, task: item.task, isActiveThisWeek: true, weekLog: log });
+            setSelectedTaskInfo({ proj: item.proj, task: item.task, sub: item.sub || null });
           }}
         />
       )}
@@ -2699,7 +3228,7 @@ function App() {
         <PendingPanel retro
           pending={myRetroPendingTasks}
           completed={myRetroCompletedTasks}
-          currentWeek={currentWeek}
+          currentWeek={currentWeek} weeksTotal={weeksTotal}
           planPending={!weeklyPlans[currentUser]?.[currentWeek]}
           extraFilled={!!extraNotes[currentUser]?.[currentWeek]}
           planMeta={weeklyPlanMeta[currentUser]?.[currentWeek]}
@@ -2707,22 +3236,22 @@ function App() {
           onFillPlan={() => { setShowRetroPanel(false); setShowWeeklyPlanModal(true); }}
           onFillExtra={() => { setShowRetroPanel(false); setShowExtraNoteModal(true); }}
           onClose={() => setShowRetroPanel(false)}
-          onSelect={(item, log) => {
+          onSelect={(item) => {
             setShowRetroPanel(false);
-            setSelectedTaskInfo({ proj: item.proj, task: item.task, isActiveThisWeek: true, weekLog: log });
+            setSelectedTaskInfo({ proj: item.proj, task: item.task, sub: item.sub || null });
           }}
         />
       )}
       {/* 主管:週次回報編輯面板(選成員後代為補登/修正該週回報,並可編輯主管回覆) */}
-      {showWeekEditPanel && role === 'manager' && (
+      {showWeekEditPanel && role === 'manager' && !isFutureWeek && (
         <ManagerWeekPanel
-          week={currentWeek} todayWeek={todayWeek} users={users} projects={projects}
-          taskLogs={taskLogs} extraNotes={extraNotes} weeklyPlans={weeklyPlans} weeklyComments={weeklyComments}
+          week={currentWeek} historical={!isReportingWeek} users={users} projects={projects}
+          taskLogs={taskLogs} subLogs={subLogs} extraNotes={extraNotes} weeklyPlans={weeklyPlans} weeklyComments={weeklyComments}
           extraNoteMeta={extraNoteMeta} weeklyPlanMeta={weeklyPlanMeta} weeklyCommentMeta={weeklyCommentMeta}
           onClose={() => setShowWeekEditPanel(false)}
-          onSelectTask={(proj, task, log) => {
+          onSelectTask={(proj, task, sub) => {
             setShowWeekEditPanel(false);
-            setSelectedTaskInfo({ proj, task, isActiveThisWeek: true, weekLog: log });
+            setSelectedTaskInfo({ proj, task, sub: sub || null });
           }}
           onEditExtra={(u) => { setShowWeekEditPanel(false); setNoteTargetUser(u); setShowExtraNoteModal(true); }}
           onEditPlan={(u) => { setShowWeekEditPanel(false); setNoteTargetUser(u); setShowWeeklyPlanModal(true); }}
@@ -2810,11 +3339,11 @@ function App() {
 // 投影友善:晶片加邊框確保輪廓、標籤文字不再用透明度淡化(投影機對比打折,淡字會消失)
 // 統計晶片。給 onToggle 就變成可切換的篩選鈕(用 <button>,鍵盤與讀螢幕器自然支援,
 // 不需要另外套 clickable();aria-pressed 才播報得出「已按下/未按下」的切換語意)。
-function StatChip({ label, value, className, onToggle, active = false, title }) {
+function StatChip({ label, value, className, onToggle, active = false, title, ringClass = 'ring-yellow-600' }) {
   const base = `flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border ${className}`;
   if (!onToggle) {
     return (
-      <span className={base}>
+      <span className={base} title={title}>
         <span className="font-medium text-[11px]">{label}</span>
         <span className="text-[13px] leading-none">{value}</span>
       </span>
@@ -2822,7 +3351,7 @@ function StatChip({ label, value, className, onToggle, active = false, title }) 
   }
   return (
     <button onClick={onToggle} aria-pressed={active} title={title}
-      className={`${base} transition ${active ? 'ring-2 ring-offset-1 ring-yellow-600' : 'hover:brightness-95'}`}>
+      className={`${base} transition ${active ? `ring-2 ring-offset-1 ${ringClass}` : 'hover:brightness-95'}`}>
       <span className="font-medium text-[11px]">{label}</span>
       <span className="text-[13px] leading-none">{value}</span>
       {active && <span className="text-[11px] font-black" aria-hidden="true">✕</span>}
@@ -2891,13 +3420,13 @@ function ErrorScreen({ message, onRetry }) {
 }
 
 // 瀏覽權限未通過的整頁封鎖畫面(卡控啟用時取代整個 App,不顯示登入與資料)
-function AccessDeniedScreen({ empId, reason, person }) {
+function AccessDeniedScreen({ empId, reason, person, siteTitle = '專案追蹤總表' }) {
   return (
     <div className="min-h-screen flex justify-center items-center bg-slate-100 app-bg p-4">
       <div className="bg-white p-10 rounded-2xl shadow-2xl modal-card border border-red-200 max-w-md w-full text-center">
         <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl">🚫</div>
         <h2 className="text-xl font-black text-slate-800 mb-2">無權限瀏覽此頁面</h2>
-        <p className="text-sm text-slate-500 mb-4">您的帳號未被授權瀏覽 MSD 專案追蹤總表。</p>
+        <p className="text-sm text-slate-500 mb-4">您的帳號未被授權瀏覽 {siteTitle}。</p>
         <div className="text-left text-sm bg-slate-100 border border-slate-300 rounded-lg p-4 mb-4 space-y-1.5">
           <div><span className="text-slate-500 font-bold mr-2">登入工號</span><span className="font-mono font-bold text-slate-800">{empId || '（無法取得）'}</span></div>
           {person && (
@@ -2915,13 +3444,13 @@ function AccessDeniedScreen({ empId, reason, person }) {
   );
 }
 
-function LoginScreen({ onLogin, users, year, empId }) {
+function LoginScreen({ onLogin, users, year, empId, siteName = '' }) {
   return (
     <div className="flex-1 flex justify-center items-center bg-slate-100 login-bg p-4">
       <div className="bg-white p-10 rounded-2xl shadow-2xl modal-card dark:shadow-none border border-slate-300 max-w-md w-full">
         <div className="text-center mb-8">
           <div className="w-16 h-16 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg text-2xl" style={{ backgroundColor: 'var(--brand-btn, #001F5B)' }}>📊</div>
-          <h2 className="text-2xl font-black text-slate-800">MSD 專案追蹤系統</h2>
+          <h2 className="text-2xl font-black text-slate-800">{siteName ? `${siteName} ` : ''}專案追蹤系統</h2>
           <p className="text-xs text-slate-500 mt-2">{year} 年度專案排程 · 週進度管控</p>
         </div>
         <button onClick={() => onLogin('管理部主管', 'manager')} className="w-full text-white font-bold py-3.5 rounded-xl mb-6 shadow-md transition hover:opacity-90" style={{ backgroundColor: 'var(--brand-btn, #001F5B)' }}>👑 主管登入（調整排程 / 檢視全體）</button>
@@ -2957,18 +3486,36 @@ const SCORE_OPTIONS = [
   { value: 1, label: '主動承擔' }
 ];
 
-function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal = WEEKS_TOTAL, allowRetroCheckin, logs = {}, onClose, onSaveLog, onUpdateTaskDetails, onDeleteTask, onUpdateScore }) {
+// isReportingWeek／isFutureWeek 由 App 統一判斷(含「非本年度沒有本週」),這裡不要再拿 currentWeek 跟 todayWeek 比;
+// todayWeek 只拿來標子區間的「未開始／進行中／已結束」。
+function TaskModal({ info, role, currentUser, currentWeek, todayWeek, isReportingWeek = currentWeek === todayWeek, isFutureWeek = currentWeek > todayWeek, weeksTotal = WEEKS_TOTAL, allowRetroCheckin, logs = {}, subLogs = {}, onClose, onSaveLog, onUpdateTaskDetails, onDeleteTask, onUpdateScore, onUpsertSub, onDeleteSub }) {
   const focus = useModalFocus();   // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
-  const { proj, task, isActiveThisWeek, weekLog } = info;
+  const { proj, task } = info;
   const isManager = role === 'manager';
   const isMyTask = proj.owner === currentUser;
-  const isReportingWeek = currentWeek === todayWeek;
-  const canClockIn = (isManager && isActiveThisWeek) || (role === 'member' && isMyTask && isActiveThisWeek && (isReportingWeek || (allowRetroCheckin && currentWeek <= todayWeek)));
-  const score = weekLog ? Number(weekLog.score ?? 1) : 0;
+  const canEditSubs = isManager || isMyTask;   // 子區間=負責人自己的工作拆解,負責人與主管皆可編輯(SP 內同樣檢查)
+  const subs = task.subs || [];
+  // 本週狀態一律從 props 現算(不吃開窗時的快照):評分／存檔後父層會更新 logs／subLogs,彈窗才跟得上
+  const isActiveThisWeek = task.start <= currentWeek && task.end >= currentWeek;
+  const weekLog = logs[currentWeek];
+  // 回報單位(遷移 20):該週有進行中的子區間 → 逐個子區間回報;info.sub 是從子條／清單點進來時要直接停在的那一個
+  const wu = weekUnits(task, currentWeek, { [task.id]: logs }, subLogs);
+  const [unitSubId, setUnitSubId] = useState(() => info.sub?.id ?? (wu.mode === 'sub' ? (wu.units.find(u => !u.log) || wu.units[0]).sub.id : null));
+  const unitSub = wu.mode === 'sub' ? (wu.units.find(u => u.sub.id === unitSubId) || wu.units[0]).sub : null;
+  const unitLog = unitSub ? subLogs[unitSub.id]?.[currentWeek] : weekLog;
+  // 未來週次一律不可回報(主管也不行,2026-09-12 使用者決定:系統是檢視「過去到現在」的狀態;後端同樣擋)
+  const canClockIn = !isFutureWeek && ((isManager && isActiveThisWeek) || (role === 'member' && isMyTask && isActiveThisWeek && (isReportingWeek || allowRetroCheckin)));
+  // 版面順序依「從哪裡開的」決定(2026-09-13 使用者要求):從**甘特條**點進來＝在看排程 → 排程與子區間置頂、回報放最下面;
+  // 從回報面板(本週回報中心／補登面板／主管 🛠)點進來＝要打卡 → 回報置頂。
+  // ⚠ 唯一例外:成員點自己「本週可打卡」的條——甘特條本來就是成員最常用的打卡入口(回報中心是第二條路),
+  //   這種情況仍回報置頂,否則成員每次打卡都得先捲過排程卡。
+  const openedFromGantt = info.origin === 'gantt';
+  const scheduleFirst = openedFromGantt && !(role === 'member' && canClockIn);
+  const score = unitLog ? Number(unitLog.score ?? 1) : 0;
 
-  const [status, setStatus] = useState(weekLog?.status || null);
-  const [note, setNote] = useState(weekLog?.note || '');
-  const [docUrl, setDocUrl] = useState(weekLog?.docUrl || '');   // 本週回報對應的文件連結(選填)
+  const [status, setStatus] = useState(unitLog?.status || null);
+  const [note, setNote] = useState(unitLog?.note || '');
+  const [docUrl, setDocUrl] = useState(unitLog?.docUrl || '');   // 本週回報對應的文件連結(選填)
   const [taskName, setTaskName] = useState(task.name);
   const [startWeek, setStartWeek] = useState(task.start);
   const [endWeek, setEndWeek] = useState(task.end);
@@ -2986,12 +3533,24 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
   // 此計畫區間「本週之前」的歷次回報,新到舊。
   // 寫本週回報時最需要的參考就是「上週寫到哪、狀態是什麼」,原本只有甘特條 hover tooltip 看得到 →
   // 使用者得先關掉這個彈窗、去甘特條上 hover、記住內容、再開回來。資料本來就在 client 端(taskLogs),不需要再打 API。
-  const history = useMemo(() =>
-    Object.entries(logs)
-      .map(([w, log]) => ({ week: Number(w), log }))
-      .filter(h => h.week < currentWeek && h.log)
-      .sort((a, b) => b.week - a.week)
-  , [logs, currentWeek]);
+  // 歷史跟著回報單位走:子區間看自己的歷史(它才是連續的那條線);父層歷史另存,子區間第一次打卡時「沿用上次」退回去用它
+  const toHistory = (map) => Object.entries(map || {})
+    .map(([w, log]) => ({ week: Number(w), log }))
+    .filter(h => h.week < currentWeek && h.log)
+    .sort((a, b) => b.week - a.week);
+  const parentHistory = useMemo(() => toHistory(logs), [logs, currentWeek]);
+  const history = useMemo(() => unitSub ? toHistory(subLogs[unitSub.id]) : parentHistory, [unitSub?.id, subLogs, parentHistory, currentWeek]);
+  const reuseSource = history[0] || (unitSub ? parentHistory[0] : null);   // 子區間沒有自己的歷史時退回計畫區間的上一次
+
+  // 回報表單是否動過(切換回報單位前要擋:表單只有一份,切過去會把打到一半的內容換掉)
+  const reportDirty = () => status !== (unitLog?.status || null) || note !== (unitLog?.note || '') || docUrl !== (unitLog?.docUrl || '');
+  const switchUnit = (id) => {
+    if (id === unitSubId || reportDirty()) return;
+    setUnitSubId(id);
+    const l = subLogs[id]?.[currentWeek];
+    setStatus(l?.status || null); setNote(l?.note || ''); setDocUrl(l?.docUrl || '');
+    setNoteError(''); setDocError('');
+  };
   // 展開後直接列出全部:原本還有一層「先 3 週、再顯示全部」的中間狀態,改成預設收合之後
   // 會變成「展開 → 再按顯示全部」兩次點擊才看得到完整歷史。清單本身有 max-h-56 內部捲動撐著,
   // 一次全列不會把版面推爆,所以收掉那層中間狀態,只留「收合 ⇄ 展開」兩態。
@@ -3018,7 +3577,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
     if (dErr) { setDocError(dErr); return; }
     if (doc !== docUrl) setDocUrl(doc);   // 補過 scheme 的話同步回欄位,使用者看得到送出的是什麼
     setSaving(true);
-    try { await onSaveLog(task.id, status, note.trim(), doc); } finally { setSaving(false); }
+    try { await onSaveLog(task.id, unitSub?.id ?? null, status, note.trim(), doc); } finally { setSaving(false); }
   };
 
   const submitSchedule = async () => {
@@ -3026,68 +3585,244 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
     const s = parseInt(startWeek), e = parseInt(endWeek);
     if (!taskName.trim()) { setScheduleError('任務名稱不可空白'); return; }
     if (isNaN(s) || isNaN(e) || s < 1 || e > weeksTotal || s > e) { setScheduleError(`週次需介於 1–${weeksTotal}，且開始週不可晚於結束週`); return; }
+    // 父區間縮短時不可讓子區間跑出範圍(SP 也會擋,這裡先講清楚哪幾筆,不必送出才知道)
+    const outside = subs.filter(x => x.start < s || x.end > e);
+    if (outside.length > 0) { setScheduleError(`以下子區間會超出 W${s}–W${e}，請先調整：${outside.map(x => `${x.name}（W${x.start}–W${x.end}）`).join('、')}`); return; }
     setSaving(true);
     try { await onUpdateTaskDetails(proj.id, task.id, taskName.trim(), s, e, taskNid.trim()); } finally { setSaving(false); }
   };
 
-  return (
-    <div {...focus} className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[100] flex justify-center items-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 text-white flex justify-between items-start" style={{ backgroundColor: isManager ? '#001F5B' : '#334155' }}>
-          <div className="pr-3">
-            <div className="text-xs text-white/80 font-medium mb-1 flex items-center">
-              負責人：{proj.owner}
-              <span className={`ml-2 px-1.5 rounded text-[10px] font-bold border ${PROJECT_TYPES[proj.type].chip}`}>{proj.type.toUpperCase()} {PROJECT_TYPES[proj.type].label}</span>
-            </div>
-            <h3 className="font-bold text-lg leading-snug">{proj.name}</h3>
-          </div>
-          <CloseButton onClick={onClose} className="text-white/60 hover:text-white flex-shrink-0" />
-        </div>
+  // --- 子區間編輯(遷移 18):清單逐列就地編輯(✎ 進入編輯、儲存/取消),底部一列新增表單。
+  //     驗證與後端一致:名稱必填、落在**已儲存的**父區間 task.start–task.end 內(不是上方表單還沒存的值)、最多 10 筆。
+  const [subEditId, setSubEditId] = useState(null);           // 進入編輯狀態的子區間 id
+  const [subForm, setSubForm] = useState({ name: '', start: '', end: '' });   // 編輯中/新增中的欄位值(同一份,兩者互斥)
+  const [subError, setSubError] = useState('');
+  const [subSaving, setSubSaving] = useState(false);
+  const SUB_MAX = 10;
+  // 起迄週留空＝沿用父區間的邊界(新增列的 placeholder 就是顯示父區間起迄,灰字暗示「不填就是這個值」,
+  // 驗證卻擋下來會讓使用者以為壞了)。「準備資料」常常就是從父起週開始,少打兩格。
+  const resolveSubWeeks = (f) => ({
+    s: String(f.start).trim() === '' ? task.start : parseInt(f.start),
+    e: String(f.end).trim() === '' ? task.end : parseInt(f.end)
+  });
+  const validateSub = (f) => {
+    const { s, e } = resolveSubWeeks(f);
+    if (!f.name.trim()) return '子區間名稱不可空白';
+    if (isNaN(s) || isNaN(e)) return `週次請填數字（W${task.start}–W${task.end} 之間；留空＝沿用計畫區間的起迄）`;
+    if (s > e) return '開始週不可晚於結束週';
+    if (s < task.start || e > task.end) return `子區間需落在計畫區間 W${task.start}–W${task.end} 內`;
+    return '';
+  };
+  // 新增列有打字時,各列的 ✎/🗑 要一併鎖住:表單是新增/編輯共用的一份,按 ✎ 會直接覆蓋掉打到一半的新增內容、
+  // 新增列也隨之隱藏,輸入無聲消失。與「編輯中鎖住其他列」是同一條規則的另一半。
+  const subFormDirty = subForm.name.trim() !== '' || String(subForm.start).trim() !== '' || String(subForm.end).trim() !== '';
+  const subRowActionsLocked = subEditId !== null || subFormDirty;
+  const subRowLockHint = subEditId !== null ? '請先儲存或取消目前編輯中的子區間' : '請先送出或清空下方新增列的內容';
+  // 「排程與子區間」折疊卡(2026-09-13):打卡情境預設收合、唯讀情境預設展開;編輯中強制展開(見 JSX 處的說明)
+  const [setupOpenState, setSetupOpenState] = useState(!canClockIn || scheduleFirst);
+  const setupForced = !!scheduleError || subEditId !== null || subFormDirty || !!subError;
+  const setupOpen = setupOpenState || setupForced;
+  const beginEditSub = (x) => { setSubEditId(x.id); setSubForm({ name: x.name, start: String(x.start), end: String(x.end) }); setSubError(''); };
+  // 子區間存檔/取消後彈窗不關閉,未儲存旗標要自己處理:其他欄位(回報、排程)都沒動的話就清掉,
+  // 否則剛存完子區間按 ESC 會誤跳「放棄未儲存的內容?」(旗標是全域布林,只能整個清)。
+  // 排程四欄(名稱/起迄週/NID)是否動過:「儲存排程」只在有變更時可按,按鈕的可按狀態本身就在講「它只管這四格」
+  // (改子區間列不會讓它亮起來,使用者就不會以為它會把子區間一起存)。
+  const scheduleDirty = taskName !== task.name || String(startWeek) !== String(task.start) || String(endWeek) !== String(task.end) || taskNid !== (task.nid || '');
+  const otherFieldsDirty = () => reportDirty() || scheduleDirty;
+  const cancelEditSub = () => {
+    setSubEditId(null); setSubForm({ name: '', start: '', end: '' }); setSubError('');
+    if (!otherFieldsDirty()) clearModalDirty();
+  };
+  const setSubField = (k, v) => { setSubForm(f => ({ ...f, [k]: v })); setSubError(''); markModalDirty(); };
+  const submitSub = async () => {
+    if (subSaving) return;
+    const err = validateSub(subForm);
+    if (err) { setSubError(err); return; }
+    if (subEditId === null && subs.length >= SUB_MAX) { setSubError(`每條計畫區間最多 ${SUB_MAX} 個子區間`); return; }
+    const { s, e } = resolveSubWeeks(subForm);
+    // 編輯但三個欄位都沒改 → 直接收掉編輯列、不打 API:否則會多一筆「…內容未變更」的稽核噪音
+    // (子區間是負責人隨手編的,「點 ✎ 看一眼又存回去」比主管改排程頻繁得多)。
+    if (subEditId !== null) {
+      const orig = subs.find(x => x.id === subEditId);
+      if (orig && orig.name === subForm.name.trim() && orig.start === s && orig.end === e) { cancelEditSub(); return; }
+    }
+    setSubSaving(true);
+    try {
+      const ok = await onUpsertSub(proj.id, task.id, { id: subEditId ?? undefined, name: subForm.name.trim(), start: s, end: e });
+      if (ok) cancelEditSub();
+    } finally { setSubSaving(false); }
+  };
+  const subInputCls = 'border border-slate-300 rounded-md px-2 py-1 text-sm outline-none focus:border-blue-500 bg-white';
 
-        <div className="p-6 space-y-6">
-          <div className="bg-slate-100 p-4 rounded-xl border border-slate-300">
-            <div className="flex justify-between items-center mb-3">
-              <label className="text-sm font-bold text-slate-800">專案排程與預計事項</label>
-              {isManager && <span className="text-[10px] bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded font-bold">主管可編輯</span>}
-            </div>
-            {/* 此區塊的 Enter 綁「儲存排程」(submitSchedule),不是打卡送出——兩者是不同的送出目標 */}
-            <input type="text" value={taskName} onChange={e => { setTaskName(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
-              onKeyDown={onEnterSubmit(submitSchedule)}
-              className="w-full border border-slate-300 rounded-md p-2 text-sm mb-3 text-center disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" />
-            <div className="flex space-x-3 items-center">
-              <div className="w-1/2">
-                <label className="text-[10px] text-slate-500 font-bold">開始週<ReqMark /></label>
-                <input type="number" min="1" max={weeksTotal} value={startWeek} onChange={e => { setStartWeek(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
-                  onKeyDown={onEnterSubmit(submitSchedule)}
-                  className="w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" />
+  // 三個區塊各自組好,最後依 scheduleFirst 決定 DOM 順序(不用 CSS order:Tab 順序要跟視覺順序一致)。
+  // 排程置頂模式下「非本週排定」的區間不渲染回報區:排程卡就在最上面寫著 W27–W31,再放一句「此任務排定於 W27–W31,
+  // 非 W37 排定項目」是同一件事講兩次;前幾週回報(歷史)仍保留。
+  const reportSection = !(scheduleFirst && !isActiveThisWeek) && (
+          <div>
+            <h4 className="text-sm font-bold text-slate-800 mb-3 flex items-center flex-wrap gap-y-1">
+              W{String(currentWeek).padStart(2, '0')} 實際執行回報
+              {isActiveThisWeek && (
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-[11px] font-bold ${unitLog ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-500'}`}
+                  title={wu.mode === 'sub' ? '此子區間的分數;計畫區間本週分數＝各子區間分數平均（未回報＝0）' : '回報成功預設 1 分,未回報 0 分;主管可依表現調整'}>
+                  🏆 {score} 分
+                </span>
+              )}
+              {wu.mode === 'sub' && (
+                <span className="ml-2 px-2 py-0.5 rounded-full text-[11px] font-bold bg-sky-100 text-sky-800 border border-sky-300"
+                  title="本週回報單位＝進行中的子區間,每個子區間各自打卡;計畫區間本週分數＝子區間平均">
+                  子區間 {wu.reported}/{wu.total} 已回報・區間得分 {Math.round(wu.score * 10) / 10}
+                </span>
+              )}
+            </h4>
+            {/* 回報單位選擇(遷移 20):該週有進行中的子區間時逐個子區間回報。表單只有一份,打到一半不能切(先送出或取消) */}
+            {wu.mode === 'sub' && (
+              <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="選擇要回報的子區間">
+                {wu.units.map(({ sub, log }) => {
+                  const on = sub.id === unitSub?.id;
+                  const locked = !on && reportDirty();
+                  return (
+                    <button key={sub.id} role="tab" aria-selected={on} onClick={() => switchUnit(sub.id)} disabled={locked}
+                      title={locked ? '請先送出或取消目前的回報內容，再切換子區間' : `回報子區間「${sub.name}」（W${String(sub.start).padStart(2, '0')}–W${String(sub.end).padStart(2, '0')}）`}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition disabled:opacity-50 ${on ? 'text-white border-transparent' : log ? 'bg-green-100 text-green-800 border-green-400 hover:bg-green-200' : 'bg-red-50 text-red-700 border-red-300 hover:bg-red-100'}`}
+                      style={on ? { backgroundColor: BRAND_BTN } : {}}>
+                      {log ? '✓ ' : '❗'}{sub.name}
+                    </button>
+                  );
+                })}
               </div>
-              <div className="w-1/2">
-                <label className="text-[10px] text-slate-500 font-bold">結束週<ReqMark /></label>
-                <input type="number" min="1" max={weeksTotal} value={endWeek} onChange={e => { setEndWeek(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
-                  onKeyDown={onEnterSubmit(submitSchedule)}
-                  className="w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" />
+            )}
+            {wu.legacy && (
+              <div className="mb-2 text-[11px] text-slate-600 bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1.5">
+                此週已以「計畫區間」為單位回報過（切分子區間之前），維持原單位，不需再對子區間逐一回報。
               </div>
-            </div>
-            <div className="mt-3">
-              <label className="text-[10px] text-slate-500 font-bold">NID（此區間對應哪組 NID，選填）</label>
-              <input type="text" value={taskNid} onChange={e => { setTaskNid(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
-                onKeyDown={onEnterSubmit(submitSchedule)}
-                className="w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" placeholder="如 N001…" />
-            </div>
-            {scheduleError && <div className="mt-2 text-xs text-red-600 font-bold">{scheduleError}</div>}
-            {isManager && (
-              <div className="mt-3 flex gap-2">
-                <button onClick={submitSchedule} disabled={saving} className="flex-1 text-white px-4 py-1.5 rounded text-sm font-bold transition hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: BRAND_BTN }}>{saving ? '儲存中…' : '儲存排程'}</button>
-                <button onClick={() => onDeleteTask(proj, task)}
-                  className="flex-shrink-0 px-3 py-1.5 rounded text-sm font-bold text-red-600 bg-red-50 border border-red-200 hover:bg-red-100 transition"
-                  title="刪除此計畫區間（軟刪除，可由資料庫還原）">🗑 刪除區間</button>
+            )}
+            {unitLog?.updatedAt && (
+              <div className="text-[11px] text-slate-500 mb-2 flex items-center gap-1.5">
+                <span>🕘 最後編輯：{unitLog.updatedAt}</span>
+                {unitLog.reporter && <span className="text-slate-500">by {unitLog.reporter}</span>}
+                {unitLog.reporterRole === 'manager' && (
+                  <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-bold text-[10px]" title="此筆由主管代為修正/補登">✏️ 主管修正</span>
+                )}
+              </div>
+            )}
+            {canClockIn ? (
+              <div className={`p-4 rounded-xl border transition-colors ${status && status !== 'not_executed' ? 'bg-blue-50 border-blue-200' : 'bg-slate-100 border-slate-300'}`}>
+                {isManager && !isMyTask && (
+                  <div className="mb-3 bg-amber-100 border border-amber-400 text-amber-900 rounded-lg px-3.5 py-2.5 text-xs font-bold flex items-center">
+                    <span className="mr-2 text-sm">👑</span>
+                    <span>主管特權模式：正在為成員核實或調補 W{String(currentWeek).padStart(2, '0')} 執行紀錄</span>
+                  </div>
+                )}
+                <div className="mb-3">
+                  <div className="font-bold text-slate-800 text-sm">{unitSub ? <>本週「<span className="text-sky-800">{unitSub.name}</span>」的執行狀態</> : '本週此任務的執行狀態'}</div>
+                  {/* 說明壓成一行(原本兩行常駐＋分數說明,每次打卡都要看一遍;分數在標題旁已有 🏆 晶片,那句是重複的)。
+                      各狀態的完整說明放在三顆按鈕的 title。 */}
+                  <div className="text-xs text-slate-500 mt-0.5">選一個狀態，該週甘特條就會標上對應顏色；完成回報預設 1 分，主管可調整。</div>
+                </div>
+                {/* 「沿用上週」主按鈕:歷史區逐列都有沿用鈕(可挑任一週),但最高頻的動作就是「照抄上一次」——
+                    走歷史區要「往上捲 → 找到最上面那列 → 點沿用」三步,而這裡一步到位。
+                    history[0] 已是最新的一週(降冪排序),故直接取 [0]。
+                    ⚠ 只在還沒選狀態時顯示:已經在編輯了才跳出來會蓋掉使用者剛打的內容(reuseLog 會覆寫 note)。 */}
+                {reuseSource && !status && (
+                  <button onClick={() => reuseLog(reuseSource)}
+                    className="mb-3 w-full px-3 py-2 rounded-lg border border-indigo-400 bg-indigo-50 text-indigo-800 text-xs font-bold hover:bg-indigo-100 transition flex items-center justify-center gap-1.5"
+                    title={`把 W${String(reuseSource.week).padStart(2, '0')} 的狀態與內容帶入，可再修改後送出`}>
+                    <span aria-hidden="true">↩</span>
+                    沿用上次回報（W{String(reuseSource.week).padStart(2, '0')}・{STATUS_META[reuseSource.log.status]?.label}{unitSub && history.length === 0 ? '・計畫區間' : ''}）
+                  </button>
+                )}
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    {Object.entries(STATUS_META).map(([key, meta]) => (
+                      <button key={key} onClick={() => { setStatus(key); setNoteError(''); markModalDirty(); }}
+                        title={key === 'executed' ? '本週有實際工作進度（甘特條標綠；需填工作說明）' : key === 'monitor' ? '例行監控／觀察，無實作進度（甘特條標藍；說明可不填）' : '本週沒有做（甘特條標灰；可備註原因）'}
+                        className={`py-3 rounded-lg border text-sm font-bold transition ${status === key ? meta.tag + ' ring-2 ring-offset-1 ring-slate-300' : 'bg-white ctl-raised text-slate-500 border-slate-300 hover:border-slate-400'}`}>
+                        {meta.icon} {meta.label}
+                      </button>
+                    ))}
+                  </div>
+                  {status && (
+                    <textarea value={note} onChange={e => { setNote(e.target.value); setNoteError(''); markModalDirty(); }}
+                      placeholder={status === 'not_executed' ? '可備註未執行原因（選填）' : status === 'monitor' ? '例行監控項目，可備註（選填）' : '說明本週實際工作內容…'}
+                      className={`w-full border rounded-lg p-3 text-sm h-24 outline-none resize-none focus:border-blue-500 ${noteError ? 'border-red-400' : 'border-slate-300'}`}></textarea>
+                  )}
+                  {noteError && <div className="text-xs text-red-600 font-bold">{noteError}</div>}
+                  {/* 文件連結(選填):選了狀態才出現,與工作說明同一組。
+                      送出目標是打卡不是排程(排程在上面那張卡有自己的送出鈕)。 */}
+                  {status && (
+                    <DocUrlField id="log-doc-url" value={docUrl} onSubmit={submitLog} error={docError}
+                      onChange={v => { setDocUrl(v); setDocError(''); }} />
+                  )}
+                </div>
+                <div className="flex justify-end space-x-3 pt-4">
+                  <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 bg-white ctl-raised border border-slate-300 rounded-lg font-bold hover:bg-slate-50">取消</button>
+                  <button onClick={submitLog} disabled={saving} className="px-6 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg shadow-md">{saving ? '儲存中…' : '儲存進度回報'}</button>
+                </div>
+                {isManager && unitLog && (
+                  <div className="mt-4 pt-3 border-t border-slate-300">
+                    <div className="text-xs font-bold text-slate-500 mb-2">主管評分微調（點擊即時更新分數{unitSub ? `・子區間「${unitSub.name}」` : ''}）</div>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {SCORE_OPTIONS.map(o => (
+                        <button key={o.value} onClick={() => onUpdateScore(task.id, unitSub?.id ?? null, o.value)}
+                          className={`px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white ctl-raised text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`}>
+                          <div className="text-[11px] font-bold leading-tight">{o.label}</div>
+                          <div className={`text-[10px] mt-0.5 ${score === o.value ? 'text-indigo-100' : 'text-slate-500'}`}>{o.value} 分</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="bg-slate-100 border border-slate-300 p-4 rounded-xl text-sm">
+                {isFutureWeek && isActiveThisWeek && (
+                  <div className="mb-3 bg-slate-200 border border-slate-400 text-slate-700 rounded-lg px-3 py-2 text-xs font-bold">
+                    📅 W{String(currentWeek).padStart(2, '0')} 尚未到：不開放預先回報（本週為 W{String(todayWeek).padStart(2, '0')}），此處僅供檢視排程。
+                  </div>
+                )}
+                {!isFutureWeek && role === 'member' && isMyTask && isActiveThisWeek && !isReportingWeek && (
+                  <div className="mb-3 bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-lg px-3 py-2 text-xs font-bold">
+                    🔒 唯讀檢視：僅能回報本週 W{String(todayWeek).padStart(2, '0')} 的進度，歷史週次只能瀏覽。
+                  </div>
+                )}
+                {!isActiveThisWeek ? (
+                  <div className="text-slate-500 text-center py-2">此任務排定於 W{task.start}–W{task.end}，非 W{String(currentWeek).padStart(2, '0')} 排定項目。</div>
+                ) : unitLog ? (
+                  <div>
+                    {unitSub && <div className="mb-2 text-xs font-bold text-sky-800">子區間「{unitSub.name}」</div>}
+                    <div className="mb-2 flex items-center flex-wrap gap-y-1"><span className="font-bold mr-2">狀態：</span>
+                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${STATUS_META[unitLog.status]?.tag}`}>
+                        {STATUS_META[unitLog.status]?.icon} {STATUS_META[unitLog.status]?.label}
+                      </span>
+                      <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700" title="回報成功預設 1 分,主管可調整">🏆 {score} 分</span>
+                    </div>
+                    <div className="font-bold mb-1">工作說明：</div>
+                    <div className="bg-white p-3 rounded border border-slate-300 text-slate-700 whitespace-pre-wrap">{unitLog.note || '（未填寫備註）'}</div>
+                    {unitLog.docUrl && <div className="mt-2"><DocLink url={unitLog.docUrl} /></div>}
+                    {isManager && (
+                      <div className="mt-3 pt-3 border-t border-slate-300">
+                        <div className="text-xs font-bold text-slate-500 mb-2">主管評分（點擊即修改此週分數）</div>
+                        <div className="grid grid-cols-5 gap-1.5">
+                          {SCORE_OPTIONS.map(o => (
+                            <button key={o.value} onClick={() => onUpdateScore(task.id, unitSub?.id ?? null, o.value)}
+                              className={`px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white ctl-raised text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`}>
+                              <div className="text-[11px] font-bold leading-tight">{o.label}</div>
+                              <div className={`text-[10px] mt-0.5 ${score === o.value ? 'text-indigo-100' : 'text-slate-500'}`}>{o.value} 分</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : <div className="text-slate-500 text-center py-2">📌 W{String(currentWeek).padStart(2, '0')} 未回報{unitSub ? `子區間「${unitSub.name}」` : '此項目'}（維持計畫中，🏆 0 分）。</div>}
               </div>
             )}
           </div>
+  );
 
-          {/* 前幾週回報:放在「本週回報」正上方,寫的時候不用捲來捲去就能對照上週寫到哪。
-              沒有歷史就整塊不渲染(不留空殼),避免新區間第一次打卡時多一塊沒內容的區域。 */}
-          {history.length > 0 && (
+  // 前幾週回報:緊接在「本週回報」下方(2026-09-13 版面重排前是正上方),寫的時候往下看一眼就能對照上週寫到哪。
+  // 沒有歷史就整塊不渲染(不留空殼),避免新區間第一次打卡時多一塊沒內容的區域。
+  const historySection = history.length > 0 && (
             <div className="border border-slate-300 rounded-xl overflow-hidden">
               {/* 整條標題列都是展開/收合的觸發區(不是只有右邊那幾個字),點擊目標大、也容易瞄準 */}
               <button onClick={() => setHistoryOpen(v => !v)}
@@ -3095,7 +3830,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
                 aria-expanded={historyOpen} aria-controls="task-history-list">
                 <span className="flex items-center gap-2 min-w-0">
                   <span aria-hidden="true" className="flex-shrink-0 text-[10px] text-slate-600">{historyOpen ? '▼' : '▶'}</span>
-                  <span className="flex-shrink-0 text-sm font-bold text-slate-800">前幾週回報（{history.length} 週）</span>
+                  <span className="flex-shrink-0 text-sm font-bold text-slate-800">{unitSub ? `「${unitSub.name}」` : ''}前幾週回報（{history.length} 週）</span>
                   {/* 收合時把「最近一週的狀態」提到標題上:不展開也能回答「上一次到底做了沒」,
                       使用者才不必為了確認這件事而每次都展開。展開後第一列就是同一筆,再顯示一次是重複資訊。 */}
                   {!historyOpen && (
@@ -3143,139 +3878,198 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, weeksTotal
               </div>
               )}
             </div>
-          )}
+  );
 
-          <div>
-            <h4 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
-              W{String(currentWeek).padStart(2, '0')} 實際執行回報
-              {isActiveThisWeek && (
-                <span className={`ml-2 px-2 py-0.5 rounded-full text-[11px] font-bold ${weekLog ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-500'}`}
-                  title="回報成功預設 1 分,未回報 0 分;主管可依表現調整">
-                  🏆 {score} 分
-                </span>
-              )}
-            </h4>
-            {weekLog?.updatedAt && (
-              <div className="text-[11px] text-slate-500 mb-2 flex items-center gap-1.5">
-                <span>🕘 最後編輯：{weekLog.updatedAt}</span>
-                {weekLog.reporter && <span className="text-slate-500">by {weekLog.reporter}</span>}
-                {weekLog.reporterRole === 'manager' && (
-                  <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-bold text-[10px]" title="此筆由主管代為修正/補登">✏️ 主管修正</span>
+  // 排程＋子區間＝「設定」不是「每週要做的事」(主管一年改幾次排程、負責人專案開始時切一次子區間),
+  // 2026-09-13 起合併成一張可折疊卡:打卡情境(從回報面板開、或成員點自己本週可打卡的條)放最下面且**預設收合**
+  // (原本兩張卡佔 600px+,把回報表單推到折線下,每次打卡都要先捲一段);從甘特條開(scheduleFirst)或唯讀情境
+  // (沒有回報表單)排程就是主要內容 → 置頂＋預設展開;排程驗證錯誤／子區間編輯中／新增列有字時強制展開,
+  // 表單不會在使用者眼前被收掉。收合時標題列自帶摘要(起迄週、子區間數與進行中幾個)。
+  const setupSection = (
+          <div className="border border-slate-300 rounded-xl overflow-hidden">
+            <button onClick={() => setSetupOpenState(v => !v)} disabled={setupForced}
+              className="w-full bg-slate-100 hover:bg-slate-200 px-4 py-2 flex items-center justify-between gap-2 text-left transition disabled:cursor-default"
+              aria-expanded={setupOpen} aria-controls="task-setup-body"
+              title={setupForced ? '排程或子區間編輯中，請先儲存或取消' : setupOpen ? '收合排程與子區間' : '展開以檢視或編輯排程與子區間'}>
+              <span className="flex items-center gap-2 min-w-0 flex-wrap">
+                <span aria-hidden="true" className="flex-shrink-0 text-[10px] text-slate-600">{setupOpen ? '▼' : '▶'}</span>
+                <span className="flex-shrink-0 text-sm font-bold text-slate-800">排程與子區間</span>
+                {!setupOpen && (
+                  <span className="text-[11px] text-slate-600 min-w-0 truncate">
+                    W{String(task.start).padStart(2, '0')}–W{String(task.end).padStart(2, '0')}
+                    {task.nid ? `・NID ${task.nid}` : ''}
+                    {subs.length > 0 ? `・子區間 ${subs.length}（進行中 ${subs.filter(x => x.start <= todayWeek && x.end >= todayWeek).length}）` : ''}
+                  </span>
                 )}
+                {isManager && <span className="flex-shrink-0 text-[10px] bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded font-bold">主管可編輯</span>}
+              </span>
+              <span className="flex-shrink-0 text-xs font-bold text-blue-700">{setupOpen ? '收合' : '展開'}</span>
+            </button>
+            {setupOpen && (
+            <div id="task-setup-body" className="p-3 space-y-3 bg-white">
+          <div className="bg-slate-100 p-4 rounded-xl border border-slate-300">
+            <div className="flex justify-between items-center mb-3">
+              <label className="text-sm font-bold text-slate-800">專案排程與預計事項</label>
+            </div>
+            {/* 此區塊的 Enter 綁「儲存排程」(submitSchedule),不是打卡送出——兩者是不同的送出目標 */}
+            <input type="text" value={taskName} onChange={e => { setTaskName(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
+              onKeyDown={onEnterSubmit(submitSchedule)}
+              className="w-full border border-slate-300 rounded-md p-2 text-sm mb-3 text-center disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" />
+            <div className="flex space-x-3 items-center">
+              <div className="w-1/2">
+                <label className="text-[10px] text-slate-500 font-bold">開始週<ReqMark /></label>
+                <input type="number" min="1" max={weeksTotal} value={startWeek} onChange={e => { setStartWeek(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
+                  onKeyDown={onEnterSubmit(submitSchedule)}
+                  className="w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" />
               </div>
-            )}
-            {canClockIn ? (
-              <div className={`p-4 rounded-xl border transition-colors ${status && status !== 'not_executed' ? 'bg-blue-50 border-blue-200' : 'bg-slate-100 border-slate-300'}`}>
-                {isManager && !isMyTask && (
-                  <div className="mb-3 bg-amber-100 border border-amber-400 text-amber-900 rounded-lg px-3.5 py-2.5 text-xs font-bold flex items-center">
-                    <span className="mr-2 text-sm">👑</span>
-                    <span>主管特權模式：正在為成員核實或調補 W{String(currentWeek).padStart(2, '0')} 執行紀錄</span>
-                  </div>
-                )}
-                <div className="mb-3">
-                  <div className="font-bold text-slate-800 text-sm">本週此任務的執行狀態</div>
-                  <div className="text-xs text-slate-500 mt-0.5">回報後會在該週甘特條標示對應顏色（有執行=綠、Monitor=藍、未執行=灰）。Monitor 為例行監控工作，可不填說明。</div>
-                  <div className="text-xs text-indigo-600 mt-1 font-bold">🏆 完成回報預設獲得 1 分（未回報為 0 分），主管可依表現調整分數。</div>
-                </div>
-                {/* 「沿用上週」主按鈕:歷史區逐列都有沿用鈕(可挑任一週),但最高頻的動作就是「照抄上一次」——
-                    走歷史區要「往上捲 → 找到最上面那列 → 點沿用」三步,而這裡一步到位。
-                    history[0] 已是最新的一週(降冪排序),故直接取 [0]。
-                    ⚠ 只在還沒選狀態時顯示:已經在編輯了才跳出來會蓋掉使用者剛打的內容(reuseLog 會覆寫 note)。 */}
-                {history.length > 0 && !status && (
-                  <button onClick={() => reuseLog(history[0])}
-                    className="mb-3 w-full px-3 py-2 rounded-lg border border-indigo-400 bg-indigo-50 text-indigo-800 text-xs font-bold hover:bg-indigo-100 transition flex items-center justify-center gap-1.5"
-                    title={`把 W${String(history[0].week).padStart(2, '0')} 的狀態與內容帶入，可再修改後送出`}>
-                    <span aria-hidden="true">↩</span>
-                    沿用上次回報（W{String(history[0].week).padStart(2, '0')}・{STATUS_META[history[0].log.status]?.label}）
-                  </button>
-                )}
-                <div className="space-y-3">
-                  <div className="grid grid-cols-3 gap-2">
-                    {Object.entries(STATUS_META).map(([key, meta]) => (
-                      <button key={key} onClick={() => { setStatus(key); setNoteError(''); markModalDirty(); }}
-                        className={`py-3 rounded-lg border text-sm font-bold transition ${status === key ? meta.tag + ' ring-2 ring-offset-1 ring-slate-300' : 'bg-white ctl-raised text-slate-500 border-slate-300 hover:border-slate-400'}`}>
-                        {meta.icon} {meta.label}
-                      </button>
-                    ))}
-                  </div>
-                  {status && (
-                    <textarea value={note} onChange={e => { setNote(e.target.value); setNoteError(''); markModalDirty(); }}
-                      placeholder={status === 'not_executed' ? '可備註未執行原因（選填）' : status === 'monitor' ? '例行監控項目，可備註（選填）' : '說明本週實際工作內容…'}
-                      className={`w-full border rounded-lg p-3 text-sm h-24 outline-none resize-none focus:border-blue-500 ${noteError ? 'border-red-400' : 'border-slate-300'}`}></textarea>
-                  )}
-                  {noteError && <div className="text-xs text-red-600 font-bold">{noteError}</div>}
-                  {/* 文件連結(選填):選了狀態才出現,與工作說明同一組。
-                      送出目標是打卡不是排程(排程在上面那張卡有自己的送出鈕)。 */}
-                  {status && (
-                    <DocUrlField id="log-doc-url" value={docUrl} onSubmit={submitLog} error={docError}
-                      onChange={v => { setDocUrl(v); setDocError(''); }} />
-                  )}
-                </div>
-                <div className="flex justify-end space-x-3 pt-4">
-                  <button onClick={onClose} className="px-4 py-2 text-sm text-slate-500 bg-white ctl-raised border border-slate-300 rounded-lg font-bold hover:bg-slate-50">取消</button>
-                  <button onClick={submitLog} disabled={saving} className="px-6 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg shadow-md">{saving ? '儲存中…' : '儲存進度回報'}</button>
-                </div>
-                {isManager && weekLog && (
-                  <div className="mt-4 pt-3 border-t border-slate-300">
-                    <div className="text-xs font-bold text-slate-500 mb-2">主管評分微調（點擊即時更新分數）</div>
-                    <div className="grid grid-cols-5 gap-1.5">
-                      {SCORE_OPTIONS.map(o => (
-                        <button key={o.value} onClick={() => onUpdateScore(task.id, o.value)}
-                          className={`px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white ctl-raised text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`}>
-                          <div className="text-[11px] font-bold leading-tight">{o.label}</div>
-                          <div className={`text-[10px] mt-0.5 ${score === o.value ? 'text-indigo-100' : 'text-slate-500'}`}>{o.value} 分</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              <div className="w-1/2">
+                <label className="text-[10px] text-slate-500 font-bold">結束週<ReqMark /></label>
+                <input type="number" min="1" max={weeksTotal} value={endWeek} onChange={e => { setEndWeek(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
+                  onKeyDown={onEnterSubmit(submitSchedule)}
+                  className="w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" />
               </div>
-            ) : (
-              <div className="bg-slate-100 border border-slate-300 p-4 rounded-xl text-sm">
-                {role === 'member' && isMyTask && isActiveThisWeek && !isReportingWeek && (
-                  <div className="mb-3 bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-lg px-3 py-2 text-xs font-bold">
-                    🔒 唯讀檢視：僅能回報本週 W{String(todayWeek).padStart(2, '0')} 的進度，歷史週次只能瀏覽。
-                  </div>
-                )}
-                {!isActiveThisWeek ? (
-                  <div className="text-slate-500 text-center py-2">此任務排定於 W{task.start}–W{task.end}，非 W{String(currentWeek).padStart(2, '0')} 排定項目。</div>
-                ) : weekLog ? (
-                  <div>
-                    <div className="mb-2 flex items-center flex-wrap gap-y-1"><span className="font-bold mr-2">狀態：</span>
-                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${STATUS_META[weekLog.status]?.tag}`}>
-                        {STATUS_META[weekLog.status]?.icon} {STATUS_META[weekLog.status]?.label}
-                      </span>
-                      <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700" title="回報成功預設 1 分,主管可調整">🏆 {score} 分</span>
-                    </div>
-                    <div className="font-bold mb-1">工作說明：</div>
-                    <div className="bg-white p-3 rounded border border-slate-300 text-slate-700 whitespace-pre-wrap">{weekLog.note || '（未填寫備註）'}</div>
-                    {weekLog.docUrl && <div className="mt-2"><DocLink url={weekLog.docUrl} /></div>}
-                    {isManager && (
-                      <div className="mt-3 pt-3 border-t border-slate-300">
-                        <div className="text-xs font-bold text-slate-500 mb-2">主管評分（點擊即修改此週分數）</div>
-                        <div className="grid grid-cols-5 gap-1.5">
-                          {SCORE_OPTIONS.map(o => (
-                            <button key={o.value} onClick={() => onUpdateScore(task.id, o.value)}
-                              className={`px-1 py-2 rounded-lg border text-center transition ${score === o.value ? 'bg-indigo-600 text-white border-indigo-700 ring-2 ring-offset-1 ring-indigo-300' : 'bg-white ctl-raised text-slate-600 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50'}`}>
-                              <div className="text-[11px] font-bold leading-tight">{o.label}</div>
-                              <div className={`text-[10px] mt-0.5 ${score === o.value ? 'text-indigo-100' : 'text-slate-500'}`}>{o.value} 分</div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : <div className="text-slate-500 text-center py-2">📌 W{String(currentWeek).padStart(2, '0')} 未回報此項目（維持計畫中，🏆 0 分）。</div>}
+            </div>
+            <div className="mt-3">
+              <label className="text-[10px] text-slate-500 font-bold">NID（此區間對應哪組 NID，選填）</label>
+              <input type="text" value={taskNid} onChange={e => { setTaskNid(e.target.value); setScheduleError(''); markModalDirty(); }} disabled={!isManager}
+                onKeyDown={onEnterSubmit(submitSchedule)}
+                className="w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100 disabled:text-slate-500 outline-none focus:border-blue-500" placeholder="如 N001…" />
+            </div>
+            {scheduleError && <div className="mt-2 text-xs text-red-600 font-bold">{scheduleError}</div>}
+            {/* 按鈕列(2026-09-13 使用者問「儲存排程要不要放到子區間下面」):
+                ① 留在排程欄位正下方——它只送這四格,子區間是每列各自即時存檔、不經過這顆鈕;放到子區間下面會暗示「連子區間一起存」。
+                ② 破壞性的「刪除區間」改到**左邊、低調文字鈕**,主要動作「儲存排程」靠右——原本兩顆並排等寬,誤觸距離 0。
+                ③ 沒改過就 disabled 並寫「排程未變更」:可按狀態本身就在講範圍(改子區間列它不會亮起來)。 */}
+            {isManager && (
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <button onClick={() => onDeleteTask(proj, task)}
+                  className="flex-shrink-0 px-2 py-1.5 rounded text-xs font-bold text-red-700 hover:bg-red-50 hover:text-red-800 transition"
+                  title="刪除此計畫區間（軟刪除，可由資料庫還原）">🗑 刪除區間</button>
+                <button onClick={submitSchedule} disabled={saving || !scheduleDirty}
+                  className="flex-shrink-0 text-white px-6 py-1.5 rounded text-sm font-bold transition hover:opacity-90 disabled:opacity-50"
+                  style={{ backgroundColor: BRAND_BTN }}
+                  title={scheduleDirty ? '儲存上方的名稱、起迄週與 NID（子區間各列已各自儲存）' : '上方的排程欄位尚未變更'}>
+                  {saving ? '儲存中…' : scheduleDirty ? '儲存排程' : '排程未變更'}
+                </button>
               </div>
             )}
           </div>
+
+          {/* 子區間(遷移 18):緊接在排程卡下方——它是排程的細分,不是回報。
+              沒有子區間且無編輯權(非負責人的成員/唯讀)就整塊不渲染,不留空殼。 */}
+          {(subs.length > 0 || canEditSubs) && (
+            <div className="border border-slate-300 rounded-xl overflow-hidden">
+              <div className="bg-slate-100 px-4 py-2 flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-sm font-bold text-slate-800">子區間（{subs.length}）</span>
+                <span className="text-[10px] text-slate-500">每列各自儲存（不經上方「儲存排程」）；甘特圖上以縮排子列顯示，可重疊{SUB_CHECKIN ? '；該週進行中的子區間即為回報單位' : ''}</span>
+              </div>
+              <div className="divide-y divide-slate-200">
+                {subs.length === 0 && <div className="px-4 py-2.5 text-xs text-slate-500 italic bg-white">尚未切分子區間</div>}
+                {subs.map(x => {
+                  const ph = x.end < todayWeek ? '已結束' : x.start > todayWeek ? '未開始' : '進行中';
+                  const phCls = ph === '進行中' ? 'bg-sky-100 text-sky-800 border-sky-300' : ph === '未開始' ? 'bg-slate-100 text-slate-600 border-slate-300' : 'bg-slate-200 text-slate-600 border-slate-300';
+                  return subEditId === x.id ? (
+                    <div key={x.id} className="px-4 py-2.5 bg-blue-50/40 flex items-center gap-2">
+                      <input autoFocus type="text" value={subForm.name} onChange={e => setSubField('name', e.target.value)} onKeyDown={onEnterSubmit(submitSub)}
+                        className={`${subInputCls} flex-1 min-w-0`} aria-label="子區間名稱" />
+                      <input type="number" min={task.start} max={task.end} value={subForm.start} onChange={e => setSubField('start', e.target.value)} onKeyDown={onEnterSubmit(submitSub)}
+                        className={`${subInputCls} w-16`} aria-label="開始週" />
+                      <span className="text-slate-500 text-xs" aria-hidden="true">–</span>
+                      <input type="number" min={task.start} max={task.end} value={subForm.end} onChange={e => setSubField('end', e.target.value)} onKeyDown={onEnterSubmit(submitSub)}
+                        className={`${subInputCls} w-16`} aria-label="結束週" />
+                      <button onClick={submitSub} disabled={subSaving} className="flex-shrink-0 px-2.5 py-1 rounded text-xs font-bold text-white hover:opacity-90 disabled:opacity-50" style={{ backgroundColor: BRAND_BTN }}>{subSaving ? '儲存中…' : '儲存'}</button>
+                      <button onClick={cancelEditSub} className="flex-shrink-0 px-2 py-1 rounded text-xs font-bold text-slate-600 bg-slate-100 border border-slate-300 hover:bg-slate-200">取消</button>
+                    </div>
+                  ) : (
+                    <div key={x.id} className="px-4 py-2 bg-white flex items-center gap-2">
+                      <span className="flex-1 min-w-0 truncate text-sm text-slate-800" title={x.name}>{x.name}</span>
+                      {/* 本週回報狀態(遷移 20):只在這個子區間是本週回報單位時顯示;有回報紀錄的子區間成員不可刪(見下方 🗑) */}
+                      {(() => {
+                        const u = wu.mode === 'sub' ? wu.units.find(v => v.sub.id === x.id) : null;
+                        if (!u) return null;
+                        return u.log
+                          ? <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_META[u.log.status]?.tag}`}>本週 {STATUS_META[u.log.status]?.icon} {STATUS_META[u.log.status]?.label}</span>
+                          : <span className="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-300">❗本週未回報</span>;
+                      })()}
+                      <span className="flex-shrink-0 px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-bold text-[11px] font-mono">W{String(x.start).padStart(2, '0')}–W{String(x.end).padStart(2, '0')}</span>
+                      <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold border ${phCls}`}>{ph}</span>
+                      {canEditSubs && (() => {
+                        const logCount = Object.keys(subLogs[x.id] || {}).length;
+                        const delLocked = subRowActionsLocked || (logCount > 0 && !isManager);
+                        const delHint = subRowActionsLocked ? subRowLockHint : logCount > 0 ? (isManager ? `刪除（含 ${logCount} 筆回報，可復原）` : `已有 ${logCount} 筆回報，僅主管可刪除`) : '刪除';
+                        return (
+                          <>
+                            <button onClick={() => beginEditSub(x)} aria-label={`編輯子區間「${x.name}」`} title={subRowActionsLocked ? subRowLockHint : '編輯'} disabled={subRowActionsLocked}
+                              className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-blue-600 hover:bg-blue-100 disabled:opacity-40">✎</button>
+                            <button onClick={() => onDeleteSub(proj.id, task.id, x)} aria-label={`刪除子區間「${x.name}」`} title={delHint} disabled={delLocked}
+                              className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded text-red-500 hover:bg-red-100 disabled:opacity-40">🗑</button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  );
+                })}
+                {canEditSubs && subEditId === null && (
+                  subs.length >= SUB_MAX ? (
+                    <div className="px-4 py-2 text-[11px] text-slate-500 bg-white">已達上限（每條計畫區間最多 {SUB_MAX} 個子區間）</div>
+                  ) : (
+                    <div className="px-4 py-2.5 bg-white flex items-center gap-2">
+                      <input type="text" value={subForm.name} onChange={e => setSubField('name', e.target.value)} onKeyDown={onEnterSubmit(submitSub)}
+                        className={`${subInputCls} flex-1 min-w-0`} placeholder="新增子區間，如：準備資料" aria-label="新增子區間名稱" />
+                      <input type="number" min={task.start} max={task.end} value={subForm.start} onChange={e => setSubField('start', e.target.value)} onKeyDown={onEnterSubmit(submitSub)}
+                        className={`${subInputCls} w-16`} placeholder={String(task.start)} aria-label="開始週" title={`留空＝W${task.start}（計畫區間的開始週）`} />
+                      <span className="text-slate-500 text-xs" aria-hidden="true">–</span>
+                      <input type="number" min={task.start} max={task.end} value={subForm.end} onChange={e => setSubField('end', e.target.value)} onKeyDown={onEnterSubmit(submitSub)}
+                        className={`${subInputCls} w-16`} placeholder={String(task.end)} aria-label="結束週" title={`留空＝W${task.end}（計畫區間的結束週）`} />
+                      <button onClick={submitSub} disabled={subSaving}
+                        className="flex-shrink-0 px-2.5 py-1 rounded text-xs font-bold bg-white ctl-raised text-blue-700 border border-blue-300 hover:bg-blue-600 hover:text-white disabled:opacity-50 transition">{subSaving ? '儲存中…' : '＋ 新增'}</button>
+                    </div>
+                  )
+                )}
+                {subError && <div className="px-4 py-2 text-xs text-red-600 font-bold bg-white">{subError}</div>}
+              </div>
+            </div>
+          )}
+            </div>
+            )}
+          </div>
+  );
+
+  return (
+    <div {...focus} className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm modal-scrim z-[100] flex justify-center items-center p-4">
+      {/* 卡片本體是 flex column、不捲動:標題列 flex-shrink-0 固定在頂端,只有下方內容區 overflow-y-auto(2026-09-13 使用者要求:
+          原本整張卡 overflow-y-auto,一捲標題列就跟著走、看不到現在開的是哪個專案哪條區間)。min-h-0 讓內容區在 max-h 內能被壓縮而不是撐破卡片。 */}
+      <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 text-white flex justify-between items-start flex-shrink-0" style={{ backgroundColor: isManager ? '#001F5B' : '#334155' }}>
+          <div className="pr-3">
+            <div className="text-xs text-white/80 font-medium mb-1 flex items-center">
+              負責人：{proj.owner}
+              <span className={`ml-2 px-1.5 rounded text-[10px] font-bold border ${PROJECT_TYPES[proj.type].chip}`}>{proj.type.toUpperCase()} {PROJECT_TYPES[proj.type].label}</span>
+            </div>
+            <h3 className="font-bold text-lg leading-snug">{proj.name}</h3>
+            {/* 這條計畫區間是哪一條、排在哪幾週:排程卡預設收合後,標題列要自己講清楚(用已儲存的 task 值,不是表單值) */}
+            <div className="text-xs text-white/85 font-medium mt-1">
+              {task.name}・W{String(task.start).padStart(2, '0')}–W{String(task.end).padStart(2, '0')}{task.nid ? `・NID ${task.nid}` : ''}
+            </div>
+          </div>
+          <CloseButton onClick={onClose} className="text-white/60 hover:text-white flex-shrink-0" />
+        </div>
+
+        {/* 版面順序照「使用者來做什麼」排,不照資料結構排(2026-09-13):
+            打卡情境 ①本週回報 ②前幾週回報(預設收合) ③排程與子區間(預設收合);
+            從甘特條開(scheduleFirst)①排程與子區間(展開) ②前幾週回報 ③本週回報(非本週排定時不渲染)。 */}
+        <div className="p-6 space-y-6 overflow-y-auto min-h-0">
+          {scheduleFirst
+            ? <>{setupSection}{historySection}{reportSection}</>
+            : <>{reportSection}{historySection}{setupSection}</>}
         </div>
       </div>
     </div>
   );
 }
 
-function ExtraNoteModal({ currentWeek, initialNote, readOnly, targetUser, meta, onClose, onSave }) {
+// future:未來週次(主管也不能預先填,唯讀文案不同)
+function ExtraNoteModal({ currentWeek, initialNote, readOnly, future = false, targetUser, meta, onClose, onSave }) {
   const focus = useModalFocus();   // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [note, setNote] = useState(initialNote);
   // 文件連結存在 meta 裡(見 Program.cs bootstrap 的說明:內容本身是純字串,
@@ -3305,7 +4099,7 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, targetUser, meta, 
             <CloseButton onClick={onClose} className="text-white/60 hover:text-white" />
           </div>
           <div className="p-6">
-            <p className="text-xs text-slate-500 mb-3">歷史週次僅供瀏覽，無法修改。</p>
+            <p className="text-xs text-slate-500 mb-3">{future ? `W${currentWeek} 尚未到，不開放預先填寫。` : '歷史週次僅供瀏覽，無法修改。'}</p>
             {initialNote ? (
               <div>
                 <div className="text-sm text-slate-700 bg-slate-100 border border-slate-300 rounded-lg p-4 whitespace-pre-wrap">{initialNote}</div>
@@ -3448,7 +4242,8 @@ function DeliverableModal({ proj, role, currentUser, onClose, onSave }) {
 }
 
 // 下週預計執行工作:每人每週一筆(填寫於本週,內容為下一週的工作安排),樣式比照非專案事項但用靛藍色系
-function WeeklyPlanModal({ currentWeek, initialNote, readOnly, targetUser, meta, onClose, onSave }) {
+// weeksTotal:「下一週」的週次上限用該年度的實際週數(2026=53、2027=52),勿寫死 53
+function WeeklyPlanModal({ currentWeek, weeksTotal = WEEKS_TOTAL, initialNote, readOnly, future = false, targetUser, meta, onClose, onSave }) {
   const focus = useModalFocus();   // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [note, setNote] = useState(initialNote);
   const [docUrl, setDocUrl] = useState(meta?.docUrl || '');   // 文件連結存在 meta 裡(同 ExtraNoteModal)
@@ -3476,7 +4271,7 @@ function WeeklyPlanModal({ currentWeek, initialNote, readOnly, targetUser, meta,
             <CloseButton onClick={onClose} className="text-white/60 hover:text-white" />
           </div>
           <div className="p-6">
-            <p className="text-xs text-slate-500 mb-3">歷史週次僅供瀏覽，無法修改。</p>
+            <p className="text-xs text-slate-500 mb-3">{future ? `W${currentWeek} 尚未到，不開放預先填寫。` : '歷史週次僅供瀏覽，無法修改。'}</p>
             {initialNote ? (
               <div>
                 <div className="text-sm text-slate-700 bg-slate-100 border border-slate-300 rounded-lg p-4 whitespace-pre-wrap">{initialNote}</div>
@@ -3521,7 +4316,7 @@ function WeeklyPlanModal({ currentWeek, initialNote, readOnly, targetUser, meta,
             </div>
           )}
           <p className="text-sm text-slate-500 mb-4 border-l-4 border-indigo-400 pl-3">
-            請填寫下一週（W{String(Math.min(currentWeek + 1, 53)).padStart(2, '0')}）預計進行的工作安排；隨時可清空內容後送出（清空後將恢復為未填寫，有填寫才算有打卡得 1 分）。
+            請填寫下一週（W{String(Math.min(currentWeek + 1, weeksTotal)).padStart(2, '0')}）預計進行的工作安排；隨時可清空內容後送出（清空後將恢復為未填寫，有填寫才算有打卡得 1 分）。
           </p>
           <textarea value={note} onChange={e => { setNote(e.target.value); setError(''); markModalDirty(); }}
             placeholder={"例如：\n1. OOO 專案進入測試階段，預計完成驗證報告\n2. 準備季度檢討資料…"}
@@ -3554,7 +4349,7 @@ function DeadlinePanel({ items, onClose, onSelect }) {
         <div className="px-5 py-4 text-white flex justify-between items-center" style={{ backgroundColor: 'var(--hdr-deadline, #EA580C)' }}>
           <div>
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>⏰ 即將到期清單</h3>
-            <p className="text-xs mt-0.5" style={{ color: '#FFF7ED' }}>剩餘 ≤2 週或時程已過 70% 的計畫區間</p>
+            <p className="text-xs mt-0.5" style={{ color: '#FFF7ED' }}>剩餘 ≤2 週，或已走過 70% 時程且剩餘 ≤{DEADLINE_RATIO_MAX_REMAIN} 週的計畫區間</p>
           </div>
           <CloseButton onClick={onClose} className="text-white/70 hover:text-white p-1" />
         </div>
@@ -3589,7 +4384,7 @@ function DeadlinePanel({ items, onClose, onSelect }) {
   );
 }
 
-function PendingPanel({ pending = [], completed = [], currentWeek, planPending = false, extraFilled = false, retro = false, planMeta, extraMeta, onFillPlan, onFillExtra, onClose, onSelect }) {
+function PendingPanel({ pending = [], completed = [], currentWeek, weeksTotal = WEEKS_TOTAL, planPending = false, extraFilled = false, retro = false, planMeta, extraMeta, onFillPlan, onFillExtra, onClose, onSelect }) {
   const focus = useModalFocus();   // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const totalRequired = pending.length + completed.length + 1; // 任務總數 + 1項下週預計
   const completedCount = completed.length + (planPending ? 0 : 1);
@@ -3641,14 +4436,15 @@ function PendingPanel({ pending = [], completed = [], currentWeek, planPending =
               </div>
             ) : (
               <div className="space-y-2.5">
-                {pending.map(({ proj, task }) => (
-                  <button key={task.id} onClick={() => onSelect({ proj, task }, undefined)}
+                {pending.map(({ proj, task, sub }) => (
+                  <button key={`${task.id}-${sub?.id ?? ''}`} onClick={() => onSelect({ proj, task, sub })}
                     className="w-full text-left bg-yellow-50 hover:bg-yellow-100 border border-yellow-300 rounded-xl p-3.5 transition group shadow-sm">
                     <div className="flex items-center justify-between">
                       <div className="min-w-0 pr-2">
                         <div className="text-xs font-bold text-amber-900 dark:text-amber-200 break-words leading-snug">{proj.name}</div>
-                        <div className="text-sm font-black text-slate-800 mt-0.5 truncate">{task.name}</div>
-                        <div className="text-[10px] text-slate-500 mt-1">排程 W{task.start}–W{task.end} · {proj.category}</div>
+                        {/* 子區間是回報單位時(遷移 20):主標題＝子區間名稱,計畫區間退為副標 */}
+                        <div className="text-sm font-black text-slate-800 mt-0.5 truncate">{sub ? sub.name : task.name}</div>
+                        <div className="text-[10px] text-slate-500 mt-1">{sub ? `${task.name} › 子區間 W${sub.start}–W${sub.end}` : `排程 W${task.start}–W${task.end}`} · {proj.category}</div>
                       </div>
                       <div className="flex-shrink-0 text-blue-600 font-bold text-xs bg-white border border-blue-300 rounded-full px-3 py-1.5 group-hover:bg-blue-600 group-hover:text-white transition shadow-sm">
                         打卡回報 ›
@@ -3675,7 +4471,7 @@ function PendingPanel({ pending = [], completed = [], currentWeek, planPending =
                       <span className="bg-emerald-600 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">✓ 已填寫完成</span>
                     )}
                   </div>
-                  <div className="text-xs text-slate-500 mt-1">請安排 W{String(Math.min(currentWeek + 1, 53)).padStart(2, '0')} 週預計進行的工作內容</div>
+                  <div className="text-xs text-slate-500 mt-1">請安排 W{String(Math.min(currentWeek + 1, weeksTotal)).padStart(2, '0')} 週預計進行的工作內容</div>
                   {!planPending && <MetaLine meta={planMeta} className="text-[10px] text-slate-500 mt-0.5" />}
                 </div>
                 <div className={`flex-shrink-0 font-bold text-xs bg-white border rounded-full px-3 py-1.5 transition ${planPending ? 'text-red-600 border-red-300 group-hover:bg-red-600 group-hover:text-white' : 'text-emerald-600 border-emerald-300 group-hover:bg-emerald-600 group-hover:text-white'}`}>
@@ -3715,8 +4511,8 @@ function PendingPanel({ pending = [], completed = [], currentWeek, planPending =
             <div>
               <div className="text-xs font-black text-slate-500 uppercase tracking-wider mb-2">🟢 {wkLabel}已完成打卡任務 ({completed.length} 項)</div>
               <div className="space-y-2">
-                {completed.map(({ proj, task, log }) => (
-                  <button key={task.id} onClick={() => onSelect({ proj, task }, log)}
+                {completed.map(({ proj, task, sub, log }) => (
+                  <button key={`${task.id}-${sub?.id ?? ''}`} onClick={() => onSelect({ proj, task, sub })}
                     className="w-full text-left bg-slate-100 hover:bg-slate-100 border border-slate-300 rounded-xl p-3 transition group opacity-90">
                     <div className="flex items-center justify-between">
                       <div className="min-w-0 pr-2">
@@ -3726,7 +4522,7 @@ function PendingPanel({ pending = [], completed = [], currentWeek, planPending =
                             {STATUS_META[log.status]?.icon} {STATUS_META[log.status]?.label}
                           </span>
                         </div>
-                        <div className="text-xs font-medium text-slate-700 mt-1 truncate">{task.name}</div>
+                        <div className="text-xs font-medium text-slate-700 mt-1 truncate">{unitLabel(task, sub)}</div>
                         {log.updatedAt && (
                           <div className="text-[10px] text-slate-500 mt-0.5">🕘 最後編輯 {log.updatedAt}{log.reporterRole === 'manager' ? '・✏️ 主管修正' : ''}</div>
                         )}
@@ -3763,14 +4559,17 @@ function PendingPanel({ pending = [], completed = [], currentWeek, planPending =
 
 // 主管:週次回報編輯面板 — 選成員後可代為補登/修正該週任務打卡、非專案事項、下週預計工作,
 // 並可編輯主管回覆;所有代修異動由 SP 記錄操作者(ReportedBy/UpdatedBy=主管)並留稽核紀錄
-function ManagerWeekPanel({ week, todayWeek, users = [], projects, taskLogs, extraNotes, weeklyPlans, weeklyComments, extraNoteMeta = {}, weeklyPlanMeta = {}, weeklyCommentMeta = {}, onClose, onSelectTask, onEditExtra, onEditPlan, onEditComment }) {
+// historical:檢視中週次不是「本週」(含非本年度)→ 標「歷史週次」晶片
+function ManagerWeekPanel({ week, historical = false, users = [], projects, taskLogs, subLogs = {}, extraNotes, weeklyPlans, weeklyComments, extraNoteMeta = {}, weeklyPlanMeta = {}, weeklyCommentMeta = {}, onClose, onSelectTask, onEditExtra, onEditPlan, onEditComment }) {
   const focus = useModalFocus();   // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
   const [member, setMember] = useState(users[0] || '');
   const wk = String(week).padStart(2, '0');
 
+  // 一列＝一個回報單位(遷移 20:該週有進行中的子區間就逐子區間列)
   const rows = [];
   projects.filter(p => p.owner === member).forEach(p => p.tasks.forEach(t => {
-    if (t.start <= week && t.end >= week) rows.push({ proj: p, task: t, log: taskLogs[t.id]?.[week] });
+    if (t.start <= week && t.end >= week)
+      weekUnits(t, week, taskLogs, subLogs).units.forEach(({ sub, log }) => rows.push({ proj: p, task: t, sub, log }));
   }));
   const extra = extraNotes[member]?.[week] || '';
   const plan = weeklyPlans[member]?.[week] || '';
@@ -3826,7 +4625,7 @@ function ManagerWeekPanel({ week, todayWeek, users = [], projects, taskLogs, ext
             {/* ⚠ 文字用 text-amber-950 而非 -900:這顆晶片坐在行內色的深琥珀標題列上,底色亮黃在深淺兩色
                 都維持不變(見 input.css「主題不變的亮琥珀晶片」),而 -900 那階會被映射成亮黃 —— 與底色同值、
                 對比 1.00,整個字消失。與 header 的「⚠ 連線中斷」晶片同一組寫法。 */}
-            {week !== todayWeek && (
+            {historical && (
               <span className="text-[10px] font-bold bg-amber-300 text-amber-950 px-2 py-1 rounded-full whitespace-nowrap">歷史週次</span>
             )}
           </div>
@@ -3840,8 +4639,8 @@ function ManagerWeekPanel({ week, todayWeek, users = [], projects, taskLogs, ext
               <div className="bg-slate-100 border border-slate-300 rounded-xl p-4 text-center text-slate-500 text-xs italic">此週無排定任務</div>
             ) : (
               <div className="space-y-2.5">
-                {rows.map(({ proj, task, log }) => (
-                  <button key={task.id} onClick={() => onSelectTask(proj, task, log)}
+                {rows.map(({ proj, task, sub, log }) => (
+                  <button key={`${task.id}-${sub?.id ?? ''}`} onClick={() => onSelectTask(proj, task, sub)}
                     className={`w-full text-left border rounded-xl p-3 transition group shadow-sm ${log ? 'bg-slate-100 hover:bg-slate-100 border-slate-300' : 'bg-yellow-50 hover:bg-yellow-100 border-yellow-300'}`}>
                     <div className="flex items-center justify-between">
                       <div className="min-w-0 pr-2">
@@ -3858,7 +4657,7 @@ function ManagerWeekPanel({ week, todayWeek, users = [], projects, taskLogs, ext
                             <span className="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300" title="此筆由主管代為修正/補登">✏️主管</span>
                           )}
                         </div>
-                        <div className="text-xs font-medium text-slate-700 mt-1 truncate">{task.name}</div>
+                        <div className="text-xs font-medium text-slate-700 mt-1 truncate">{unitLabel(task, sub)}</div>
                         {log?.updatedAt && (
                           <div className="text-[10px] text-slate-500 mt-0.5">🕘 最後編輯 {log.updatedAt}{log.reporter ? `（${log.reporter}）` : ''}</div>
                         )}
@@ -3967,8 +4766,9 @@ function MetaLine({ meta, showManagerTag = true, className = 'text-[10px] text-s
   );
 }
 
-function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, extraNotes, weeklyPlans = {}, weeklyComments = {}, extraNoteMeta = {}, weeklyPlanMeta = {}, weeklyCommentMeta = {}, currentUser, role, panelWidth = 672, highlightedTaskId, onHighlightTask, onEditComment, onClose }) {
+function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, subLogs = {}, extraNotes, weeklyPlans = {}, weeklyComments = {}, extraNoteMeta = {}, weeklyPlanMeta = {}, weeklyCommentMeta = {}, currentUser, role, panelWidth = 672, todayWeek = currentWeek, isFutureWeek = currentWeek > todayWeek, highlightedTaskId, highlightedSubId = null, onHighlightTask, onEditComment, onClose }) {
   const isManager = role === 'manager';
+  // isFutureWeek 由 App 判斷(含「未來年度」):未來週全員本來就「未回報」,催報名單沒有意義(主管回覆入口由父層以 onEditComment=undefined 收掉)
   // 看板變窄(投影機/筆電)時卡片內容改單欄:md: 斷點看的是「視窗寬」不是「面板寬」,不改會在窄面板裡擠成兩欄
   const narrowPanel = panelWidth < 560;
   // 更窄(≈1024 螢幕→面板 358)時成員列連晶片文字也放不下(實測溢出 26px),只留圖示＋title
@@ -4009,17 +4809,23 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
     }
   };
 
+  // activeTasks／pendingTasks 的元素＝「回報單位」{proj, task, sub, log}(遷移 20:該週有進行中的子區間就逐子區間一筆,sub=null＝計畫區間本身)。
+  // 回報數 x/total 以單位計;得分則以計畫區間計(區間分數＝子區間平均,滿分＝taskTotal)——切得細不會膨脹分數。
   const summary = useMemo(() => users.map(user => {
     const activeTasks = [], pendingTasks = [];
+    let taskTotal = 0, scoreSum = 0;
     projects.filter(p => p.owner === user).forEach(p => p.tasks.forEach(t => {
       if (t.start <= currentWeek && t.end >= currentWeek) {
-        const log = taskLogs[t.id]?.[currentWeek];
-        if (log) activeTasks.push({ proj: p, task: t, log });
-        else pendingTasks.push({ proj: p, task: t });
+        const wu = weekUnits(t, currentWeek, taskLogs, subLogs);
+        taskTotal++;
+        scoreSum += wu.score;
+        wu.units.forEach(({ sub, log }) => {
+          if (log) activeTasks.push({ proj: p, task: t, sub, log, legacy: wu.legacy });
+          else pendingTasks.push({ proj: p, task: t, sub });
+        });
       }
     }));
-    // 本週得分=已回報任務分數加總(回報預設 1 分,主管可調 0.3~1);未回報=0;滿分=本週排定任務數
-    const weekScore = Math.round(activeTasks.reduce((sum, { log }) => sum + Number(log.score ?? 1), 0) * 10) / 10;
+    const weekScore = Math.round(scoreSum * 10) / 10;
     return {
       user, activeTasks, pendingTasks,
       extraNote: extraNotes[user]?.[currentWeek],
@@ -4029,9 +4835,10 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
       planMeta: weeklyPlanMeta[user]?.[currentWeek],
       commentMeta: weeklyCommentMeta[user]?.[currentWeek],
       total: activeTasks.length + pendingTasks.length,
+      taskTotal,
       weekScore
     };
-  }), [users, projects, taskLogs, extraNotes, weeklyPlans, weeklyComments, extraNoteMeta, weeklyPlanMeta, weeklyCommentMeta, currentWeek]);
+  }), [users, projects, taskLogs, subLogs, extraNotes, weeklyPlans, weeklyComments, extraNoteMeta, weeklyPlanMeta, weeklyCommentMeta, currentWeek]);
 
   // 依 onlyMine 過濾要顯示的成員摘要
   const visibleSummary = useMemo(() => {
@@ -4041,13 +4848,20 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
 
   const showTeamView = isManager || !onlyMine;   // 是否為團隊瀏覽模式（多人＋折疊）
 
+  // 週報文字裡的一列回報。「階段」= 該計畫區間底下、本週(currentWeek,不是今天)落在範圍內的子區間;沒有就不加括號。
+  // 兩份週報文字(單人/全隊)共用這一行,格式才不會漂掉。
+  // 一列＝一個回報單位:子區間回報寫成「區間 › 子區間」;父層舊紀錄(legacy)才在括號列出當週階段
+  const reportTaskLine = ({ proj, task, sub, log, legacy }) => {
+    const phases = legacy ? activeSubsOf(task, currentWeek).map(x => x.name) : [];
+    const phaseText = phases.length > 0 ? `（階段：${phases.join('／')}）` : '';
+    return `  [${STATUS_META[log.status]?.label}] ${proj.name} - ${unitLabel(task, sub)}${phaseText}${log.note ? '：' + log.note : ''}${log.docUrl ? `\n      📎 ${log.docUrl}` : ''}`;
+  };
+
   // 產生單一成員的週報文字
   const buildSingleUserReport = (s) => {
     const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} 週報 — ${s.user}】`, ''];
-    lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}・得分 ${s.weekScore}/${s.total}）`);
-    s.activeTasks.forEach(({ proj, task, log }) => {
-      lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}${log.docUrl ? `\n      📎 ${log.docUrl}` : ''}`);
-    });
+    lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}・得分 ${s.weekScore}/${s.taskTotal}）`);
+    s.activeTasks.forEach(t => lines.push(reportTaskLine(t)));
     if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
     if (s.extraMeta?.docUrl) lines.push(`      📎 ${s.extraMeta.docUrl}`);
     if (s.weekPlan) lines.push(`  (下週預計) ${s.weekPlan.replace(/\n/g, ' / ')}`);
@@ -4063,10 +4877,8 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
     visibleSummary.forEach(s => {
       // 只附了文件、沒打字的人也要出現(否則他的連結不會進週報文字)
       if (s.activeTasks.length === 0 && !s.extraNote && !s.weekPlan && !s.extraMeta?.docUrl && !s.planMeta?.docUrl) return;
-      lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}・得分 ${s.weekScore}/${s.total}）`);
-      s.activeTasks.forEach(({ proj, task, log }) => {
-        lines.push(`  [${STATUS_META[log.status]?.label}] ${proj.name} - ${task.name}${log.note ? '：' + log.note : ''}${log.docUrl ? `\n      📎 ${log.docUrl}` : ''}`);
-      });
+      lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}・得分 ${s.weekScore}/${s.taskTotal}）`);
+      s.activeTasks.forEach(t => lines.push(reportTaskLine(t)));
       if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
       if (s.extraMeta?.docUrl) lines.push(`      📎 ${s.extraMeta.docUrl}`);
       if (s.weekPlan) lines.push(`  (下週預計) ${s.weekPlan.replace(/\n/g, ' / ')}`);
@@ -4103,7 +4915,7 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
       if (!s.weekPlan) miss.push('下週預計未填');
       lines.push(`• ${s.user}：${miss.join('、')}`);
       // 把未回報的項目名稱一併列出,收到訊息的人不用再回系統查是哪幾項
-      s.pendingTasks.forEach(({ proj, task }) => lines.push(`    - ${proj.name}｜${task.name}`));
+      s.pendingTasks.forEach(({ proj, task, sub }) => lines.push(`    - ${proj.name}｜${unitLabel(task, sub)}`));
     });
     lines.push('', `（共 ${pendingSummary.length} 人待補，請於本週內完成回報）`);
     return lines.join('\n');
@@ -4126,16 +4938,19 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
     <div className={`p-4 grid grid-cols-1 gap-4 ${narrowPanel ? '' : 'md:grid-cols-2'}`}>
       <div className="space-y-2.5">
         <div className="text-xs font-bold text-slate-500 border-b border-slate-200 pb-1">📌 專案執行項目</div>
-        {activeTasks.length > 0 ? activeTasks.map(({ proj, task, log }) => (
-          <div key={task.id}
+        {activeTasks.length > 0 ? activeTasks.map(({ proj, task, sub, log, legacy }) => {
+          // 一張卡＝一個回報單位:高亮也以單位比對(子區間的卡只亮那條子條,父層的卡只亮父條)
+          const cardHighlighted = highlightedTaskId === task.id && (highlightedSubId ?? null) === (sub?.id ?? null);
+          return (
+          <div key={`${task.id}-${sub?.id ?? ''}`}
             {...clickable(
-              onHighlightTask ? () => onHighlightTask(proj, task) : undefined,
-              `在甘特圖高亮 ${proj.name}｜${task.name}`
+              onHighlightTask ? () => onHighlightTask(proj, task, sub || null) : undefined,
+              `在甘特圖高亮 ${proj.name}｜${task.name}${sub ? `｜${sub.name}` : ''}`
             )}
-            title={onHighlightTask ? '點擊在左側甘特圖高亮此項目的計畫區間' : undefined}
-            className={`text-sm p-2.5 rounded-lg border ${onHighlightTask ? 'cursor-pointer' : ''} ${highlightedTaskId === task.id ? 'ring-2 ring-blue-500 border-blue-400 bg-blue-50/70' : log.status === 'not_executed' ? 'bg-slate-100 border-slate-300 opacity-80' : log.status === 'monitor' ? 'bg-sky-50/70 border-sky-200' : 'bg-green-50/60 border-green-200'}`}>
+            title={onHighlightTask ? (sub ? '點擊在左側甘特圖高亮此子區間' : '點擊在左側甘特圖高亮此項目的計畫區間') : undefined}
+            className={`text-sm p-2.5 rounded-lg border ${onHighlightTask ? 'cursor-pointer' : ''} ${cardHighlighted ? 'ring-2 ring-blue-500 border-blue-400 bg-blue-50/70' : log.status === 'not_executed' ? 'bg-slate-100 border-slate-300 opacity-80' : log.status === 'monitor' ? 'bg-sky-50/70 border-sky-200' : 'bg-green-50/60 border-green-200'}`}>
             {/* 方案A:專案名稱獨立整行完整顯示(可換行,不截斷),徽章移到下方一列 */}
-            <div className="font-bold text-slate-700 text-xs leading-snug break-words">{proj.name}{highlightedTaskId === task.id && <span className="ml-1 text-blue-600 text-[10px]">◀ 甘特圖已高亮</span>}</div>
+            <div className="font-bold text-slate-700 text-xs leading-snug break-words">{proj.name}{cardHighlighted && <span className="ml-1 text-blue-600 text-[10px]">◀ 甘特圖已高亮</span>}</div>
             <div className="flex flex-wrap items-center gap-1 mt-1">
               <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${STATUS_META[log.status]?.tag}`}>{STATUS_META[log.status]?.label}</span>
               <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700" title="打卡得分">{Number(log.score ?? 1)}分</span>
@@ -4147,14 +4962,37 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
                   stopPropagation——整張卡片是 clickable(點了會去高亮甘特),不擋會兩件事一起發生。 */}
               {log.docUrl && <DocLink url={log.docUrl} stopPropagation />}
             </div>
-            <div className="text-slate-600 my-1 font-medium text-xs">{task.name}</div>
+            {/* 遷移 20 起子區間本身就是回報單位:一張卡＝一個子區間,區間名稱後直接接子區間名稱(藍晶片)。
+                只有父層舊紀錄(legacy,切子區間前回報的)才用「階段：…」列出當週階段。 */}
+            {(() => {
+              const phases = legacy ? activeSubsOf(task, currentWeek) : [];
+              return (
+                <div className="my-1 flex flex-wrap items-center gap-1">
+                  <span className="text-slate-600 font-medium text-xs">{task.name}</span>
+                  {sub && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300 whitespace-nowrap"
+                      title={`子區間：${sub.name}（W${String(sub.start).padStart(2, '0')}–W${String(sub.end).padStart(2, '0')}）`}>
+                      › {sub.name}
+                    </span>
+                  )}
+                  {phases.map(x => (
+                    <span key={x.id} className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-300 whitespace-nowrap"
+                      title={`本週進行中的子區間：${x.name}（W${String(x.start).padStart(2, '0')}–W${String(x.end).padStart(2, '0')}）；此週以計畫區間為單位回報`}>
+                      階段：{x.name}
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
             {log.note && <div className="text-slate-700 text-xs bg-white p-1.5 rounded border border-slate-200 whitespace-pre-wrap">{log.note}</div>}
             {log.updatedAt && <div className="text-[10px] text-slate-500 mt-1">🕘 最後編輯 {log.updatedAt}{log.reporter ? `（${log.reporter}）` : ''}</div>}
           </div>
-        )) : <div className="text-sm text-slate-500 italic py-2">本週無專案投入</div>}
+          );
+        }) : <div className="text-sm text-slate-500 italic py-2">本週無專案投入</div>}
         {pendingTasks.length > 0 && (
           <div className="text-[11px] text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5">
-            尚有 {pendingTasks.length} 項本週排定任務未回報
+            尚有 {pendingTasks.length} 項本週排定任務未回報：
+            {pendingTasks.map(({ task, sub }) => unitLabel(task, sub)).join('、')}
           </div>
         )}
       </div>
@@ -4245,7 +5083,7 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
             {/* 催報名單:看板算得出誰沒交,但原本看完就沒有下一步了(主管得自己把名字抄到通訊軟體)。
                 只有主管、且真的有人沒交時才出現——全員交齊時擺一顆按不出東西的鈕只是噪音。
                 放在子工具列而不是標題列:標題列已有三顆鈕,窄面板(400px)再加會擠爆。 */}
-            {isManager && pendingSummary.length > 0 && (
+            {isManager && !isFutureWeek && pendingSummary.length > 0 && (
               <>
                 <span className="text-slate-400" aria-hidden="true">|</span>
                 <button onClick={copyPendingList}
@@ -4323,10 +5161,10 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, e
                       </span>
                     )}
                     {/* 個人週得分:已回報任務分數加總/滿分(=排定任務數);滿分綠、其餘靛藍 */}
-                    <span className={`flex-shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${s.weekScore >= total ? 'bg-green-100 text-green-800 border-green-400 dark:bg-green-900/40 dark:text-green-300 dark:border-green-700/50' : 'bg-indigo-100 text-indigo-800 border-indigo-400 dark:bg-indigo-900/40 dark:text-indigo-300 dark:border-indigo-700/50'}`}
-                      title={`本週得分＝各任務打卡分數加總（回報預設 1 分、主管可調 0.3~1；未回報 0 分）／滿分＝本週排定任務數`}>
+                    <span className={`flex-shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${s.weekScore >= s.taskTotal ? 'bg-green-100 text-green-800 border-green-400 dark:bg-green-900/40 dark:text-green-300 dark:border-green-700/50' : 'bg-indigo-100 text-indigo-800 border-indigo-400 dark:bg-indigo-900/40 dark:text-indigo-300 dark:border-indigo-700/50'}`}
+                      title={`本週得分＝各計畫區間打卡分數加總（回報預設 1 分、主管可調 0.3~1；未回報 0 分；有子區間的週＝子區間分數平均）／滿分＝本週排定計畫區間數`}>
                       {/* 最窄時省 🏆 改帶「分」字:此時回報數已隱藏,只剩一組 x/y,不標單位會分不出是回報數還是得分 */}
-                      {tightRow ? `${s.weekScore}/${total}分` : `🏆 ${s.weekScore}/${total}${narrowPanel ? '' : ' 分'}`}
+                      {tightRow ? `${s.weekScore}/${s.taskTotal}分` : `🏆 ${s.weekScore}/${s.taskTotal}${narrowPanel ? '' : ' 分'}`}
                     </span>
                   </>
                 )}
@@ -4581,7 +5419,7 @@ const AUDIT_ACTION_META = {
   ACCESSRULE:{ label: '權限', cls: 'bg-rose-100 text-rose-700' },
   SETTING:   { label: '設定', cls: 'bg-slate-200 text-slate-700' }
 };
-const AUDIT_ENTITY_LABELS = { Project: '專案', Task: '任務', WeeklyLog: '週回報', ExtraNote: '非專案事項', WeeklyPlan: '下週計畫', WeeklyComment: '主管回覆', User: '成員', AccessRule: '瀏覽權限', AppSettings: '系統設定' };
+const AUDIT_ENTITY_LABELS = { Project: '專案', Task: '任務', SubInterval: '子區間', WeeklyLog: '週回報', ExtraNote: '非專案事項', WeeklyPlan: '下週計畫', WeeklyComment: '主管回覆', User: '成員', AccessRule: '瀏覽權限', AppSettings: '系統設定' };
 
 // 主管:使用統計面板 — 登入次數(LoginLogs,遷移 13)評估網頁使用率;
 // 每次登入寫一筆(manual=登入畫面點選/auto=重整自動還原,兩者都代表一次開啟使用)

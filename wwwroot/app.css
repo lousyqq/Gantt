@@ -1317,6 +1317,12 @@ video {
   margin-left: calc(1rem * calc(1 - var(--tw-space-x-reverse)));
 }
 
+.space-y-0\.5 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-y-reverse: 0;
+  margin-top: calc(0.125rem * calc(1 - var(--tw-space-y-reverse)));
+  margin-bottom: calc(0.125rem * var(--tw-space-y-reverse));
+}
+
 .space-y-1\.5 > :not([hidden]) ~ :not([hidden]) {
   --tw-space-y-reverse: 0;
   margin-top: calc(0.375rem * calc(1 - var(--tw-space-y-reverse)));
@@ -1714,6 +1720,11 @@ video {
   border-color: rgb(186 230 253 / var(--tw-border-opacity, 1));
 }
 
+.border-sky-300 {
+  --tw-border-opacity: 1;
+  border-color: rgb(125 211 252 / var(--tw-border-opacity, 1));
+}
+
 .border-sky-400 {
   --tw-border-opacity: 1;
   border-color: rgb(56 189 248 / var(--tw-border-opacity, 1));
@@ -1762,6 +1773,10 @@ video {
 .border-teal-400 {
   --tw-border-opacity: 1;
   border-color: rgb(45 212 191 / var(--tw-border-opacity, 1));
+}
+
+.border-teal-700\/70 {
+  border-color: rgb(15 118 110 / 0.7);
 }
 
 .border-teal-800 {
@@ -1923,6 +1938,10 @@ video {
 .bg-blue-50 {
   --tw-bg-opacity: 1;
   background-color: rgb(239 246 255 / var(--tw-bg-opacity, 1));
+}
+
+.bg-blue-50\/40 {
+  background-color: rgb(239 246 255 / 0.4);
 }
 
 .bg-blue-50\/70 {
@@ -2532,6 +2551,10 @@ video {
   padding-top: 0.5rem;
 }
 
+.pt-2\.5 {
+  padding-top: 0.625rem;
+}
+
 .pt-3 {
   padding-top: 0.75rem;
 }
@@ -2814,11 +2837,6 @@ video {
   color: rgb(224 231 255 / var(--tw-text-opacity, 1));
 }
 
-.text-indigo-600 {
-  --tw-text-opacity: 1;
-  color: rgb(79 70 229 / var(--tw-text-opacity, 1));
-}
-
 .text-indigo-700 {
   --tw-text-opacity: 1;
   color: rgb(67 56 202 / var(--tw-text-opacity, 1));
@@ -2889,6 +2907,11 @@ video {
   color: rgb(159 18 57 / var(--tw-text-opacity, 1));
 }
 
+.text-sky-200 {
+  --tw-text-opacity: 1;
+  color: rgb(186 230 253 / var(--tw-text-opacity, 1));
+}
+
 .text-sky-300 {
   --tw-text-opacity: 1;
   color: rgb(125 211 252 / var(--tw-text-opacity, 1));
@@ -2902,6 +2925,11 @@ video {
 .text-slate-200 {
   --tw-text-opacity: 1;
   color: rgb(226 232 240 / var(--tw-text-opacity, 1));
+}
+
+.text-slate-300 {
+  --tw-text-opacity: 1;
+  color: rgb(203 213 225 / var(--tw-text-opacity, 1));
 }
 
 .text-slate-400 {
@@ -2932,6 +2960,11 @@ video {
 .text-slate-900 {
   --tw-text-opacity: 1;
   color: rgb(15 23 42 / var(--tw-text-opacity, 1));
+}
+
+.text-teal-200 {
+  --tw-text-opacity: 1;
+  color: rgb(153 246 228 / var(--tw-text-opacity, 1));
 }
 
 .text-teal-700 {
@@ -3125,6 +3158,11 @@ video {
   --tw-ring-color: rgb(4 120 87 / 0.4);
 }
 
+.ring-green-700 {
+  --tw-ring-opacity: 1;
+  --tw-ring-color: rgb(21 128 61 / var(--tw-ring-opacity, 1));
+}
+
 .ring-indigo-300 {
   --tw-ring-opacity: 1;
   --tw-ring-color: rgb(165 180 252 / var(--tw-ring-opacity, 1));
@@ -3148,6 +3186,11 @@ video {
   --tw-ring-color: rgb(185 28 28 / 0.4);
 }
 
+.ring-sky-700 {
+  --tw-ring-opacity: 1;
+  --tw-ring-color: rgb(3 105 161 / var(--tw-ring-opacity, 1));
+}
+
 .ring-slate-300 {
   --tw-ring-opacity: 1;
   --tw-ring-color: rgb(203 213 225 / var(--tw-ring-opacity, 1));
@@ -3156,6 +3199,11 @@ video {
 .ring-slate-500 {
   --tw-ring-opacity: 1;
   --tw-ring-color: rgb(100 116 139 / var(--tw-ring-opacity, 1));
+}
+
+.ring-slate-600 {
+  --tw-ring-opacity: 1;
+  --tw-ring-color: rgb(71 85 105 / var(--tw-ring-opacity, 1));
 }
 
 .ring-yellow-600 {
@@ -3250,6 +3298,8 @@ video {
   /* 專案列 hover */
   --frozen-bg: #FFFFFF;
   /* 凍結資料格底色(=bg-white);用於封住欄位間的次像素縫隙 */
+  --gantt-sub-band: rgba(253,237,184,0.45);
+  /* 子區間列上「父區間範圍」的淡色底帶(父條奶油色的淡版) */
   --brand-btn: #001F5B;
   /* 品牌主行動鈕/圖示磚(登入頁);深色下提亮 */
   /* 「即將到期」標題列:#EA580C 太亮,連純白副標都只有 3.56(淺色下亦然)。
@@ -3267,6 +3317,8 @@ video {
   --gantt-group-hover: #1F2F4A;
   --gantt-row-hover: #17233A;
   --frozen-bg: #1E293B;
+  --gantt-sub-band: rgba(253,230,138,0.13);
+  /* 深底上奶油色要很淡,否則整條變土黃;13% 剛好看得出範圍 */
   --brand-btn: #2563EB;
   --hdr-deadline: #C2410C;
 }
@@ -3460,6 +3512,12 @@ video {
 .dark .bg-sky-100 {
   background-color:#1E486E;
 }
+
+.dark .hover\:bg-sky-200:hover {
+  background-color:#265A87;
+}
+
+/* 子區間展開鈕 hover:比 -100 再上一階 */
 
 .dark .text-sky-600,.dark .text-sky-700,.dark .text-sky-800 {
   color:#7DD3FC;
@@ -3789,6 +3847,12 @@ video {
   background-color:#2A5C2F;
 }
 
+.dark .hover\:bg-green-200:hover {
+  background-color:#336A38;
+}
+
+/* 打卡彈窗的子區間單位晶片(已回報)hover:比 -100 再上一階 */
+
 .dark .hover\:bg-emerald-50\/40:hover {
   background-color:#1A4F34;
 }
@@ -3815,6 +3879,12 @@ video {
 .dark .hover\:text-blue-700:hover,.dark .hover\:text-blue-800:hover,.dark .hover\:text-blue-900:hover {
   color:#BFDBFE;
 }
+
+.dark .hover\:text-red-800:hover {
+  color:#FECACA;
+}
+
+/* 「🗑 刪除區間」文字鈕:紅字 hover 更亮一階(基底 text-red-700 深色為 #FCA5A5) */
 
 /* -200 晶片底（少數以 -200 當底色的小標籤）：需高於同色 -100 一階 */
 
@@ -4137,6 +4207,11 @@ thead :where(button, a, input, select):focus-visible,
   background-color: rgb(220 252 231 / var(--tw-bg-opacity, 1));
 }
 
+.hover\:bg-green-200:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(187 247 208 / var(--tw-bg-opacity, 1));
+}
+
 .hover\:bg-green-600:hover {
   --tw-bg-opacity: 1;
   background-color: rgb(22 163 74 / var(--tw-bg-opacity, 1));
@@ -4216,6 +4291,11 @@ thead :where(button, a, input, select):focus-visible,
 .hover\:bg-rose-700:hover {
   --tw-bg-opacity: 1;
   background-color: rgb(190 18 60 / var(--tw-bg-opacity, 1));
+}
+
+.hover\:bg-sky-200:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(186 230 253 / var(--tw-bg-opacity, 1));
 }
 
 .hover\:bg-slate-100:hover {
@@ -4309,6 +4389,11 @@ thead :where(button, a, input, select):focus-visible,
   color: rgb(30 64 175 / var(--tw-text-opacity, 1));
 }
 
+.hover\:text-red-800:hover {
+  --tw-text-opacity: 1;
+  color: rgb(153 27 27 / var(--tw-text-opacity, 1));
+}
+
 .hover\:text-slate-600:hover {
   --tw-text-opacity: 1;
   color: rgb(71 85 105 / var(--tw-text-opacity, 1));
@@ -4395,6 +4480,10 @@ thead :where(button, a, input, select):focus-visible,
   cursor: grabbing;
 }
 
+.disabled\:cursor-default:disabled {
+  cursor: default;
+}
+
 .disabled\:cursor-not-allowed:disabled {
   cursor: not-allowed;
 }
@@ -4407,6 +4496,10 @@ thead :where(button, a, input, select):focus-visible,
 .disabled\:text-slate-500:disabled {
   --tw-text-opacity: 1;
   color: rgb(100 116 139 / var(--tw-text-opacity, 1));
+}
+
+.disabled\:opacity-40:disabled {
+  opacity: 0.4;
 }
 
 .disabled\:opacity-50:disabled {

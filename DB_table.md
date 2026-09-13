@@ -7,9 +7,9 @@
 
 | 環境 | 說明 | 已執行 |
 |------|------|--------|
-| 遠端正式主機 | 線上正式資料，只能跑增量遷移 | `old.sql` → `new.sql`（=01~09 基準）；**10~17 需依編號順序執行（若尚未）** |
-| 本機開發 `Sariel\Gantt` | 開發／驗證用 | 全部（old+new+10~17） |
-| 本機測試 `Sariel\Gantt2` | 切換連線字串測試用 | old+new+10（2026-07-16 補跑）；11~17 未套用 |
+| 遠端正式主機 | 線上正式資料，只能跑增量遷移 | `old.sql` → `new.sql`（=01~09 基準）；**10~18 需依編號順序執行（若尚未）** |
+| 本機開發 `Sariel\Gantt` | 開發／驗證用 | 全部（old+new+10~18） |
+| 本機測試 `Sariel\Gantt2` | 切換連線字串測試用 | old+new+10（2026-07-16 補跑）；11~18 未套用 |
 
 - **`old.sql`＋`new.sql` 不可修改**：兩檔＝遠端已執行完畢的架構基準（2026-07-12 以臨時 DB 逐項指紋驗證與正式架構一致）。
 - `backup_sql/` 內 01~09 逐檔僅供參考，勿執行勿修改。
@@ -18,7 +18,7 @@
 - sqlcmd 執行必帶旗標：`-I`（QUOTED_IDENTIFIER ON，filtered index 必要）、`-f 65001`（UTF-8 中文）、`-b`（遇錯停止）。
 - 開新年度只需 `EXEC dbo.usp_EnsureScheduleYear <年度>;`。
 
-## 目前資料表清單（13 張）
+## 目前資料表清單（14 張）
 
 | 資料表 | 用途 | 關鍵欄位 |
 |--------|------|----------|
@@ -27,6 +27,7 @@
 | ScheduleWeeks | 年度週→月對照 | (ScheduleYear,WeekNo) PK、MonthName、MonthLabel；CHECK 週 1..53 |
 | Projects | 專案主檔 | TypeCode、Category、OwnerUserId、Name、ScheduleYear、SortOrder、IsDeleted、Deliverable、MpSaving、IsStarred、NID |
 | Tasks | 計畫區間 | TaskCode(`t{ProjectId}-{seq}`)、StartWeek/EndWeek(CHECK 1..53)、SortOrder、IsDeleted、NID |
+| TaskSubIntervals | 計畫區間的子區間（只排程不打卡，可重疊） | SubId、TaskId(FK)、Name、StartWeek/EndWeek(CHECK 1..53；SP 另限制在父區間內)、SortOrder、IsDeleted |
 | WeeklyLogs | 每週打卡 | TaskId×Year×Week 唯一、Status、Note、**DocUrl**(文件連結,選填)、Score DECIMAL(2,1) DEFAULT 1、ReportedByUserId、UpdatedAt |
 | ExtraNotes | 非專案事項 | UserId×Year×Week 唯一、Note、**DocUrl**(文件連結,選填)、UpdatedByUserId、UpdatedAt |
 | WeeklyPlans | 下週預計工作 | 同 ExtraNotes 結構（含 DocUrl） |
@@ -39,10 +40,10 @@
 **View**：`vw_ProjectTasks`、`vw_WeeklyReport`。
 **外部相依**：`[WEB].[dbo].[notes_person]` 名冊（遠端跨 server VIEW；本機以 sim 腳本模擬）。
 
-## 目前預存程序清單（24 個，全部寫 AuditLog）
+## 目前預存程序清單（26 個，全部寫 AuditLog）
 
 usp_UpsertWeeklyLog（打卡）、usp_UpsertExtraNote、usp_UpsertWeeklyPlan、usp_UpsertWeeklyComment（SP 內檢查主管）、
-usp_UpdateTaskSchedule、usp_InsertProject、usp_UpdateProject（可改負責人）、usp_DeleteProject（軟刪）、
+usp_UpdateTaskSchedule（含子區間範圍檢查）、usp_UpsertTaskSubInterval／usp_DeleteTaskSubInterval（SP 內檢查主管或負責人）、usp_InsertProject、usp_UpdateProject（可改負責人）、usp_DeleteProject（軟刪）、
 usp_ReorderProjects（OPENJSON 保序）、usp_InsertTask、usp_DeleteTask（軟刪）、usp_RestoreProject、usp_RestoreTask、
 usp_InsertUser（同名停用者重新啟用）、usp_UpdateUser、usp_DeleteUser（名下有專案 RAISERROR）、
 usp_UpdateProjectDeliverable（含 @MpSaving；SP 內檢查負責人/主管）、usp_UpdateLogScore（SP 內檢查主管；0.3/0.5/0.8/0.9/1）、
@@ -196,5 +197,79 @@ usp_ToggleProjectStar、usp_EnsureScheduleYear、usp_SetAppSetting、usp_AddAcce
 - 已套用本機 Gantt（驗證：https 與 UNC 皆正確存取、清空存回 NULL、稽核白話顯示「…，文件連結：…」、
   週報 Excel 的 Sheet2 多「非專案文件連結」「下週預計文件連結」兩欄且產生真正可點的外部超連結）。
   **遠端需執行（順序 …→16→17）**；Gantt2 未套用。
+
+## 2026-09-11 — 遷移 18：計畫區間的「子區間」（18_add_task_subintervals.sql）
+- 需求：一條計畫區間（如「測試 W10–W27」）底下實際上還會再切成幾個**可重疊**的階段
+  （準備資料 W10–W15、跟 IT 溝通 W12–W19、驗證 W14–W27），主管希望在甘特圖上直接看到。
+- 新表 **`dbo.TaskSubIntervals`**：`SubId` IDENTITY PK、`TaskId` FK→Tasks、`Name NVARCHAR(200)`、
+  `StartWeek/EndWeek`（CHECK 1..53 且 Start≤End）、`SortOrder`、`IsDeleted`（軟刪）、`CreatedAt/UpdatedAt`；
+  filtered index `IX_TaskSub_Task(TaskId) WHERE IsDeleted=0`（需 `-I`）。
+  ⚠ **子區間只排程、不打卡**：`WeeklyLogs` 仍以 Tasks 為單位、完全不動——子區間也打卡會讓成員一週對同一專案回報三次。
+- `usp_UpsertTaskSubInterval(@SubId=NULL→新增, @TaskCode, @Name, @Start, @End, @Actor…, @NewSubId OUTPUT)`：
+  SP 內檢查 ①權限＝**主管或專案負責人**（比照 `usp_UpdateProjectDeliverable`，子區間是負責人自己的工作拆解）
+  ②名稱非空 ③**起迄必須落在父區間內**（跑出去就不是「子」，甘特圖也會畫到父條外面）④每條計畫區間最多 10 筆。
+- `usp_DeleteTaskSubInterval(@SubId, @Actor…)`：軟刪除；同一套權限檢查。
+- `CREATE OR ALTER usp_UpdateTaskSchedule`：**父區間改期時若任一子區間會跑出新範圍 → RAISERROR 列出名稱**
+  （`STRING_AGG`；不靜默截斷子區間，讓使用者自己決定先改哪邊）。其餘與遷移 15 完全相同（稽核值尾端的 `NID=` 保留）。
+- 稽核：`EntityType='SubInterval'`、`EntityId=CONCAT(TaskCode,'#',SubId)`（如 `t204-2#3`）；Old/NewValue 格式與 Task 相同
+  `name=… | W..-W..`；**DELETE 的 OldValue 也帶名稱**——子區間不在 API 的 Tasks 對照表裡，刪除後白話翻譯只能靠它。
+- 父區間／專案軟刪時子區間不另行處理（bootstrap 以 `t.IsDeleted=0 AND p.IsDeleted=0` JOIN，復原父區間即自動回來）。
+- 後端 bootstrap **先 `OBJECT_ID('dbo.TaskSubIntervals')` 檢查再查**：遠端尚未跑遷移 18 時整包不會失敗（遷移 16/17 曾因欄位不存在讓系統開不起來）。
+- 冪等（`OBJECT_ID`／`sys.indexes` 檢查、`CREATE OR ALTER`）；SP 以 `QUOTED_IDENTIFIER ON` 建立。
+- 已套用本機 Gantt（驗證：負責人與主管新增皆成功、他人 400「僅專案負責人或主管可編輯子區間」、超出父區間 400 並列出範圍、
+  空白名稱 400、W0 400、父區間縮短 400 列出兩筆子區間、修改與刪除正確、稽核白話三種動作皆完整句子；
+  驗證用 5 筆子區間已刪除，AuditLog 保留）。**遠端需執行（順序 …→17→18）**；Gantt2 未套用。
+
+## 2026-09-12 — 遷移 18 腳本修正（結構不變，遠端執行前的順序修正）
+- `18_add_task_subintervals.sql` 的 `SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;` **由第 4 段 SP 之前移到檔頭**（`CREATE TABLE` 之前）。
+  原本註解寫「上方 filtered index 亦需要」，但實際擺在 `CREATE INDEX … WHERE IsDeleted = 0` **之後**：
+  sqlcmd 沒帶 `-I`（或用其他排程工具）跑時，索引會 error 1934 失敗、後面的 SP 卻照建 → 得到「功能正常但沒索引」的半套結果，
+  且因腳本冪等、下次重跑也只會再失敗一次那一段。
+- 資料表／SP／稽核格式**完全沒變**；本機 Gantt 當初以 `-I` 執行，`sys.indexes` 已確認 `IX_TaskSub_Task has_filter=1`，**不需重跑**。
+  遠端／Gantt2 尚未執行 18，直接用修正後的檔案即可。
+- 另：`STRING_AGG`（第 4 段）需 **SQL Server 2017+**；遠端執行前先 `SELECT @@VERSION` 確認（`系統架構.md` 記載為 2019）。
+
+## 2026-09-12 — 遷移 19：移除殘留的 1–52 週次 CHECK（`19_drop_legacy_week_checks.sql`）
+- **成因**：`old.sql` 建表時的週次約束叫 `CK_WLog_Week`（WeeklyLogs）／`CK_Extra_Week`（ExtraNotes），上限 **52**。
+  `new.sql` 升到 53 週時 DROP 的是**新名字** `CK_WeeklyLogs_WeekNo`／`CK_ExtraNotes_WeekNo`（當時不存在），再用新名字建 1–53
+  → 兩張表各同時掛著新舊兩條約束，**實際上限仍是 52**。（Tasks／WeeklyPlans／WeeklyComments／ScheduleWeeks 沒這問題。）
+- **症狀**：本機以交易＋rollback 探測 `WeeklyLogs` 寫入 `WeekNo=53` →「INSERT 陳述式與 CHECK 條件約束 "CK_WLog_Week" 衝突」。
+  不是 RAISERROR 50000，API 走 `Fail(ex)` 回 500「伺服器處理失敗」，使用者看不出是週次問題。
+  2026 年度有 53 週（W53＝2026-12-28～2027-01-03），**年底打卡與非專案事項一定失敗**；遠端基準（old+new）相同。
+- **內容**：冪等 `DROP CONSTRAINT CK_WLog_Week`／`CK_Extra_Week`（依 `sys.check_constraints` 名稱＋所屬表判斷）；
+  另加保險：若新約束 `CK_WeeklyLogs_WeekNo`／`CK_ExtraNotes_WeekNo` 不存在則補建 1–53。末段 SELECT 列出兩張表的週次約束供目視確認。
+  不動資料、不動 SP。
+- 已套用本機 Gantt（驗證：兩張表各只剩一條 1–53 約束；W53 探測 INSERT 成功後 rollback；重跑腳本「不存在，略過」）。
+  **遠端需執行（順序 …→18→19）**；Gantt2 未套用。
+
+## 2026-09-12 — 遷移 20：子區間打卡（`20_sub_interval_checkin.sql`）
+- **背景**：使用者決定推翻遷移 18 的「子區間只排程不打卡」——專案很大時一條計畫區間切了好幾個階段，只對計畫區間打卡
+  變成「一週只有一件事」，主管看不出哪個階段動了。規則：①該週有落在範圍內的子區間 → 對每個子區間各自打卡；沒有 → 對計畫區間
+  ②父層那週已有紀錄（切子區間前回報的舊週）→ 視為已回報、不催子區間 ③計畫區間該週分數＝子區間平均（未回報 0），滿分仍＝區間數
+  ④有回報紀錄的子區間僅主管可刪；刪除可復原。
+- `WeeklyLogs.SubId INT NULL`（FK `FK_WLog_Sub`→TaskSubIntervals）：NULL＝對計畫區間的回報；**既有資料全部維持 NULL，不動**。
+- 唯一鍵：`UQ_WeeklyLogs (TaskId,Year,Week)` → 唯一索引 **`UQ_WeeklyLogs_Unit (TaskId,SubId,Year,Week)`**（先建新的再拿掉舊的）。
+  SQL Server 的唯一索引把 NULL 當一個值 → 每條區間每週仍只能有一筆父層紀錄、每個子區間各一筆。
+- `usp_UpsertWeeklyLog`／`usp_UpdateLogScore` 加 **`@SubId INT = NULL`（參數最後）**：舊呼叫端不變；有值時檢查子區間屬於該區間且未刪。
+  MERGE／查詢一律 `ISNULL(SubId,-1)=ISNULL(@SubId,-1)`。稽核 `EntityId`＝`t101-1#5@2026W9`（有 SubId 時；`#` 與子區間稽核同分隔符）。
+  ⚠ API 層**只在 `req.SubId` 有值時才傳 `@SubId`**——遠端未跑遷移 20 時舊 SP 沒這個參數，一律傳會讓所有打卡壞掉。
+- `usp_DeleteTaskSubInterval`：有回報紀錄（`COUNT(*) FROM WeeklyLogs WHERE SubId=@SubId`）時非主管 RAISERROR；Detail
+  `軟刪除（含 n 筆回報，資料保留）`（API 白話翻譯會接在句尾）。
+- 新 `usp_RestoreTaskSubInterval(@SubId, @Actor…)`：復原軟刪除；檢查父區間仍在、範圍仍涵蓋、未超過 10 筆；稽核 `RESTORE/SubInterval`。
+- `vw_WeeklyReport` 補 `SubId`／`SubName`（LEFT JOIN）。
+- 後端 bootstrap 先 `COL_LENGTH('dbo.WeeklyLogs','SubId')` 再組 SQL：分兩份回 `taskLogs`（SubId NULL）＋`subLogs[subId][week]`；
+  週報 Excel 同樣先檢查欄位，父層無紀錄且有進行中子區間 → 逐子區間一列。遠端未跑遷移 20 時整包不會失敗。
+- 已套用本機 Gantt（驗證：成員對子區間打卡／主管評分／不屬於該區間的 SubId 400／成員刪有紀錄的子區間 400／主管刪→復原、
+  bootstrap 分兩份、稽核白話「…的子區間「X」…」、Excel 逐子區間一列、看板「回報 2/4・得分 0.9/3」、legacy 父層紀錄優先；
+  驗證用子區間 16／17 與 3 筆 WeeklyLogs 已硬刪除，AuditLog 保留）。**遠端需執行（順序 …→19→20）**；Gantt2 未套用。
+
+## 2026-09-12 — 子區間打卡總開關（**不在 DB**，在 `appsettings.json` 的 `Features:SubIntervalCheckin`；無結構變更、無遷移檔）
+- 使用者決定「先不用子區間打卡」→ 加總開關，**預設 false**。原本做成 `AppSettings.SubIntervalCheckin`＋網頁切換鈕，
+  使用者要求**改為設定檔、不做在網頁上**（避免誤操作）→ 已拆掉端點與 DB key；本機測試時建的 `AppSettings` 列已刪除。
+  `AppSettings` 維持兩個 key：`AllowRetroCheckin`／`AccessControlEnabled`。
+- 關著時：bootstrap 回 `subCheckinEnabled:false`、前端回報單位一律為計畫區間、`/api/weekly-log`／`/score` 帶 `SubId` 一律 400、
+  週報 Excel 不逐子區間展開（父層查詢仍以 `SubId IS NULL` 過濾，避免既有子區間回報讓 JOIN 出多列）。
+- 遠端部署：`appsettings.json` 加 `"Features": { "SubIntervalCheckin": false }`（缺值也視為 false）；與連線字串同為即時讀取，改檔即生效。
+- 本機已驗證：改檔 true → bootstrap `true`、改回 false → `false`（伺服器不重啟）；關著時子區間回報 400。
 
 <!-- 新的 DB 變更請從此行下方繼續追加，勿修改上方任何段落 -->

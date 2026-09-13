@@ -27,6 +27,7 @@
   --gantt-group-hover: #DBEAFE;  /* 群組列 hover */
   --gantt-row-hover: #EFF6FF;    /* 專案列 hover */
   --frozen-bg: #FFFFFF;          /* 凍結資料格底色(=bg-white);用於封住欄位間的次像素縫隙 */
+  --gantt-sub-band: rgba(253,237,184,0.45);   /* 子區間列上「父區間範圍」的淡色底帶(父條奶油色的淡版) */
   --brand-btn: #001F5B;          /* 品牌主行動鈕/圖示磚(登入頁);深色下提亮 */
   /* 「即將到期」標題列:#EA580C 太亮,連純白副標都只有 3.56(淺色下亦然)。
      深色下轉深一階 → 副標 4.95、標題 5.26。淺色維持原色不動。 */
@@ -42,6 +43,7 @@
   --gantt-group-hover: #1F2F4A;
   --gantt-row-hover: #17233A;
   --frozen-bg: #1E293B;
+  --gantt-sub-band: rgba(253,230,138,0.13);   /* 深底上奶油色要很淡,否則整條變土黃;13% 剛好看得出範圍 */
   --brand-btn: #2563EB;
   --hdr-deadline: #C2410C;
 }
@@ -128,6 +130,7 @@
 /* sky */
 .dark .bg-sky-50,.dark .bg-sky-50\/70 { background-color:#183659; }
 .dark .bg-sky-100 { background-color:#1E486E; }
+.dark .hover\:bg-sky-200:hover { background-color:#265A87; }   /* 子區間展開鈕 hover:比 -100 再上一階 */
 .dark .text-sky-600,.dark .text-sky-700,.dark .text-sky-800 { color:#7DD3FC; }
 .dark .border-sky-200,.dark .border-sky-300 { border-color:#2773A7; }
 
@@ -238,6 +241,7 @@
 .dark .hover\:bg-amber-50\/40:hover { background-color:#594115; }
 .dark .hover\:bg-green-50:hover { background-color:#234F21; }
 .dark .hover\:bg-green-100:hover { background-color:#2A5C2F; }
+.dark .hover\:bg-green-200:hover { background-color:#336A38; }   /* 打卡彈窗的子區間單位晶片(已回報)hover:比 -100 再上一階 */
 .dark .hover\:bg-emerald-50\/40:hover { background-color:#1A4F34; }
 .dark .hover\:bg-emerald-100\/70:hover { background-color:#215D3E; }
 .dark .hover\:bg-teal-100:hover { background-color:#205B58; }
@@ -247,6 +251,7 @@
 /* hover 文字色:同理是獨立 class。淺色模式的慣例是 hover 時「加深」(text-blue-600→800),
    但深色模式底色本來就深,加深等於滑過去反而看不見 → 深色一律改成「更亮一階」。 */
 .dark .hover\:text-blue-700:hover,.dark .hover\:text-blue-800:hover,.dark .hover\:text-blue-900:hover { color:#BFDBFE; }
+.dark .hover\:text-red-800:hover { color:#FECACA; }   /* 「🗑 刪除區間」文字鈕:紅字 hover 更亮一階(基底 text-red-700 深色為 #FCA5A5) */
 
 /* -200 晶片底（少數以 -200 當底色的小標籤）：需高於同色 -100 一階 */
 .dark .bg-yellow-200 { background-color:#5D512A; }
