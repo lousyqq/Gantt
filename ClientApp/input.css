@@ -268,6 +268,9 @@
 /* 亮橘/琥珀實心按鈕（bg-amber-500 白字在淺色下已偏低對比）：深色下轉深琥珀，白字清晰、投影不刺眼 */
 .dark .bg-amber-500 { background-color:#B45309; }
 .dark .hover\:bg-amber-600:hover { background-color:#92400E; }
+/* 成員「📋 本週回報中心」（2026-09-14）：淺色 amber-600 已經夠沉，深色刻意鎖同一值不再壓暗——
+   壓到 700 就與「⏰ 即將到期」晶片、主管的「🛠 編輯回報」撞色（使用者實測回報）。 */
+.dark .bg-amber-600 { background-color:#D97706; }
 
 /* 概況列的漸層底（唯一的漸層用法） */
 .dark .from-slate-50 { --tw-gradient-from: #0F172A var(--tw-gradient-from-position); --tw-gradient-to: rgb(15 23 42 / 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }

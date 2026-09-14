@@ -1000,6 +1000,10 @@ video {
   width: 6rem;
 }
 
+.w-28 {
+  width: 7rem;
+}
+
 .w-3 {
   width: 0.75rem;
 }
@@ -1010,10 +1014,6 @@ video {
 
 .w-32 {
   width: 8rem;
-}
-
-.w-36 {
-  width: 9rem;
 }
 
 .w-4 {
@@ -1040,8 +1040,12 @@ video {
   width: 2.25rem;
 }
 
-.w-\[420px\] {
-  width: 420px;
+.w-\[200px\] {
+  width: 200px;
+}
+
+.w-\[300px\] {
+  width: 300px;
 }
 
 .w-auto {
@@ -3158,11 +3162,6 @@ video {
   --tw-ring-color: rgb(4 120 87 / 0.4);
 }
 
-.ring-green-700 {
-  --tw-ring-opacity: 1;
-  --tw-ring-color: rgb(21 128 61 / var(--tw-ring-opacity, 1));
-}
-
 .ring-indigo-300 {
   --tw-ring-opacity: 1;
   --tw-ring-color: rgb(165 180 252 / var(--tw-ring-opacity, 1));
@@ -3186,11 +3185,6 @@ video {
   --tw-ring-color: rgb(185 28 28 / 0.4);
 }
 
-.ring-sky-700 {
-  --tw-ring-opacity: 1;
-  --tw-ring-color: rgb(3 105 161 / var(--tw-ring-opacity, 1));
-}
-
 .ring-slate-300 {
   --tw-ring-opacity: 1;
   --tw-ring-color: rgb(203 213 225 / var(--tw-ring-opacity, 1));
@@ -3199,16 +3193,6 @@ video {
 .ring-slate-500 {
   --tw-ring-opacity: 1;
   --tw-ring-color: rgb(100 116 139 / var(--tw-ring-opacity, 1));
-}
-
-.ring-slate-600 {
-  --tw-ring-opacity: 1;
-  --tw-ring-color: rgb(71 85 105 / var(--tw-ring-opacity, 1));
-}
-
-.ring-yellow-600 {
-  --tw-ring-opacity: 1;
-  --tw-ring-color: rgb(202 138 4 / var(--tw-ring-opacity, 1));
 }
 
 .ring-offset-1 {
@@ -3929,6 +3913,13 @@ video {
   background-color:#92400E;
 }
 
+/* 成員「📋 本週回報中心」（2026-09-14）：淺色 amber-600 已經夠沉，深色刻意鎖同一值不再壓暗——
+   壓到 700 就與「⏰ 即將到期」晶片、主管的「🛠 編輯回報」撞色（使用者實測回報）。 */
+
+.dark .bg-amber-600 {
+  background-color:#D97706;
+}
+
 /* 概況列的漸層底（唯一的漸層用法） */
 
 .dark .from-slate-50 {
@@ -4414,11 +4405,6 @@ thead :where(button, a, input, select):focus-visible,
 
 .hover\:opacity-90:hover {
   opacity: 0.9;
-}
-
-.hover\:brightness-95:hover {
-  --tw-brightness: brightness(.95);
-  filter: var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow);
 }
 
 .focus\:w-52:focus {

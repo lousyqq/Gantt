@@ -10,25 +10,48 @@ const {
 const WEEKS_TOTAL = 52; // 預設值;實際以選定年度 ScheduleWeeks 的筆數為準(52 或 53)
 const DEFAULT_SCHEDULE_YEAR = new Date().getFullYear(); // 預設載入今年;實際可用年度由 bootstrap 的 years 決定
 
-// 依今天日期計算 ISO 週數(週一為一週起始);非選定年度時夾在排程範圍內
+// 公司週次規則(2026-09-14 使用者確認,**不是 ISO 8601**):一週從**週日**開始;W1＝含 1/1 的那一週(從 1/1 前最近的週日起算);
+// 跨年照日期切——12/31 屬於舊年度的最後一週、1/1 起屬於新年度 W1(等同 Excel WEEKNUM(d,1))。
+// 例:2026-12-31(四)=2026 W53、2027-01-01(五)=2027 W01(只有 1/1、1/2 兩天,0 個上班日)、2027 W02 從 1/3(日)起。
+// ⚠ 後端 Program.cs `CompanyWeekOf` 與 SP `usp_EnsureScheduleYear`(遷移 21)是同一套規則,三處要一起改。
+// ⚠ 之前是 ISO 週(週一起始、含 1/4 那週為 W1),每個星期日差一週、跨年整段錯,2026-09-14 一併修正。
+const WEEK1_SUNDAY = year => {
+  const jan1 = new Date(year, 0, 1);
+  return new Date(year, 0, 1 - jan1.getDay());
+}; // getDay: 週日=0
+const companyWeekOf = d => {
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.floor(Math.round((day - WEEK1_SUNDAY(day.getFullYear())) / 86400000) / 7) + 1;
+};
+// 某週的實際日期區間(夾在 1/1～12/31 內):W1 從 1/1 起、最後一週到 12/31 止。純前端算,不進 DB。
+const weekDateRange = (year, week) => {
+  const start = new Date(WEEK1_SUNDAY(year).getTime() + (week - 1) * 7 * 86400000);
+  const end = new Date(start.getTime() + 6 * 86400000);
+  const jan1 = new Date(year, 0, 1),
+    dec31 = new Date(year, 11, 31);
+  return {
+    start: start < jan1 ? jan1 : start,
+    end: end > dec31 ? dec31 : end
+  };
+};
+// MM/DD 零填補(2026-09-14 使用者決定):與企業報表／Excel 慣例一致、與 W01 的週次寫法一致,且日期區間寬度固定不隨週跳動
+const fmtMD = d => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+// 「W37（9/6–9/12）」這種給人看的週名;短週(跨年 W1、W53)靠日期區間自明,不必另外解釋
+const weekRangeLabel = (year, week) => {
+  const r = weekDateRange(year, week);
+  return `${fmtMD(r.start)}–${fmtMD(r.end)}`;
+};
+// 依今天日期算公司週;非選定年度時夾在排程範圍內(過去年度=最後一週、未來年度=1)
 const getTodayWeek = (scheduleYear = DEFAULT_SCHEDULE_YEAR, weeksTotal = WEEKS_TOTAL) => {
   const now = new Date();
   if (now.getFullYear() < scheduleYear) return 1;
   if (now.getFullYear() > scheduleYear) return weeksTotal;
-  const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-  const dayNum = (d.getUTCDay() + 6) % 7; // 週一=0
-  d.setUTCDate(d.getUTCDate() - dayNum + 3); // 本週的週四
-  const firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
-  const fDayNum = (firstThu.getUTCDay() + 6) % 7;
-  firstThu.setUTCDate(firstThu.getUTCDate() - fDayNum + 3);
-  const week = 1 + Math.round((d - firstThu) / (7 * 24 * 3600 * 1000));
-  return Math.min(weeksTotal, Math.max(1, week));
+  return Math.min(weeksTotal, Math.max(1, companyWeekOf(now)));
 };
 const DEFAULT_CURRENT_WEEK = getTodayWeek();
 // 「今天」屬於哪個排程年度。選到別的年度時整年都是過去或未來,沒有「本週」可言——
 // 所有「本週回報」的入口(徽章、回報中心、打卡)都只認 scheduleYear === getTodayScheduleYear()。
-// ⚠ 目前與 getTodayWeek 一樣暫用日曆年;公司週次規則(週日起始、含 1/1 那週為 W1)確認後兩者要一起改,
-//   只改這兩個函式即可,其餘判斷都經由 isCurrentYear／isReportingWeek／isFutureWeek 三個旗標。
+// 公司規則跨年照日期切,所以就是日曆年;其餘判斷都經由 isCurrentYear／isReportingWeek／isFutureWeek 三個旗標。
 const getTodayScheduleYear = () => new Date().getFullYear();
 const NAVY = '#001F5B';
 // 品牌色的「按鈕」版本:深色模式下提亮成 #2563EB(見 input.css 的 --brand-btn)。
@@ -221,22 +244,10 @@ const unitsDotStatus = wu => {
   const st = wu.units.map(u => u.log.status);
   return st.includes('executed') ? 'executed' : st.includes('monitor') ? 'monitor' : 'not_executed';
 };
-// 概況列四顆狀態晶片的篩選鍵(2026-09-13):'pending'＝未回報、其餘三個＝已回報且為該狀態。
-// 分類規則與 weekStats 一模一樣(沒有 log＝未回報;有 log 依 status,非 monitor/not_executed 一律算有執行),
-// 晶片上的數字與篩出來的列數才對得起來——不要在別處再寫一份分類。
-const STATUS_FILTER_LABEL = {
-  pending: '未回報',
-  executed: '有執行',
-  monitor: 'Monitor',
-  not_executed: '未執行'
-};
-const unitMatchesStatus = (u, key) => {
-  if (key === 'pending') return !u.log;
-  if (!u.log) return false;
-  if (key === 'not_executed') return u.log.status === 'not_executed';
-  if (key === 'monitor') return u.log.status === 'monitor';
-  return u.log.status !== 'not_executed' && u.log.status !== 'monitor';
-};
+// ⚠ 概況列的四顆狀態晶片是**純計數**,不是篩選鈕(2026-09-14 使用者決定移除篩選;2026-08-10 做了「未回報」、09-13 擴成四顆)。
+//   移除理由:篩出來的是 20 列整年甘特,主管還是不知道「哪一條」該交;「誰還沒交／誰沒做」看板已經回答得更好
+//   (每人「回報 0/5」＋複製待回報名單＋點卡片高亮那條)。同一件事兩條路只是多一套要學、多一堆特例要維護。
+//   晶片改成不像按鈕的靜態標籤(色點＋文字＋數字),避免再有人去點。勿再把 statusFilter 加回來。
 const unitLabel = (task, sub) => sub ? `${task.name} › ${sub.name}` : task.name;
 const sameUnit = (a, b) => a.task.id === b.task.id && (a.sub?.id ?? null) === (b.sub?.id ?? null);
 const NO_UNITS = Object.freeze({
@@ -1071,7 +1082,7 @@ function ResultsView({
     className: "bg-slate-100 text-xs font-bold border-b border-slate-300 h-9 [&>th:first-child]:rounded-tl-xl [&>th:last-child]:rounded-tr-xl"
   }, /*#__PURE__*/React.createElement("th", {
     className: "px-2 w-10 text-center bg-slate-100 text-slate-600 whitespace-nowrap"
-  }, "No"), renderSortHeader("分類", "category", "w-20"), renderSortHeader("類型", "type", "w-14 text-center"), renderSortHeader("專案名稱", "name", "w-[420px]"), renderSortHeader("負責人", "owner", "w-24"), renderSortHeader("預計交付具體產出成果", "deliverable", "w-auto"), renderSortHeader("MP Saving", "mpSaving", "w-36"), renderSortHeader("NID", "nid", "w-32"))), /*#__PURE__*/React.createElement("tbody", {
+  }, "No"), renderSortHeader("分類", "category", "w-20"), renderSortHeader("類型", "type", "w-14 text-center"), renderSortHeader("專案名稱", "name", "w-[300px]"), renderSortHeader("負責人", "owner", "w-24"), renderSortHeader("預計交付具體產出成果", "deliverable", "w-auto"), renderSortHeader("MP Saving", "mpSaving", "w-28"), renderSortHeader("NID", "nid", "w-[200px]"))), /*#__PURE__*/React.createElement("tbody", {
     className: "divide-y divide-slate-200 text-[13px]"
   }, displayedProjects.map((proj, idx) => {
     const cleanDeliverable = proj.deliverable ? String(proj.deliverable).replace(/[\r\n]+/g, ' ') : '';
@@ -1139,7 +1150,7 @@ function ResultsView({
       className: "flex flex-wrap gap-1"
     }, String(proj.nid).split(/[、,，;；\s]+/).filter(Boolean).map((n, i) => /*#__PURE__*/React.createElement("span", {
       key: i,
-      className: "inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold border border-slate-300 whitespace-nowrap"
+      className: "inline-block px-1 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold border border-slate-300 whitespace-nowrap"
     }, n))) : /*#__PURE__*/React.createElement("span", {
       className: "text-slate-500 font-light",
       "aria-hidden": "true"
@@ -1289,12 +1300,6 @@ function App() {
   };
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState(new Set()); // 空 = 全部
-  // 概況列狀態晶片的篩選(2026-09-13 由「未回報」單顆擴成四顆):null＝不篩,'pending'／'executed'／'monitor'／'not_executed'
-  // ＝只顯示本週有回報單位屬於該狀態的專案。**單選不多選**:四者是同一批「本週回報單位」的分割,主管一次只問一個問題
-  // (誰沒交／誰這週沒做),點另一顆＝換問題、點同一顆＝取消。原本只有「未回報」能點,旁邊三顆長得一樣卻只是數字,使用者會去點。
-  const [statusFilter, setStatusFilter] = useState(null);
-  const pendingOnly = statusFilter === 'pending'; // 既有「未回報」專屬邏輯(🎉 已全數回報空狀態)沿用這個名字
-  const toggleStatusFilter = key => setStatusFilter(cur => cur === key ? null : key);
   // 成員篩選:三個檢視統一用「成員下拉」('all' 或成員名),不再有週檢視專用的「只看我的專案」勾選框
   // ——同一件事兩種操作方式(勾選 vs 下拉)會讓使用者切檢視時以為篩選跑掉了。
   // 登入預設:成員=自己、主管=全部成員(見 handleLogin / DEFAULT_OWNER_FILTER)
@@ -1495,8 +1500,6 @@ function App() {
   const ultraTightStatsBar = availW < STATS_BAR_MIN_W;
   // 概況列左側「有執行／Monitor／未執行」三顆統計晶片是否在畫面上:在 → 右側圖例不再重畫這三個色點(晶片本身就是圖例);
   // 收起(看板開啟／窄螢幕)→ 圖例補回,讀圖必需的資訊任何情況都在。
-  // ⚠ 篩選中的那顆晶片不受此開關影響(各自 `|| statusFilter === key`):看板開啟／窄螢幕把三顆收起時,
-  //   使用者若正用「有執行」篩著,清單只剩幾列卻找不到地方取消——沿用「有殘留條件就保留該顆＋可清除」規則。
   const statusChipsVisible = !showWeeklyReport && !tightStatsBar;
   // 圖例的「子區間」格只在資料裡真的有子區間時顯示(見圖例處的說明)
   const hasAnySubs = useMemo(() => projects.some(p => p.tasks.some(t => (t.subs || []).length > 0)), [projects]);
@@ -1588,7 +1591,6 @@ function App() {
     setOwnerFilter(defaultOwnerFilter(selectedRole, user)); // 成員=自己、主管=全部成員
     setSearchText('');
     setTypeFilter(new Set());
-    setStatusFilter(null);
     setShowPendingPanel(false);
     setShowRetroPanel(false);
     setShowWeekEditPanel(false);
@@ -1613,7 +1615,6 @@ function App() {
     setOwnerFilter('all');
     setSearchText('');
     setTypeFilter(new Set());
-    setStatusFilter(null);
     setShowPendingPanel(false);
     setShowRetroPanel(false);
     setShowWeekEditPanel(false);
@@ -2295,8 +2296,7 @@ function App() {
   const existingCategories = useMemo(() => [...new Set(projects.map(p => p.category).filter(Boolean))].sort(), [projects]);
 
   // 搜尋/類型篩選會隱藏同成員內的部分專案列,此時拖曳落點會與畫面不一致,故暫停拖曳排序
-  // statusFilter 也算:它同樣會隱藏同一位成員底下的部分專案列,拖曳落點會與畫面對不上
-  const isFilteringRows = searchText.trim() !== '' || typeFilter.size > 0 || statusFilter !== null;
+  const isFilteringRows = searchText.trim() !== '' || typeFilter.size > 0;
   const handleSaveProject = async form => {
     try {
       if (form.mode === 'add') {
@@ -2529,19 +2529,12 @@ function App() {
       clearLabel: '清除成員',
       clear: () => setOwnerFilter(ownerDefault)
     });
-    if (statusFilter) list.push({
-      key: 'status',
-      label: `只看${STATUS_FILTER_LABEL[statusFilter]}`,
-      clearLabel: `清除「只看${STATUS_FILTER_LABEL[statusFilter]}」`,
-      clear: () => setStatusFilter(null)
-    });
     return list;
-  }, [searchText, typeFilter, ownerFilter, ownerDefault, statusFilter]);
+  }, [searchText, typeFilter, ownerFilter, ownerDefault]);
   const clearAllFilters = () => {
     setSearchText('');
     setTypeFilter(new Set());
     setOwnerFilter(ownerDefault);
-    setStatusFilter(null);
   };
 
   // --- 篩選 ---
@@ -2550,17 +2543,13 @@ function App() {
     return projects.filter(p => {
       if (ownerFilter !== 'all' && p.owner !== ownerFilter) return false; // 三個檢視共用的成員下拉
       if (typeFilter.size > 0 && !typeFilter.has(p.type)) return false;
-      // 概況列狀態晶片的篩選:只留下本週有排定、且至少一個回報單位屬於該狀態的專案(子區間模式下逐單位看)。
-      // 主管每週的核心動作就是「誰還沒交」「誰這週沒做」——原本看到「未回報 18」之後,只能自己在 69 列裡找紅框。
-      // 分類走 unitMatchesStatus(與 weekStats 同一套),晶片數字與篩出的列才對得起來。
-      if (statusFilter && !p.tasks.some(t => t.start <= currentWeek && t.end >= currentWeek && weekUnits(t, currentWeek, taskLogs, subLogs).units.some(u => unitMatchesStatus(u, statusFilter)))) return false;
       if (kw) {
         const hay = `${p.name} ${p.category} ${p.owner} ${p.tasks.map(t => `${t.name} ${(t.subs || []).map(s => s.name).join(' ')}`).join(' ')}`.toLowerCase();
         if (!hay.includes(kw)) return false;
       }
       return true;
     });
-  }, [projects, searchText, typeFilter, ownerFilter, statusFilter, currentWeek, taskLogs, subLogs]);
+  }, [projects, searchText, typeFilter, ownerFilter]);
   // 關鍵字命中「子區間名稱」的專案 id:這些專案要暫時視為展開(見 isSubExpanded),否則收合狀態下
   // 搜「驗證」跑出一個名稱裡沒有「驗證」的專案,使用者只會覺得搜尋壞了。
   // 只是暫時的顯示狀態,不寫進 gantt_prefs——清掉搜尋就回到原本的偏好。
@@ -2860,8 +2849,9 @@ function App() {
         setScrollTargetWeek(w);
       }
     }), /*#__PURE__*/React.createElement("span", {
-      className: "text-white/75 font-normal text-[10px] ml-1"
-    }, weekToMonth(currentWeek, months))), /*#__PURE__*/React.createElement("button", {
+      className: "text-white/75 font-normal text-[10px] ml-1 whitespace-nowrap",
+      title: `${weekToMonth(currentWeek, months)}・${weekRangeLabel(scheduleYear, currentWeek)}（週日起算）`
+    }, weekRangeLabel(scheduleYear, currentWeek))), /*#__PURE__*/React.createElement("button", {
       onClick: () => {
         const w = Math.min(weeksTotal, currentWeek + 1);
         setCurrentWeek(w);
@@ -2895,8 +2885,9 @@ function App() {
         setScrollTargetWeek(w);
       }
     }), /*#__PURE__*/React.createElement("span", {
-      className: "text-white/75 font-normal text-[10px] ml-1"
-    }, weekToMonth(currentWeek, months))), /*#__PURE__*/React.createElement("button", {
+      className: "text-white/75 font-normal text-[10px] ml-1 whitespace-nowrap",
+      title: `${weekToMonth(currentWeek, months)}・${weekRangeLabel(scheduleYear, currentWeek)}（週日起算）`
+    }, weekRangeLabel(scheduleYear, currentWeek))), /*#__PURE__*/React.createElement("button", {
       onClick: () => {
         const w = Math.min(todayWeek, currentWeek + 1);
         setCurrentWeek(w);
@@ -2943,9 +2934,13 @@ function App() {
     /*#__PURE__*/
     // 本週回報的三件事(任務打卡/下週預計/非專案事項)合併為單一入口;紅點=未回報任務+未填下週預計(非專案為選填不計)
     // 非本年度整顆收起:那裡沒有「本週」
+    // 琥珀 amber-600(2026-09-14 三輪定案):原本 bg-amber-500(#F59E0B)使用者說「太亮太刺眼」;改主管同款 amber-700/80
+    // → 深色下與「⏰ 即將到期」撞色;改 emerald-700 翠綠 → 使用者「不好,退回黃色但不要那麼亮」。
+    // 現行＝amber-600(#D97706),深淺兩色鎖同一值(input.css 明示 .dark .bg-amber-600),比 500 沉、比主管的 700/80 亮一階。
+    // hover 用 opacity 不換色階(免再開一組 .dark 映射)。⚠ 白字在 amber-600 對比 2.86,是使用者明確選擇的例外。
     React.createElement("button", {
       onClick: () => setShowPendingPanel(true),
-      className: "relative bg-amber-500 hover:bg-amber-600 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold shadow-md transition flex items-center gap-1.5 border border-amber-400"
+      className: "relative bg-amber-600 hover:opacity-90 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold shadow-md transition flex items-center gap-1.5 border border-amber-400/80"
     }, /*#__PURE__*/React.createElement("span", null, "\uD83D\uDCCB \u672C\u9031\u56DE\u5831\u4E2D\u5FC3"), totalPendingCount > 0 && /*#__PURE__*/React.createElement("span", {
       className: "bg-red-600 text-white text-[11px] px-1.5 py-0.5 rounded-full font-black shadow leading-none"
     }, totalPendingCount)), !isResults && !showWeeklyReport && role === 'manager' && !isFutureWeek && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
@@ -3117,42 +3112,31 @@ function App() {
       }
     })), /*#__PURE__*/React.createElement("span", {
       className: "ml-2 font-bold text-slate-800 whitespace-nowrap"
-    }, weekStats.reported, "/", weekStats.active, " \u5DF2\u56DE\u5831")), (!showWeeklyReport || statusFilter) && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    }, weekStats.reported, "/", weekStats.active, " \u5DF2\u56DE\u5831")), !showWeeklyReport && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
       className: "h-6 border-l border-slate-300 flex-shrink-0"
     }), /*#__PURE__*/React.createElement("div", {
-      className: "flex items-center gap-1.5 flex-shrink-0"
-    }, (statusChipsVisible || statusFilter === 'executed') && /*#__PURE__*/React.createElement(StatChip, {
+      className: "flex items-center gap-3 flex-shrink-0"
+    }, statusChipsVisible && /*#__PURE__*/React.createElement(StatCount, {
       label: "\u6709\u57F7\u884C",
       value: weekStats.executed,
-      className: "bg-green-100 text-green-800 border-green-400",
-      ringClass: "ring-green-700",
-      onToggle: () => toggleStatusFilter('executed'),
-      active: statusFilter === 'executed',
-      title: statusFilter === 'executed' ? '取消篩選，顯示全部專案' : '只顯示本週回報「有執行」的專案；甘特條上該週的綠色點＝有執行'
-    }), (statusChipsVisible || statusFilter === 'monitor') && /*#__PURE__*/React.createElement(StatChip, {
+      dotClass: "bg-green-700",
+      title: "\u672C\u9031\u56DE\u5831\u300C\u6709\u57F7\u884C\u300D\u7684\u56DE\u5831\u55AE\u4F4D\u6578\uFF1B\u7518\u7279\u689D\u4E0A\u8A72\u9031\u7684\u7DA0\u8272\u9EDE\uFF1D\u6709\u57F7\u884C"
+    }), statusChipsVisible && /*#__PURE__*/React.createElement(StatCount, {
       label: "Monitor",
       value: weekStats.monitor,
-      className: "bg-sky-100 text-sky-800 border-sky-400",
-      ringClass: "ring-sky-700",
-      onToggle: () => toggleStatusFilter('monitor'),
-      active: statusFilter === 'monitor',
-      title: statusFilter === 'monitor' ? '取消篩選，顯示全部專案' : '只顯示本週回報「Monitor（例行監控）」的專案；甘特條上該週的藍色點＝Monitor'
-    }), (statusChipsVisible || statusFilter === 'not_executed') && /*#__PURE__*/React.createElement(StatChip, {
+      dotClass: "bg-sky-700",
+      title: "\u672C\u9031\u56DE\u5831\u300CMonitor\uFF08\u4F8B\u884C\u76E3\u63A7\uFF09\u300D\u7684\u56DE\u5831\u55AE\u4F4D\u6578\uFF1B\u7518\u7279\u689D\u4E0A\u8A72\u9031\u7684\u85CD\u8272\u9EDE\uFF1DMonitor"
+    }), statusChipsVisible && /*#__PURE__*/React.createElement(StatCount, {
       label: "\u672A\u57F7\u884C",
       value: weekStats.notExec,
-      className: "bg-slate-200 text-slate-700 border-slate-400",
-      ringClass: "ring-slate-600",
-      onToggle: () => toggleStatusFilter('not_executed'),
-      active: statusFilter === 'not_executed',
-      title: statusFilter === 'not_executed' ? '取消篩選，顯示全部專案' : '只顯示本週回報「未執行」的專案（有回報、但本週沒做＝要追原因）；甘特條上該週的灰色點＝未執行'
-    }), (!showWeeklyReport || pendingOnly) && /*#__PURE__*/React.createElement(StatChip, {
+      dotClass: "bg-slate-500",
+      title: "\u672C\u9031\u56DE\u5831\u300C\u672A\u57F7\u884C\u300D\u7684\u56DE\u5831\u55AE\u4F4D\u6578\uFF08\u6709\u56DE\u5831\u3001\u4F46\u672C\u9031\u6C92\u505A\uFF1D\u8981\u8FFD\u539F\u56E0\uFF09\uFF1B\u7518\u7279\u689D\u4E0A\u8A72\u9031\u7684\u7070\u8272\u9EDE\uFF1D\u672A\u57F7\u884C"
+    }), /*#__PURE__*/React.createElement(StatCount, {
       label: "\u672A\u56DE\u5831",
       value: weekStats.pending,
-      className: weekStats.pending > 0 ? 'bg-yellow-100 text-yellow-800 border-yellow-500' : 'bg-slate-100 text-slate-500 border-slate-300',
-      onToggle: () => toggleStatusFilter('pending'),
-      active: pendingOnly,
-      title: pendingOnly ? '取消篩選，顯示全部專案' : '只顯示本週尚未回報的專案（要催）'
-    }), !showWeeklyReport && /*#__PURE__*/React.createElement("button", {
+      valueClass: weekStats.pending > 0 ? 'text-amber-800' : 'text-slate-500',
+      title: "\u672C\u9031\u6392\u5B9A\u4F46\u5C1A\u672A\u56DE\u5831\u7684\u56DE\u5831\u55AE\u4F4D\u6578\uFF08\u8981\u50AC\uFF09\uFF1B\u7518\u7279\u689D\u4E0A\u7684\u7D05\u6846\uFF1D\u5F85\u56DE\u5831\u3002\u8981\u770B\u662F\u8AB0\u3001\u8981\u8907\u88FD\u50AC\u5831\u540D\u55AE\uFF0C\u958B\u300C\uD83D\uDCCA \u5718\u968A\u7E3D\u7D50\u300D"
+    }), /*#__PURE__*/React.createElement("button", {
       onClick: () => setShowDeadlinePanel(true),
       title: "\u9EDE\u64CA\u6AA2\u8996\u5373\u5C07\u5230\u671F\u6E05\u55AE",
       className: `flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border transition ${deadlineTasks.length > 0 ? 'bg-orange-100 text-orange-800 hover:bg-orange-200 border-orange-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 border-slate-300'}`
@@ -3301,9 +3285,6 @@ function App() {
           setCollapsedOwners(new Set());
           setOwnerFilter(defaultOwnerFilter(role, currentUser)); // 清掉看板高亮造成的單一成員聚焦
         }
-        // 「本週未回報」在全年度產出總表沒有意義,切過去一併清掉;
-        // 不清的話清單會莫名只剩幾列,而該檢視根本沒有那顆晶片可以取消(與 ownerFilter 的還原同理)
-        setStatusFilter(null);
         setIsOverview(false);
         setIsResults(true);
       },
@@ -3494,7 +3475,7 @@ function App() {
         onClick: () => {
           if (role === 'manager' || weekNum <= todayWeek) setCurrentWeek(weekNum);
         },
-        title: role === 'manager' ? `點擊將系統週切換至 W${weekNum}` : weekNum <= todayWeek ? `點擊檢視 W${weekNum}(唯讀)` : undefined,
+        title: `W${String(weekNum).padStart(2, '0')}（${weekRangeLabel(scheduleYear, weekNum)}）${role === 'manager' ? '・點擊將系統週切換至此' : weekNum <= todayWeek ? '・點擊檢視(唯讀)' : '・尚未到'}`,
         className: `border-r border-b border-slate-300 p-0 text-center relative ${isOverview ? 'text-[9px] leading-none' : ''} ${role === 'manager' || weekNum <= todayWeek ? 'cursor-pointer hover:bg-blue-100' : ''} ${isCurrent ? 'text-white font-bold' : weekNum > todayWeek ? 'bg-slate-100 text-slate-600 font-normal' : 'bg-slate-100 text-slate-700 font-normal'}`,
         style: {
           ...(isOverview ? {} : {
@@ -3517,17 +3498,7 @@ function App() {
     }, groupedProjects.length === 0 ? /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
       colSpan: weeksTotal + 3,
       className: "p-10 text-center text-slate-500"
-    }, pendingOnly && weekStats.pending === 0 ? /*#__PURE__*/React.createElement("div", {
-      className: "space-y-2"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "text-3xl mb-2",
-      "aria-hidden": "true"
-    }, "\uD83C\uDF89"), /*#__PURE__*/React.createElement("div", {
-      className: "font-bold text-slate-700"
-    }, "W", String(currentWeek).padStart(2, '0'), " ", ownerFilter === 'all' ? '全隊' : ownerFilter, "\u5DF2\u5168\u6578\u56DE\u5831\uFF0C\u6C92\u6709\u5F85\u8FFD\u8E64\u7684\u9805\u76EE\u3002"), /*#__PURE__*/React.createElement("button", {
-      onClick: () => setStatusFilter(null),
-      className: "px-3 py-1 rounded-lg bg-white border border-slate-400 font-bold text-slate-700 hover:bg-slate-100 transition"
-    }, "\u986F\u793A\u5168\u90E8\u5C08\u6848")) : /*#__PURE__*/React.createElement(EmptyFilterState, {
+    }, /*#__PURE__*/React.createElement(EmptyFilterState, {
       filters: activeFilters,
       onClearAll: clearAllFilters
     }))) : groupedProjects.map(group => {
@@ -3848,12 +3819,15 @@ function App() {
           task,
           sub
         }, subIdx) => {
-          const subRowH = isOverview ? 16 : isCompact ? 22 : 26;
+          // 總覽子列 18(不是 16):條內要放 9px 的名稱＋3px 色點,16 扣掉上下 2px 只剩 12px 會疊在一起。
+          const subRowH = isOverview ? 18 : isCompact ? 22 : 26;
           const isLastSub = subIdx === subEntries.length - 1;
           // 名稱欄的樹狀導引線(2026-09-13,取代每列一個 └):10 筆子區間時每列都是 └ 會像每列都是最後一筆,
           // 父列捲出畫面後也不知道這幾列屬於誰、到哪結束。改成一條貫穿的直線,最後一列只畫到一半自然收成 └,
           // 群組結尾再把底線加粗一階(slate-300),與下一個專案列分開。純 CSS、不進 state。
-          const subIndent = isOverview ? 16 : 40;
+          // ⚠ 縮排兩種檢視都是 40(2026-09-14 修):總覽原本 16,但總覽的父列名稱欄一樣有 px-2＋類型晶片(B)＋mr-2,
+          //   專案名從 36px 起,子區間名稱 16px 反而跑到專案名**左邊**,讀起來像另一層、不像底下的子項。
+          const subIndent = 40;
           const guideX = subIndent - 10;
           const phase = sub.end < todayWeek ? 'done' : sub.start > todayWeek ? 'future' : 'active';
           const phaseLabel = phase === 'done' ? '已結束' : phase === 'future' ? '未開始' : '進行中';
@@ -4018,8 +3992,8 @@ function App() {
             style: {
               left: `${(sub.start - 1) * (100 / weeksTotal)}%`,
               width: `${(sub.end - sub.start + 1) * (100 / weeksTotal)}%`,
-              top: isOverview ? 3 : 4,
-              bottom: isOverview ? 3 : 4,
+              top: isOverview ? 2 : 4,
+              bottom: isOverview ? 2 : 4,
               ...subBarStyle
             }
           }), subDots.map(({
@@ -4034,8 +4008,8 @@ function App() {
               height: wn === currentWeek ? '4px' : '3px',
               opacity: wn === currentWeek ? 0.95 : 0.75
             }
-          })), !isOverview && /*#__PURE__*/React.createElement("span", {
-            className: `relative z-10 truncate px-1.5 whitespace-nowrap font-medium ${isCompact ? 'text-[10px]' : 'text-[11px]'}`
+          })), /*#__PURE__*/React.createElement("span", {
+            className: `relative z-10 truncate whitespace-nowrap font-medium ${isOverview ? 'text-[9px] leading-none px-1' : isCompact ? 'text-[10px] px-1.5' : 'text-[11px] px-1.5'}`
           }, subPending && '❗', sub.name))));
         }));
       }));
@@ -4207,6 +4181,7 @@ function App() {
       completed: myCompletedTasks,
       currentWeek: todayWeek,
       weeksTotal: weeksTotal,
+      scheduleYear: scheduleYear,
       planPending: planPendingThisWeek,
       extraFilled: !!extraNotes[currentUser]?.[todayWeek],
       planMeta: weeklyPlanMeta[currentUser]?.[todayWeek],
@@ -4237,6 +4212,7 @@ function App() {
       completed: myRetroCompletedTasks,
       currentWeek: currentWeek,
       weeksTotal: weeksTotal,
+      scheduleYear: scheduleYear,
       planPending: !weeklyPlans[currentUser]?.[currentWeek],
       extraFilled: !!extraNotes[currentUser]?.[currentWeek],
       planMeta: weeklyPlanMeta[currentUser]?.[currentWeek],
@@ -4368,42 +4344,25 @@ function App() {
   );
 }
 
-// 投影友善:晶片加邊框確保輪廓、標籤文字不再用透明度淡化(投影機對比打折,淡字會消失)
-// 統計晶片。給 onToggle 就變成可切換的篩選鈕(用 <button>,鍵盤與讀螢幕器自然支援,
-// 不需要另外套 clickable();aria-pressed 才播報得出「已按下/未按下」的切換語意)。
-function StatChip({
+// 概況列的狀態計數(2026-09-14 起是純顯示,不再是篩選鈕):色點＋標籤＋數字,與右側圖例同一種構造。
+// 刻意**不做成晶片／不加 hover**——長得像按鈕就會有人去點(09-13 的四顆篩選鈕就是這樣長出來的)。
+// 投影友善:數字用 700 級粗體、標籤 slate-700,不用透明度淡化。
+function StatCount({
   label,
   value,
-  className,
-  onToggle,
-  active = false,
-  title,
-  ringClass = 'ring-yellow-600'
+  dotClass,
+  valueClass = 'text-slate-800',
+  title
 }) {
-  const base = `flex-shrink-0 pl-2 pr-2.5 py-1 rounded-full font-bold flex items-center gap-1 border ${className}`;
-  if (!onToggle) {
-    return /*#__PURE__*/React.createElement("span", {
-      className: base,
-      title: title
-    }, /*#__PURE__*/React.createElement("span", {
-      className: "font-medium text-[11px]"
-    }, label), /*#__PURE__*/React.createElement("span", {
-      className: "text-[13px] leading-none"
-    }, value));
-  }
-  return /*#__PURE__*/React.createElement("button", {
-    onClick: onToggle,
-    "aria-pressed": active,
-    title: title,
-    className: `${base} transition ${active ? `ring-2 ring-offset-1 ${ringClass}` : 'hover:brightness-95'}`
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "font-medium text-[11px]"
-  }, label), /*#__PURE__*/React.createElement("span", {
-    className: "text-[13px] leading-none"
-  }, value), active && /*#__PURE__*/React.createElement("span", {
-    className: "text-[11px] font-black",
+  return /*#__PURE__*/React.createElement("span", {
+    className: "flex-shrink-0 flex items-center gap-1 text-[11px] text-slate-700",
+    title: title
+  }, dotClass && /*#__PURE__*/React.createElement("span", {
+    className: `w-2.5 h-2.5 rounded-sm ${dotClass}`,
     "aria-hidden": "true"
-  }, "\u2715"));
+  }), /*#__PURE__*/React.createElement("span", null, label), /*#__PURE__*/React.createElement("span", {
+    className: `text-[13px] leading-none font-black ${valueClass}`
+  }, value));
 }
 
 // 「條件篩到 0 筆」的共用空狀態(週檢視/年度總覽/成果清單)。
@@ -5845,6 +5804,7 @@ function PendingPanel({
   completed = [],
   currentWeek,
   weeksTotal = WEEKS_TOTAL,
+  scheduleYear = DEFAULT_SCHEDULE_YEAR,
   planPending = false,
   extraFilled = false,
   retro = false,
@@ -5878,7 +5838,7 @@ function PendingPanel({
     className: "font-bold text-lg flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("span", null, retro ? `🕘 W${String(currentWeek).padStart(2, '0')} 歷史回報補登` : `📋 W${String(currentWeek).padStart(2, '0')} 本週回報中心`)), /*#__PURE__*/React.createElement("p", {
     className: `text-xs mt-0.5 ${retro ? 'text-amber-200' : 'text-blue-200'}`
-  }, retro ? '主管已開放補登：可修改此週任務打卡、非專案事項與下週預計工作' : '整合本週排定任務打卡 ＋ 每週必填工作預計')), /*#__PURE__*/React.createElement(CloseButton, {
+  }, weekRangeLabel(scheduleYear, currentWeek), "\u30FB", retro ? '主管已開放補登：可修改此週任務打卡、非專案事項與下週預計工作' : '整合本週排定任務打卡 ＋ 每週必填工作預計')), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
     className: "text-white/60 hover:text-white p-1"
   })), /*#__PURE__*/React.createElement("div", {

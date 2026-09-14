@@ -102,11 +102,20 @@ IResult? ValidateWeekRange(int start, int end)
 //    存進去等於一個「主管一定會點」的儲存型 XSS。前端也擋一次,但前端擋不住直接打 API,
 //    所以真正的防線在這裡。允許的形式=http/https 網址、UNC 路徑(\\server\share)、本機路徑。
 // 「尚未到的週次」不可回報／回覆(2026-09-12 使用者決定:系統是檢視過去到現在的專案狀態,主管也不開放對未來週打卡)。
-// 以伺服器今天的 ISO 週為準(與前端 getTodayWeek 同一套演算法:週一起始、含跨年 53 週);前端已擋,這是第二道防線。
+// 以伺服器今天的**公司週**為準;前端已擋,這是第二道防線。
+// 公司週次規則(2026-09-14 使用者確認,不是 ISO 8601):一週從週日開始、W1＝含 1/1 的那一週(從 1/1 前最近的週日起算)、
+// 跨年照日期切(12/31 屬舊年度最後一週、1/1 起屬新年度 W1;等同 Excel WEEKNUM(d,1))。
+// 例:2026-12-31(四)=2026 W53、2027-01-01(五)=2027 W01。與前端 `companyWeekOf`、SP `usp_EnsureScheduleYear`(遷移 21)同一套規則。
+// ⚠ 之前用 ISOWeek(週一起始、含 1/4 那週為 W1),每個星期日差一週、跨年整段錯,2026-09-14 一併修正。
+static (int Year, int Week) CompanyWeekOf(DateTime d)
+{
+    var jan1 = new DateTime(d.Year, 1, 1);
+    var week1Sunday = jan1.AddDays(-(int)jan1.DayOfWeek);   // DayOfWeek.Sunday = 0
+    return (d.Year, (d.Date - week1Sunday).Days / 7 + 1);
+}
 static bool IsFutureWeek(int year, int week)
 {
-    var today = DateTime.Today;
-    int y = System.Globalization.ISOWeek.GetYear(today), w = System.Globalization.ISOWeek.GetWeekOfYear(today);
+    var (y, w) = CompanyWeekOf(DateTime.Today);
     return year > y || (year == y && week > w);
 }
 IResult? RejectFutureWeek(int year, int week, string what) =>

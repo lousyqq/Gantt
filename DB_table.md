@@ -273,3 +273,20 @@ usp_ToggleProjectStar、usp_EnsureScheduleYear、usp_SetAppSetting、usp_AddAcce
 - 本機已驗證：改檔 true → bootstrap `true`、改回 false → `false`（伺服器不重啟）；關著時子區間回報 400。
 
 <!-- 新的 DB 變更請從此行下方繼續追加，勿修改上方任何段落 -->
+
+## 2026-09-14 — 遷移 21：`usp_EnsureScheduleYear` 改用公司週次規則，校正既有週表（`21_company_week_rule.sql`）
+- **背景**：使用者 2026-09-14 確認公司行事曆——**公司週次不是 ISO 8601**：一週從**週日**開始；W1＝含 1/1 的那一週（從 1/1 前最近的
+  週日起算）；跨年**照日期切**（12/31 屬舊年度最後一週、1/1 起屬新年度 W1；等同 Excel `WEEKNUM(d,1)`）。
+  例：2026-12-31(四)＝2026 W53、2027-01-01(五)＝2027 W01（只有 1/1、1/2 兩天、0 個上班日）、2027 W02 從 1/3(日) 起。
+  舊 SP 依 ISO（週一起始、含 1/4 那週為 W1、月份取週四）：2027 產成 52 週且日期全錯；old.sql 已 `EXEC … 2027`，遠端存有這份 ISO 版。
+  2026 的 53 列是 old.sql 手寫種子，本來就符合公司規則（各月 5,4,5,4,5,4,4,5,4,4,5,4）。
+- **SP**：`CREATE OR ALTER usp_EnsureScheduleYear`——`@week1Sun`＝1/1 往前推到週日（`DATEDIFF(DAY,'19000107',@jan1)%7`，與 `@@DATEFIRST` 無關）、
+  `@maxWeek = DATEDIFF(DAY,@week1Sun,12/31)/7+1`（52 或 53）、週所屬月份＝該週**週日**的月份（W1 的週日可能在前一年 12 月，固定算 1 月）。
+- **校正既有年度**（cursor 逐年逐週比對）：月份不符 → UPDATE `MonthName/MonthLabel`；缺週 → INSERT；多出的週只 PRINT 警告不刪。
+  **週次編號本身不動**——使用者一直是用公司週在填，W37 就是 W37，只有「哪幾週算 9 月」與週數對錯。ScheduleWeeks 沒有 FK 指向它，不影響資料表。
+- 實測本機：**Gantt（MSD）2026 完全吻合、0 更動**；**Gantt_IMD 的 2026 是舊 SP 產的 ISO 版 52 列 → 更正 9 週月份（W14/18/23/27/31/36/40/44/49）
+  ＋補 W53**；2027 兩庫皆由 ISO 52 列 → 公司規則 53 列（各月 6,4,4,4,5,4,4,5,4,5,4,4、W53＝12/26–12/31）。重跑「更正 0 週、補入 0 週」。
+- 同批程式：前端 `app.jsx` `companyWeekOf`／`weekDateRange`／`weekRangeLabel`（`getTodayWeek` 改用；header 週數旁、甘特週次表頭 title、
+  回報中心副標顯示「9/13–9/19」日期區間）、後端 `Program.cs` `CompanyWeekOf`（`IsFutureWeek` 改用，不再 `ISOWeek`）。三處同一套規則。
+- **遠端需執行（順序 …→20→21，四個站台的 DB 都要跑）**；Gantt2 未套用。
+  ⚠ 跑之前先看 PRINT：某站台的 2026 若是 ISO 版（像本機 IMD），會更正月份＋補 W53，甘特月份表頭會跟著移一週——那是修正，不是壞掉。
