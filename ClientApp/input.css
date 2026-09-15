@@ -126,6 +126,9 @@
 .dark .text-blue-600,.dark .text-blue-700,.dark .text-blue-800,.dark .text-blue-900 { color:#93C5FD; }
 .dark .border-blue-100 { border-color:#244673; }
 .dark .border-blue-200,.dark .border-blue-300 { border-color:#3B71AD; }
+/* 甘特成員群組列的底線(border-separate 後改下在 td 的 border-b-blue-100;單邊變體是獨立 class,要另外映射)。
+   ⚠ 必須排在 .border-blue-200 之後:凍結格同時掛 border-blue-200(右框)＋border-b-blue-100,同特異性下後者要贏才會是底線色 */
+.dark .border-b-blue-100 { border-bottom-color:#244673; }
 
 /* sky */
 .dark .bg-sky-50,.dark .bg-sky-50\/70 { background-color:#183659; }

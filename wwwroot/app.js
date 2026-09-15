@@ -374,6 +374,9 @@ const useViewportWidth = () => {
 const defaultOwnerFilter = (role, user) => role === 'member' && user ? user : 'all';
 const STICKY_LEAD_W = 70; // 凍結欄前兩格:No(28)+分類(42)
 const nameColWidth = vw => Math.round(Math.min(420, Math.max(200, vw * 0.22))); // 專案名稱欄(1920→420=原值)
+const WEEK_W_RELAXED = 32; // 週檢視寬鬆模式的週欄寬(固定,橫向捲)
+const WEEK_W_COMPACT_MIN = 22; // 緊湊模式的週欄下限;整年塞得下時會放大到最多 WEEK_W_RELAXED(見 App 內 weekW)
+const SCROLLBAR_W = 17; // Windows 傳統垂直捲軸寬,算「塞不塞得下」時要扣掉
 // 團隊看板(1920→672=原 max-w-2xl);下限 400=成員列放得下「條＋得分＋兩顆有文字的按鈕」的最小寬度
 const reportPanelWidth = vw => Math.round(Math.min(672, Math.max(400, vw * 0.35)));
 
@@ -1480,7 +1483,6 @@ function App() {
   }); // fixed 定位座標(工具列是 overflow 容器,absolute 會被裁掉)
   const [showDeadlinePanel, setShowDeadlinePanel] = useState(false); // 即將到期清單面板(頂部 ⏰ 晶片點開)
 
-  const weekW = isCompact ? 22 : 32;
   // 版面自適應:凍結欄與右側團隊看板寬度隨視窗縮放,投影機/筆電才留得下中間甘特區(1920 時＝原本的 420/490/672)
   const viewportW = useViewportWidth();
   // 看板寬度:再夾一道「不得超過視窗 45%」,避免小視窗下甘特被壓成一條
@@ -1510,6 +1512,13 @@ function App() {
   const overviewNameW = Math.round(Math.max(240, Math.min(nameColWidth(viewportW), availW - weeksTotal * MIN_OVERVIEW_WEEK_W)));
   const nameW = isOverview ? overviewNameW : nameColWidth(viewportW);
   const frozenW = isOverview ? nameW : STICKY_LEAD_W + nameW; // 甘特左側凍結區總寬(捲動置中的基準)
+  // 週檢視的週欄寬:寬鬆固定 32(本來就要橫向捲);緊湊原本固定 22 → 1926 寬時 53 週只佔 1166、加凍結欄 490 才 1656,
+  // 右側 ~230px 什麼都沒放。改成「整年塞得下就把剩餘寬度分給週欄」(與年度總覽名稱欄同一種思路):
+  // 1926 → 26px(條內名稱截斷變少、格子點擊區變大)、1366 算出 18 → 夾回 22 照舊橫向捲、開看板 availW 變小自動退回。
+  // 上限 32＝寬鬆值(緊湊不可比寬鬆寬);扣 SCROLLBAR_W 是垂直捲軸,少扣會多出 1~2px 吐一條橫向捲軸。
+  // 凍結欄一律用週檢視的寬(不吃 isOverview)——總覽不用 weekW,但 ←→ 平移量吃它,切檢視時不要跳值。
+  const fitWeekW = Math.floor((availW - (STICKY_LEAD_W + nameColWidth(viewportW)) - SCROLLBAR_W) / weeksTotal);
+  const weekW = isCompact ? Math.min(WEEK_W_RELAXED, Math.max(WEEK_W_COMPACT_MIN, fitWeekW)) : WEEK_W_RELAXED;
   // 年度總覽的週欄寬度是「剩餘空間 ÷ 週數」(非固定 weekW);太窄時 53 個數字會擠成一片,
   // 故 <16px 只標 5 的倍數與當週(格子本身仍可點,hover/title 不變)
   const overviewWeekW = isOverview ? (availW - frozenW) / weeksTotal : 0;
@@ -3389,7 +3398,7 @@ function App() {
         background: 'var(--frozen-bg)'
       }
     }), /*#__PURE__*/React.createElement("table", {
-      className: "border-collapse bg-white",
+      className: "border-separate border-spacing-0 bg-white",
       style: {
         gridArea: '1 / 1',
         tableLayout: 'fixed',
@@ -3415,7 +3424,7 @@ function App() {
         width: weekW
       }
     }))), /*#__PURE__*/React.createElement("thead", {
-      className: "sticky top-0 z-40 text-xs shadow-sm bg-slate-100"
+      className: "sticky top-0 z-50 text-xs shadow-sm bg-slate-100"
     }, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
       colSpan: isOverview ? 1 : 3,
       className: "border-r border-b border-slate-300 bg-slate-200 sticky left-0 z-50 px-2 py-1 text-left",
@@ -3465,7 +3474,7 @@ function App() {
         left: isOverview ? 0 : STICKY_LEAD_W,
         backgroundColor: 'var(--gantt-sticky)'
       }
-    }, "\u5C08\u6848\u540D\u7A31 (Project Name)"), Array.from({
+    }, "\u5C08\u6848\u540D\u7A31"), Array.from({
       length: weeksTotal
     }).map((_, i) => {
       const weekNum = i + 1;
@@ -3519,10 +3528,10 @@ function App() {
         expanded: !isCollapsed
       }), {
         title: `${isCollapsed ? '展開' : '收合'} ${group.owner} 的專案`,
-        className: "group/header bg-[var(--gantt-group)] hover:bg-[var(--gantt-group-hover)] cursor-pointer border-b border-blue-100 transition-colors"
+        className: "group/header bg-[var(--gantt-group)] hover:bg-[var(--gantt-group-hover)] cursor-pointer transition-colors"
       }), /*#__PURE__*/React.createElement("td", {
         colSpan: isOverview ? 1 : 3,
-        className: "sticky left-0 z-40 border-r border-blue-200 p-0 shadow-[3px_0_6px_rgba(0,0,0,0.06)]",
+        className: "sticky left-0 z-30 border-r border-b border-blue-200 border-b-blue-100 p-0 shadow-[3px_0_6px_rgba(0,0,0,0.06)]",
         style: {
           width: frozenW,
           minWidth: frozenW,
@@ -3574,7 +3583,7 @@ function App() {
         title: `為 ${group.owner} 新增專案`
       }, "\uFF0B \u65B0\u589E\u5C08\u6848"))), /*#__PURE__*/React.createElement("td", {
         colSpan: weeksTotal,
-        className: "p-0 border-r border-slate-300"
+        className: "p-0 border-r border-b border-slate-300 border-b-blue-100"
       }, /*#__PURE__*/React.createElement("div", {
         className: "w-full h-full flex opacity-30"
       }, Array.from({
@@ -3607,15 +3616,17 @@ function App() {
           setDragOverId(null);
         } : undefined;
         const isDragSource = !!dragState && dragState.id === proj.id;
+        // 列底線與拖曳目標的藍線下在每個 td(border-separate 下 tr 的 border 不會畫,見 table 處說明)
+        const rowBorder = `border-b border-slate-300 ${dragOverId === proj.id && dragState && !isDragSource ? 'border-t-2 border-t-blue-500' : ''}`;
         return /*#__PURE__*/React.createElement(React.Fragment, {
           key: proj.id
         }, /*#__PURE__*/React.createElement("tr", {
           "data-proj-row": proj.id,
           onDragOver: rowDragOver,
           onDrop: rowDrop,
-          className: `group/row border-b border-slate-300 transition-colors ${dragOverId === proj.id && dragState && !isDragSource ? 'border-t-2 border-t-blue-500' : ''} ${isDragSource ? 'opacity-40' : ''}`
+          className: `group/row transition-colors ${isDragSource ? 'opacity-40' : ''}`
         }, !isOverview && /*#__PURE__*/React.createElement("td", {
-          className: `text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
+          className: `text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r ${rowBorder} text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
           style: {
             width: 28,
             minWidth: 28,
@@ -3623,7 +3634,7 @@ function App() {
             boxShadow: '2px 0 0 0 var(--frozen-bg)'
           }
         }, idx + 1), !isOverview && /*#__PURE__*/React.createElement("td", {
-          className: `text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
+          className: `text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r ${rowBorder} text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
           style: {
             width: 42,
             minWidth: 42,
@@ -3632,7 +3643,7 @@ function App() {
             boxShadow: '2px 0 0 0 var(--frozen-bg)'
           }
         }, proj.category), /*#__PURE__*/React.createElement("td", {
-          className: "sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 p-0",
+          className: `sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r ${rowBorder} p-0`,
           style: {
             width: nameW,
             minWidth: nameW,
@@ -3712,9 +3723,9 @@ function App() {
           title: "\u522A\u9664\u5C08\u6848"
         }, "\uD83D\uDDD1")))), /*#__PURE__*/React.createElement("td", {
           colSpan: weeksTotal,
-          className: "p-0 relative",
+          className: `p-0 relative ${rowBorder}`,
           style: {
-            height: isOverview ? 24 : isCompact ? 30 : 40
+            height: isOverview ? 24 : isCompact ? 28 : 40
           }
         }, /*#__PURE__*/React.createElement("div", {
           className: "absolute inset-0 flex pointer-events-none z-0"
@@ -3791,7 +3802,7 @@ function App() {
               left: `${leftPercent}%`,
               width: `${widthPercent}%`,
               top: isOverview ? 4 : 4,
-              bottom: isOverview ? 4 : isCompact ? 8 : 10,
+              bottom: isOverview ? 4 : isCompact ? 6 : 10,
               ...barStyle
             }
           }), dots.map(({
@@ -3822,6 +3833,7 @@ function App() {
           // 總覽子列 18(不是 16):條內要放 9px 的名稱＋3px 色點,16 扣掉上下 2px 只剩 12px 會疊在一起。
           const subRowH = isOverview ? 18 : isCompact ? 22 : 26;
           const isLastSub = subIdx === subEntries.length - 1;
+          const subRowBorder = isLastSub ? 'border-slate-300' : 'border-slate-200';
           // 名稱欄的樹狀導引線(2026-09-13,取代每列一個 └):10 筆子區間時每列都是 └ 會像每列都是最後一筆,
           // 父列捲出畫面後也不知道這幾列屬於誰、到哪結束。改成一條貫穿的直線,最後一列只畫到一半自然收成 └,
           // 群組結尾再把底線加粗一階(slate-300),與下一個專案列分開。純 CSS、不進 state。
@@ -3889,9 +3901,9 @@ function App() {
             "data-sub-row": sub.id,
             onDragOver: rowDragOver,
             onDrop: rowDrop,
-            className: `group/row border-b ${isLastSub ? 'border-slate-300' : 'border-slate-200'} ${isDragSource ? 'opacity-40' : ''}`
+            className: `group/row ${isDragSource ? 'opacity-40' : ''}`
           }, !isOverview && /*#__PURE__*/React.createElement("td", {
-            className: "sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300",
+            className: `sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 border-b ${subRowBorder}`,
             style: {
               width: 28,
               minWidth: 28,
@@ -3899,7 +3911,7 @@ function App() {
               boxShadow: '2px 0 0 0 var(--frozen-bg)'
             }
           }), !isOverview && /*#__PURE__*/React.createElement("td", {
-            className: "sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300",
+            className: `sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 border-b ${subRowBorder}`,
             style: {
               width: 42,
               minWidth: 42,
@@ -3908,7 +3920,7 @@ function App() {
               boxShadow: '2px 0 0 0 var(--frozen-bg)'
             }
           }), /*#__PURE__*/React.createElement("td", {
-            className: "sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 p-0",
+            className: `sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 border-b ${subRowBorder} p-0`,
             style: {
               width: nameW,
               minWidth: nameW,
@@ -3948,7 +3960,7 @@ function App() {
             title: subTitle
           }, sub.name))), /*#__PURE__*/React.createElement("td", {
             colSpan: weeksTotal,
-            className: "p-0 relative",
+            className: `p-0 relative border-b ${subRowBorder}`,
             style: {
               height: subRowH
             }

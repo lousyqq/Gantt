@@ -296,7 +296,7 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   ⚠ 子區間刪除的「↩ 復原」已於遷移 20 補上（子區間底下開始掛回報紀錄後，「重建即可」的前提消失）；
     Confirm 訊息會列出「含 n 筆週回報」。
   ⚠ 遷移檔的 `SET QUOTED_IDENTIFIER ON` 要放在 **filtered index 之前**（不只是 SP 之前）；沒帶 `-I` 時索引會 1934 失敗、SP 照建。
-  ⚠ 列高 週 26／緊湊 22／總覽 18（父列 40／30／24），條色走行內固定色（與父條同一條規則，不受深色映射影響）。
+  ⚠ 列高 週 26／緊湊 22／總覽 18（父列 40／28／24；緊湊父列 2026-09-15 由 30 降為 28），條色走行內固定色（與父條同一條規則，不受深色映射影響）。
     **子條三種密度都寫名稱**（2026-09-14 起總覽也顯示，與父條同一條規則；原本 `!isOverview` 關掉，使用者回報「子區間甘特圖內無文字」）：
     總覽用 `text-[9px] leading-none px-1`，條 `top/bottom 2`＝14px 才放得下 9px 字＋3px 色點，所以總覽子列從 16 加到 18。
   ⚠ TaskModal 的子區間存檔／取消後**彈窗不關**，全域 `MODAL_DIRTY` 要自己處理：其他欄位（回報、排程）都沒動才
@@ -346,6 +346,14 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   投影環境完全得不到改善；20px 才讓 1366 也能撐到 300。
 - **量測文字截斷務必等 `document.fonts.ready`**：字體載入前是 fallback（較窄），同一畫面會量出
   1/176 與 13/176 兩種結果（本專案實際踩過，導致一份稽核報告數字錯誤）。
+- **緊湊模式的週欄寬不是固定 22，是「整年塞得下就把剩餘寬度分給週欄」**（2026-09-15，使用者貼 1926 寬截圖問「還有空間可利用？」）：
+  原本 `weekW = isCompact ? 22 : 32`，1926 下 53 週只佔 1166＋凍結欄 490＝1656，右側 ~230px 空白。現行
+  `fitWeekW = floor((availW − (STICKY_LEAD_W + nameColWidth(vw)) − SCROLLBAR_W) / weeksTotal)`，緊湊＝`clamp(22, fit, 32)`
+  （常數 `WEEK_W_COMPACT_MIN`／`WEEK_W_RELAXED`／`SCROLLBAR_W=17`，`app.jsx` 頂部）。實測 1926→26px 整年一畫面無橫向捲軸、
+  1600→22（算出 21 夾回）、1366→22 照舊橫向捲、1926 開看板→22 關看板→26。寬鬆維持 32 不動（它本來就要橫向捲）。
+  ⚠ 上限是寬鬆值：緊湊不可比寬鬆寬。⚠ 一定要扣垂直捲軸寬（成員只看自己時列數少沒捲軸、主管 80 列有），少扣 1~2px 就會吐一條橫向捲軸。
+  ⚠ 凍結欄用**週檢視**的寬算（不吃 `isOverview`）：總覽不用 `weekW`，但 `←→` 平移量吃它，切檢視時不要跳值。
+  同批：緊湊父列 30→28（條本身 18px 不變，`bottom` 8→6；紅框 ring 2＋offset 1 仍有 3px 餘裕），750px 可視高度多 2 列。
 - **版面寬度一律用 `viewportW` 推導，勿再寫死 490／420**（app.jsx 頂部 `nameColWidth`／`reportPanelWidth`／
   `STICKY_LEAD_W`；`frozenW = STICKY_LEAD_W + nameW`）。投影機／筆電（1366）下寫死的「凍結欄 490＋看板 672」
   會吃掉 85% 畫面寬，中間甘特只剩 6 欄。1920 時公式算出來仍是原本的 420/672，桌機畫面不變。
@@ -563,6 +571,22 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
   `input.css` 明示 `.dark .bg-amber-600 { #D97706 }` 鎖住不壓暗；hover 用 `opacity-90` 不換色階。
   ⚠ 白字在 amber-600 對比 2.86，**是使用者明確選擇的例外**，不要「順手」改成 700 級（會回到撞色）。
 - 甘特斑馬紋（sticky 欄同步上色）；圖例常駐可見（閱讀輔助資訊不藏 tooltip）。
+- **甘特表格是 `border-separate border-spacing-0`，不是 `border-collapse`**（2026-09-15 修，使用者截圖回報）：collapse 模式下
+  Chrome 會讓捲到 sticky thead 底下的甘特條**透出來**——th 背景是不透明的 `slate-100`、`elementsFromPoint` 也是 th 在最上層，
+  但畫出來的月份列／週次列／凍結欄表頭上隱約看得到底下的條與專案名（800 寬 1:1 截圖可見）。`isolation:isolate`、
+  `translateZ(0)` 都救不了，改 `border-separate` 立即消失，且原本 24.5／49.5 的半像素列位也變成整數。
+  ⚠ **separate 模式下 `<tr>` 上的 border 不會畫**：列底線（群組列 `border-b-blue-100`、專案列 `border-slate-300`、子列
+  `slate-200/300`）與拖曳目標的 `border-t-2 border-t-blue-500` 全部改下在**每一個 td**（`rowBorder`／`subRowBorder` 變數），
+  不要再往 tr 加 border。`border-spacing-0` 讓格線與 collapse 時完全同寬；實測表寬 2186＝`frozenW + 53×weekW`、
+  凍結格 left 0／28／70／490 不變、列高 40／28／24 不變。
+  ⚠ 單邊色 class 是獨立 class：`border-b-blue-100` 要另外映射 `.dark .border-b-blue-100 { border-bottom-color }`，且要排在
+  `.dark .border-blue-200` **之後**（凍結格同時掛右框 `border-blue-200`，同特異性下後者才會贏）。`check-dark-coverage.js`
+  目前不檢查 `border-*` 單邊變體，這條是手動補的。成果清單那張表仍是 collapse（純文字列、無 absolute 子元素，未見透出）。
+- **甘特 thead 的 z 必須高於 tbody 裡所有 sticky 格**（2026-09-15 同日第二張截圖）：群組列凍結格原本與 thead 同為 `z-40`，
+  同一 stacking context 內同層級＝DOM 較後者蓋前者 → 往下捲時「玉婷 16 項」整格疊在「No／分類／專案名稱」表頭上。
+  現行：**thead 50 > 群組列凍結格 30 ＝ 專案列／子列凍結格 30 > 凍結遮罩 20 > 甘特條 10～20**。th 自己的 `z-50` 只是
+  thead 內部的排序，對外只看 thead 的 50。實測往下捲 669px＋橫捲 120px，表頭四個位置 `elementsFromPoint` 都是 th、群組列被裁在週次列下方。
+  ⚠ 新增任何 tbody 內的 sticky 格，z 一律 ≤30；要蓋過表頭的東西（下拉、tooltip）走 60 以上並放在表格外。
 - **凍結欄遮罩層的高度必須剛好等於表格**（2026-09-13 修）：原本 `height:100000 + margin-bottom:-100000`，以為負 margin
   「不撐長捲軸」——**負 margin 只抵銷版面位置，不抵銷捲動溢出**，容器 `scrollHeight` 實測就是 100000，群組全收合時滾輪一動
   整張表被捲出畫面（成員只看自己 5 案時每天都會遇到）。現行＝遮罩與 `<table>` 放同一個 grid 格（wrapper `display:grid`、

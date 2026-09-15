@@ -570,6 +570,10 @@ video {
   pointer-events: none;
 }
 
+.collapse {
+  visibility: collapse;
+}
+
 .fixed {
   position: fixed;
 }
@@ -648,10 +652,6 @@ video {
 
 .z-30 {
   z-index: 30;
-}
-
-.z-40 {
-  z-index: 40;
 }
 
 .z-50 {
@@ -1126,6 +1126,16 @@ video {
 
 .border-collapse {
   border-collapse: collapse;
+}
+
+.border-separate {
+  border-collapse: separate;
+}
+
+.border-spacing-0 {
+  --tw-border-spacing-x: 0px;
+  --tw-border-spacing-y: 0px;
+  border-spacing: var(--tw-border-spacing-x) var(--tw-border-spacing-y);
 }
 
 .-translate-x-1\/2 {
@@ -1846,6 +1856,11 @@ video {
 .border-yellow-500 {
   --tw-border-opacity: 1;
   border-color: rgb(234 179 8 / var(--tw-border-opacity, 1));
+}
+
+.border-b-blue-100 {
+  --tw-border-opacity: 1;
+  border-bottom-color: rgb(219 234 254 / var(--tw-border-opacity, 1));
 }
 
 .border-l-emerald-500 {
@@ -3485,6 +3500,13 @@ video {
 
 .dark .border-blue-200,.dark .border-blue-300 {
   border-color:#3B71AD;
+}
+
+/* 甘特成員群組列的底線(border-separate 後改下在 td 的 border-b-blue-100;單邊變體是獨立 class,要另外映射)。
+   ⚠ 必須排在 .border-blue-200 之後:凍結格同時掛 border-blue-200(右框)＋border-b-blue-100,同特異性下後者要贏才會是底線色 */
+
+.dark .border-b-blue-100 {
+  border-bottom-color:#244673;
 }
 
 /* sky */

@@ -230,6 +230,9 @@ const defaultOwnerFilter = (role, user) => (role === 'member' && user ? user : '
 
 const STICKY_LEAD_W = 70;                                                              // 凍結欄前兩格:No(28)+分類(42)
 const nameColWidth = (vw) => Math.round(Math.min(420, Math.max(200, vw * 0.22)));       // 專案名稱欄(1920→420=原值)
+const WEEK_W_RELAXED = 32;        // 週檢視寬鬆模式的週欄寬(固定,橫向捲)
+const WEEK_W_COMPACT_MIN = 22;    // 緊湊模式的週欄下限;整年塞得下時會放大到最多 WEEK_W_RELAXED(見 App 內 weekW)
+const SCROLLBAR_W = 17;           // Windows 傳統垂直捲軸寬,算「塞不塞得下」時要扣掉
 // 團隊看板(1920→672=原 max-w-2xl);下限 400=成員列放得下「條＋得分＋兩顆有文字的按鈕」的最小寬度
 const reportPanelWidth = (vw) => Math.round(Math.min(672, Math.max(400, vw * 0.35)));
 
@@ -1163,7 +1166,6 @@ function App() {
   const [displayMenuPos, setDisplayMenuPos] = useState({ top: 0, right: 0 });   // fixed 定位座標(工具列是 overflow 容器,absolute 會被裁掉)
   const [showDeadlinePanel, setShowDeadlinePanel] = useState(false); // 即將到期清單面板(頂部 ⏰ 晶片點開)
 
-  const weekW = isCompact ? 22 : 32;
   // 版面自適應:凍結欄與右側團隊看板寬度隨視窗縮放,投影機/筆電才留得下中間甘特區(1920 時＝原本的 420/490/672)
   const viewportW = useViewportWidth();
   // 看板寬度:再夾一道「不得超過視窗 45%」,避免小視窗下甘特被壓成一條
@@ -1193,6 +1195,13 @@ function App() {
   const overviewNameW = Math.round(Math.max(240, Math.min(nameColWidth(viewportW), availW - weeksTotal * MIN_OVERVIEW_WEEK_W)));
   const nameW = isOverview ? overviewNameW : nameColWidth(viewportW);
   const frozenW = isOverview ? nameW : STICKY_LEAD_W + nameW;    // 甘特左側凍結區總寬(捲動置中的基準)
+  // 週檢視的週欄寬:寬鬆固定 32(本來就要橫向捲);緊湊原本固定 22 → 1926 寬時 53 週只佔 1166、加凍結欄 490 才 1656,
+  // 右側 ~230px 什麼都沒放。改成「整年塞得下就把剩餘寬度分給週欄」(與年度總覽名稱欄同一種思路):
+  // 1926 → 26px(條內名稱截斷變少、格子點擊區變大)、1366 算出 18 → 夾回 22 照舊橫向捲、開看板 availW 變小自動退回。
+  // 上限 32＝寬鬆值(緊湊不可比寬鬆寬);扣 SCROLLBAR_W 是垂直捲軸,少扣會多出 1~2px 吐一條橫向捲軸。
+  // 凍結欄一律用週檢視的寬(不吃 isOverview)——總覽不用 weekW,但 ←→ 平移量吃它,切檢視時不要跳值。
+  const fitWeekW = Math.floor((availW - (STICKY_LEAD_W + nameColWidth(viewportW)) - SCROLLBAR_W) / weeksTotal);
+  const weekW = isCompact ? Math.min(WEEK_W_RELAXED, Math.max(WEEK_W_COMPACT_MIN, fitWeekW)) : WEEK_W_RELAXED;
   // 年度總覽的週欄寬度是「剩餘空間 ÷ 週數」(非固定 weekW);太窄時 53 個數字會擠成一片,
   // 故 <16px 只標 5 的倍數與當週(格子本身仍可點,hover/title 不變)
   const overviewWeekW = isOverview ? (availW - frozenW) / weeksTotal : 0;
@@ -2618,14 +2627,23 @@ function App() {
                   週檢視表格有固定寬(比容器寬)→ 欄用 max-content;總覽表格 width:100% → 欄用 100%。 */}
               <div aria-hidden="true" className="sticky left-0 z-20 pointer-events-none"
                 style={{ gridArea: '1 / 1', justifySelf: 'start', width: frozenW, background: 'var(--frozen-bg)' }}></div>
-              <table className="border-collapse bg-white" style={{ gridArea: '1 / 1', tableLayout: 'fixed', width: isOverview ? '100%' : frozenW + weeksTotal * weekW }}>
+              {/* ⚠ border-separate 不是 border-collapse(2026-09-15 修):collapse 模式下 Chrome 會讓捲到 sticky thead 底下的
+                  甘特條「透」出來——th 背景明明是不透明的 slate-100、elementsFromPoint 也是 th 在最上層,但畫出來的表頭上就是
+                  隱約看得到底下的條與文字(使用者截圖回報;isolation / translateZ 都救不了,只有改 separate 會消失)。
+                  ⚠ separate 模式下 <tr> 上的 border 不會畫,所以列的 border-b／拖曳目標的 border-t-2 全部下在每一個 td 上
+                  (群組列、專案列、子列各自的 rowBorder),不要再加回 tr。border-spacing 0 讓格線寬度與 collapse 時完全一樣。 */}
+              <table className="border-separate border-spacing-0 bg-white" style={{ gridArea: '1 / 1', tableLayout: 'fixed', width: isOverview ? '100%' : frozenW + weeksTotal * weekW }}>
               <colgroup>
                 {!isOverview && <col style={{ width: 28 }} />}
                 {!isOverview && <col style={{ width: 42 }} />}
                 <col style={{ width: nameW }} />
                 {Array.from({ length: weeksTotal }).map((_, i) => <col key={i} style={isOverview ? undefined : { width: weekW }} />)}
               </colgroup>
-              <thead className="sticky top-0 z-40 text-xs shadow-sm bg-slate-100">
+              {/* ⚠ thead 的 z 必須高於 tbody 裡所有 sticky 格(2026-09-15 修,使用者截圖):群組列凍結格原本與 thead 同為 z-40,
+                  同層級時 DOM 較後的 tbody 會蓋在 thead 上 → 往下捲時「玉婷 16 項」整格疊到「No／分類／專案名稱」表頭上。
+                  現行層級(同一個 stacking context):thead 50 > 群組列凍結格 30 = 專案列凍結格 30 > 遮罩 20 > 甘特條 10~20。
+                  th 自己的 z-50 是 thead 這個 stacking context 內部的排序,對外只看 thead 的 50。 */}
+              <thead className="sticky top-0 z-50 text-xs shadow-sm bg-slate-100">
                 <tr>
                   <th colSpan={isOverview ? 1 : 3} className="border-r border-b border-slate-300 bg-slate-200 sticky left-0 z-50 px-2 py-1 text-left" style={{ width: frozenW }}>
                     <div className="flex justify-between items-center text-[10px]">
@@ -2649,7 +2667,7 @@ function App() {
                 <tr className="bg-slate-100 text-slate-600 text-[11px]">
                   {!isOverview && <th className="border-r border-b border-slate-300 p-1 sticky left-0 z-50 text-center font-medium" style={{ width: 28, minWidth: 28, maxWidth: 28, backgroundColor: 'var(--gantt-sticky)' }}>No</th>}
                   {!isOverview && <th className="border-r border-b border-slate-300 p-1 sticky z-50 text-center font-medium" style={{ width: 42, minWidth: 42, maxWidth: 42, left: 28, backgroundColor: 'var(--gantt-sticky)' }}>分類</th>}
-                  <th className="border-r border-b border-slate-300 p-1 sticky z-50 shadow-[3px_0_6px_rgba(0,0,0,0.08)] text-left pl-3 font-medium" style={{ width: nameW, minWidth: nameW, maxWidth: nameW, left: isOverview ? 0 : STICKY_LEAD_W, backgroundColor: 'var(--gantt-sticky)' }}>專案名稱 (Project Name)</th>
+                  <th className="border-r border-b border-slate-300 p-1 sticky z-50 shadow-[3px_0_6px_rgba(0,0,0,0.08)] text-left pl-3 font-medium" style={{ width: nameW, minWidth: nameW, maxWidth: nameW, left: isOverview ? 0 : STICKY_LEAD_W, backgroundColor: 'var(--gantt-sticky)' }}>專案名稱</th>
                   {Array.from({ length: weeksTotal }).map((_, i) => {
                     const weekNum = i + 1;
                     const isCurrent = weekNum === currentWeek;
@@ -2692,8 +2710,9 @@ function App() {
                       {/* 展開/收合成員群組:role 保留原生 row,只補可聚焦與 Enter/Space(換成 button 會破壞 table 列結構) */}
                       <tr {...clickable(() => toggleOwnerCollapse(group.owner), null, { role: null, expanded: !isCollapsed })}
                         title={`${isCollapsed ? '展開' : '收合'} ${group.owner} 的專案`}
-                        className="group/header bg-[var(--gantt-group)] hover:bg-[var(--gantt-group-hover)] cursor-pointer border-b border-blue-100 transition-colors">
-                        <td colSpan={isOverview ? 1 : 3} className="sticky left-0 z-40 border-r border-blue-200 p-0 shadow-[3px_0_6px_rgba(0,0,0,0.06)]" style={{ width: frozenW, minWidth: frozenW, maxWidth: frozenW, backgroundColor: 'var(--gantt-group)' }}>
+                        className="group/header bg-[var(--gantt-group)] hover:bg-[var(--gantt-group-hover)] cursor-pointer transition-colors">
+                        {/* 列底線下在 td 不在 tr(border-separate 下 tr 的 border 不會畫,見 table 處說明) */}
+                        <td colSpan={isOverview ? 1 : 3} className="sticky left-0 z-30 border-r border-b border-blue-200 border-b-blue-100 p-0 shadow-[3px_0_6px_rgba(0,0,0,0.06)]" style={{ width: frozenW, minWidth: frozenW, maxWidth: frozenW, backgroundColor: 'var(--gantt-group)' }}>
                           <div className="flex items-center text-blue-900 font-bold text-[13px] px-2 py-1.5 border-l-4" style={{ borderColor: NAVY }}>
                             <svg className={`w-4 h-4 mr-1 text-blue-500 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                             <div className="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs mr-2 flex-shrink-0" style={{ backgroundColor: BRAND_BTN }}>{group.owner[0]}</div>
@@ -2721,7 +2740,7 @@ function App() {
                             )}
                           </div>
                         </td>
-                        <td colSpan={weeksTotal} className="p-0 border-r border-slate-300">
+                        <td colSpan={weeksTotal} className="p-0 border-r border-b border-slate-300 border-b-blue-100">
                           <div className="w-full h-full flex opacity-30">
                             {Array.from({ length: weeksTotal }).map((_, i) => (
                               <div key={i} className={`flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-100' : ''}`}></div>
@@ -2744,16 +2763,18 @@ function App() {
                         const rowDragOver = role === 'manager' && dragState && dragState.owner === group.owner ? (e) => { e.preventDefault(); if (dragOverId !== proj.id) setDragOverId(proj.id); } : undefined;
                         const rowDrop = role === 'manager' && dragState ? (e) => { e.preventDefault(); handleReorderProjects(group.owner, dragState.id, proj.id); setDragState(null); setDragOverId(null); } : undefined;
                         const isDragSource = !!dragState && dragState.id === proj.id;
+                        // 列底線與拖曳目標的藍線下在每個 td(border-separate 下 tr 的 border 不會畫,見 table 處說明)
+                        const rowBorder = `border-b border-slate-300 ${dragOverId === proj.id && dragState && !isDragSource ? 'border-t-2 border-t-blue-500' : ''}`;
                         return (
                         <React.Fragment key={proj.id}>
                         <tr data-proj-row={proj.id}
                           onDragOver={rowDragOver}
                           onDrop={rowDrop}
-                          className={`group/row border-b border-slate-300 transition-colors ${dragOverId === proj.id && dragState && !isDragSource ? 'border-t-2 border-t-blue-500' : ''} ${isDragSource ? 'opacity-40' : ''}`}>
-                          {!isOverview && <td className={`text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ width: 28, minWidth: 28, maxWidth: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}>{idx + 1}</td>}
-                          {!isOverview && <td className={`text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ width: 42, minWidth: 42, maxWidth: 42, left: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}>{proj.category}</td>}
+                          className={`group/row transition-colors ${isDragSource ? 'opacity-40' : ''}`}>
+                          {!isOverview && <td className={`text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r ${rowBorder} text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ width: 28, minWidth: 28, maxWidth: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}>{idx + 1}</td>}
+                          {!isOverview && <td className={`text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r ${rowBorder} text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`} style={{ width: 42, minWidth: 42, maxWidth: 42, left: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}>{proj.category}</td>}
                           {/* --- 嚴格設定 100% 純實色背景與絕對寬度，防止橫向捲動時甘特條穿透或重疊 --- */}
-                          <td className="sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 p-0" style={{ width: nameW, minWidth: nameW, maxWidth: nameW, left: isOverview ? 0 : STICKY_LEAD_W, boxShadow: '2px 0 0 0 var(--frozen-bg), 4px 0 8px rgba(0,0,0,0.08)' }}>
+                          <td className={`sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r ${rowBorder} p-0`} style={{ width: nameW, minWidth: nameW, maxWidth: nameW, left: isOverview ? 0 : STICKY_LEAD_W, boxShadow: '2px 0 0 0 var(--frozen-bg), 4px 0 8px rgba(0,0,0,0.08)' }}>
                             <div className="w-full h-full flex items-center px-2 overflow-hidden">
                               {role === 'manager' && !isOverview && (
                                 isFilteringRows ? (
@@ -2820,7 +2841,9 @@ function App() {
                             </div>
                           </td>
 
-                          <td colSpan={weeksTotal} className="p-0 relative" style={{ height: isOverview ? 24 : isCompact ? 30 : 40 }}>
+                          {/* 列高 寬鬆 40／緊湊 28／總覽 24。緊湊原本 30:條本身 18px(top 4/bottom 8),底下的 8 只是留白,
+                              改 28 時條高不變(bottom 6),紅框 ring-2+offset-1 佔 3px 仍有 3px 餘裕;750px 可視高度多看 2 列。 */}
+                          <td colSpan={weeksTotal} className={`p-0 relative ${rowBorder}`} style={{ height: isOverview ? 24 : isCompact ? 28 : 40 }}>
                             <div className="absolute inset-0 flex pointer-events-none z-0">
                               {Array.from({ length: weeksTotal }).map((_, i) => (
                                 <div key={i} className={`flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-50/70' : ''}`}></div>
@@ -2879,7 +2902,7 @@ function App() {
                                     onMouseMove={moveTooltip}
                                     onMouseLeave={hideTooltip}
                                     className={`absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 border rounded-sm shadow-sm ${barClass} ${isHighlighted ? 'ring-2 ring-blue-500 ring-offset-1 z-20' : isPending ? 'ring-2 ring-red-400 ring-offset-1 z-10' : deadlineSoon ? 'ring-2 ring-orange-400 ring-offset-1 z-10' : 'z-10'}`}
-                                    style={{ left: `${leftPercent}%`, width: `${widthPercent}%`, top: isOverview ? 4 : 4, bottom: isOverview ? 4 : isCompact ? 8 : 10, ...barStyle }}>
+                                    style={{ left: `${leftPercent}%`, width: `${widthPercent}%`, top: isOverview ? 4 : 4, bottom: isOverview ? 4 : isCompact ? 6 : 10, ...barStyle }}>
                                     
                                     {/* ⚠ 收合時**不要**在父條上畫子區間縮圖(2026-09-13 做過一版、同日拆掉):曾在父條頂端畫每個子區間
                                         一段 3px teal 細帶,想讓年度總覽(預設收合)不展開也看得到子排程。使用者收合後看到「計畫區間
@@ -2924,6 +2947,7 @@ function App() {
                           // 總覽子列 18(不是 16):條內要放 9px 的名稱＋3px 色點,16 扣掉上下 2px 只剩 12px 會疊在一起。
                           const subRowH = isOverview ? 18 : isCompact ? 22 : 26;
                           const isLastSub = subIdx === subEntries.length - 1;
+                          const subRowBorder = isLastSub ? 'border-slate-300' : 'border-slate-200';
                           // 名稱欄的樹狀導引線(2026-09-13,取代每列一個 └):10 筆子區間時每列都是 └ 會像每列都是最後一筆,
                           // 父列捲出畫面後也不知道這幾列屬於誰、到哪結束。改成一條貫穿的直線,最後一列只畫到一半自然收成 └,
                           // 群組結尾再把底線加粗一階(slate-300),與下一個專案列分開。純 CSS、不進 state。
@@ -2970,10 +2994,11 @@ function App() {
                           const subRovingId = `s${sub.id}`;
                           return (
                             <tr key={`sub-${sub.id}`} data-sub-row={sub.id} onDragOver={rowDragOver} onDrop={rowDrop}
-                              className={`group/row border-b ${isLastSub ? 'border-slate-300' : 'border-slate-200'} ${isDragSource ? 'opacity-40' : ''}`}>
-                              {!isOverview && <td className="sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300" style={{ width: 28, minWidth: 28, maxWidth: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}></td>}
-                              {!isOverview && <td className="sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300" style={{ width: 42, minWidth: 42, maxWidth: 42, left: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}></td>}
-                              <td className="sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 p-0" style={{ width: nameW, minWidth: nameW, maxWidth: nameW, left: isOverview ? 0 : STICKY_LEAD_W, boxShadow: '2px 0 0 0 var(--frozen-bg), 4px 0 8px rgba(0,0,0,0.08)' }}>
+                              className={`group/row ${isDragSource ? 'opacity-40' : ''}`}>
+                              {/* 子列底線:最後一列 slate-300 標出群組結尾、其餘 slate-200;下在 td 不在 tr(border-separate,見 table 處說明) */}
+                              {!isOverview && <td className={`sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 border-b ${subRowBorder}`} style={{ width: 28, minWidth: 28, maxWidth: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}></td>}
+                              {!isOverview && <td className={`sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 border-b ${subRowBorder}`} style={{ width: 42, minWidth: 42, maxWidth: 42, left: 28, boxShadow: '2px 0 0 0 var(--frozen-bg)' }}></td>}
+                              <td className={`sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 border-b ${subRowBorder} p-0`} style={{ width: nameW, minWidth: nameW, maxWidth: nameW, left: isOverview ? 0 : STICKY_LEAD_W, boxShadow: '2px 0 0 0 var(--frozen-bg), 4px 0 8px rgba(0,0,0,0.08)' }}>
                                 <div className="relative w-full h-full flex items-center overflow-hidden pr-2" style={{ paddingLeft: subIndent }}>
                                   {/* 直線:非最後一列貫穿整列、最後一列只到一半;橫向短線接到名稱 */}
                                   <div aria-hidden="true" className="absolute border-l border-slate-400 pointer-events-none" style={{ left: guideX, top: 0, bottom: isLastSub ? '50%' : 0 }}></div>
@@ -2984,7 +3009,7 @@ function App() {
                                   <span className={`flex-1 min-w-0 truncate text-slate-700 ${isOverview ? 'text-[11px]' : isCompact ? 'text-[11px]' : 'text-[12px]'}`} title={subTitle}>{sub.name}</span>
                                 </div>
                               </td>
-                              <td colSpan={weeksTotal} className="p-0 relative" style={{ height: subRowH }}>
+                              <td colSpan={weeksTotal} className={`p-0 relative border-b ${subRowBorder}`} style={{ height: subRowH }}>
                                 <div className="absolute inset-0 flex pointer-events-none z-0">
                                   {Array.from({ length: weeksTotal }).map((_, i) => (
                                     <div key={i} className={`flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-50/70' : ''}`}></div>
