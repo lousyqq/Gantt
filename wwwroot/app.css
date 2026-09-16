@@ -1859,6 +1859,11 @@ video {
   border-bottom-color: rgb(219 234 254 / var(--tw-border-opacity, 1));
 }
 
+.border-b-blue-500 {
+  --tw-border-opacity: 1;
+  border-bottom-color: rgb(59 130 246 / var(--tw-border-opacity, 1));
+}
+
 .border-l-emerald-500 {
   --tw-border-opacity: 1;
   border-left-color: rgb(16 185 129 / var(--tw-border-opacity, 1));

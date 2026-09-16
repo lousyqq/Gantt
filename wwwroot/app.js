@@ -3633,8 +3633,13 @@ function App() {
           setDragOverId(null);
         } : undefined;
         const isDragSource = !!dragState && dragState.id === proj.id;
+        // 拖曳目標的藍線要畫在「實際會落下的位置」(2026-09-16 實測修):handleReorderProjects 是先移除再 splice 到目標索引,
+        // 往下拖會落在目標**之後**、往上拖落在目標**之前**——原本一律畫在目標上緣,往下拖時線在 E3 上方、放開卻跑到 E3 下方。
+        // 不改演算法(那樣最後一個位置就永遠放不到),改讓線說實話:往下＝目標區塊底緣(子列展開時是最後一條子列的底緣),往上＝目標頂緣。
+        const isDropTarget = dragOverId === proj.id && !!dragState && !isDragSource;
+        const dropBelow = isDropTarget && group.projects.findIndex(p => p.id === dragState.id) < idx;
         // 列底線與拖曳目標的藍線下在每個 td(border-separate 下 tr 的 border 不會畫,見 table 處說明)
-        const rowBorder = `border-b border-slate-300 ${dragOverId === proj.id && dragState && !isDragSource ? 'border-t-2 border-t-blue-500' : ''}`;
+        const rowBorder = `border-b border-slate-300 ${isDropTarget ? dropBelow ? subExpanded ? '' : 'border-b-2 border-b-blue-500' : 'border-t-2 border-t-blue-500' : ''}`;
         return /*#__PURE__*/React.createElement(React.Fragment, {
           key: proj.id
         }, /*#__PURE__*/React.createElement("tr", {
@@ -3850,7 +3855,8 @@ function App() {
           // 總覽子列 18(不是 16):條內要放 9px 的名稱＋3px 色點,16 扣掉上下 2px 只剩 12px 會疊在一起。
           const subRowH = isOverview ? 18 : isCompact ? 22 : 26;
           const isLastSub = subIdx === subEntries.length - 1;
-          const subRowBorder = isLastSub ? 'border-slate-300' : 'border-slate-200';
+          // 往下拖到子列展開的專案:藍線畫在最後一條子列底緣(專案會落在整個區塊之後,畫在父列底緣會像「插進子列中間」)
+          const subRowBorder = `${isLastSub ? 'border-slate-300' : 'border-slate-200'} ${dropBelow && isLastSub ? 'border-b-2 border-b-blue-500' : ''}`;
           // 名稱欄的樹狀導引線(2026-09-13,取代每列一個 └):10 筆子區間時每列都是 └ 會像每列都是最後一筆,
           // 父列捲出畫面後也不知道這幾列屬於誰、到哪結束。改成一條貫穿的直線,最後一列只畫到一半自然收成 └,
           // 群組結尾再把底線加粗一階(slate-300),與下一個專案列分開。純 CSS、不進 state。
