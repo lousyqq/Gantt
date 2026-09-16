@@ -634,10 +634,6 @@ video {
   top: 50%;
 }
 
-.top-full {
-  top: 100%;
-}
-
 .z-0 {
   z-index: 0;
 }

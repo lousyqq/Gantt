@@ -1476,6 +1476,10 @@ function App() {
   const [showAccessPanel, setShowAccessPanel] = useState(false); // 主管:瀏覽權限卡控面板(遷移 11)
   const [showUsagePanel, setShowUsagePanel] = useState(false); // 主管:使用統計面板(登入次數,遷移 13)
   const [showAdminMenu, setShowAdminMenu] = useState(false); // 主管:header「⚙️ 管理」下拉選單(收納低頻管理入口)
+  const [adminMenuPos, setAdminMenuPos] = useState({
+    top: 0,
+    right: 0
+  }); // fixed 定位座標(選單本體放在 header 外,見 2026-09-16 註解)
   const [showDisplayMenu, setShowDisplayMenu] = useState(false); // 工具列「顯示 ▾」下拉(展開/收合全部成員群組、子區間)
   const [displayMenuPos, setDisplayMenuPos] = useState({
     top: 0,
@@ -2964,64 +2968,19 @@ function App() {
     }, role === 'manager' && /*#__PURE__*/React.createElement("div", {
       className: "relative"
     }, /*#__PURE__*/React.createElement("button", {
-      onClick: () => setShowAdminMenu(v => !v),
+      onClick: e => {
+        const r = e.currentTarget.getBoundingClientRect();
+        setAdminMenuPos({
+          top: r.bottom + 6,
+          right: window.innerWidth - r.right
+        });
+        setShowAdminMenu(v => !v);
+      },
       "aria-expanded": showAdminMenu,
       "aria-haspopup": "true",
       className: `px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20 text-white ${showAdminMenu ? 'bg-white/25' : 'bg-white/10 hover:bg-white/20'}`,
       title: "\u7BA1\u7406\u529F\u80FD\uFF1A\u6B77\u53F2\u88DC\u767B\u958B\u95DC\u3001\u6210\u54E1\u7BA1\u7406\u3001\u700F\u89BD\u6B0A\u9650\u3001\u4F7F\u7528\u7D71\u8A08\u3001\u7570\u52D5\u7D00\u9304"
-    }, "\u2699\uFE0F \u7BA1\u7406 ", showAdminMenu ? '▴' : '▾'), showAdminMenu && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-      className: "fixed inset-0 z-[60]",
-      onClick: () => setShowAdminMenu(false)
-    }), /*#__PURE__*/React.createElement("div", {
-      className: "absolute right-0 top-full mt-1.5 z-[70] w-44 bg-white rounded-xl shadow-2xl border border-slate-300 py-1.5 overflow-hidden"
-    }, [
-    // 補登總開關(2026-09-13 從工具列移進來):改全體寫入權限的系統設定,放在第一項並用琥珀色標示 ON 狀態。
-    // 關閉的入口另有兩處:此處、以及開啟時畫面上的琥珀橫幅「關閉歷史補登」。
-    // ⚠ 標籤寫「動作」、小字寫「現況」(2026-09-13 使用者問):原本標籤是「歷史補登:僅限當週」這種狀態描述,
-    //   點下去卻做相反的事,其他四項都是「點了會去哪」,只有這項要先讀小字才知道是開還是關。
-    //   名稱全站統一叫「歷史補登」(橫幅、toast 原本叫「豁免期」「調正歷史進度」,同一件事三個名字)。
-    {
-      icon: allowRetroCheckin ? '🔒' : '🔓',
-      label: allowRetroCheckin ? '關閉歷史補登' : '開放歷史補登',
-      desc: allowRetroCheckin ? '目前：開放中，全體可補登歷史週次' : '目前：僅限當週回報',
-      open: toggleRetroCheckin,
-      cls: allowRetroCheckin ? 'bg-amber-100 hover:bg-amber-200' : ''
-    }, {
-      icon: '👥',
-      label: '成員管理',
-      desc: '新增/移除/改名',
-      open: () => setShowMemberPanel(true)
-    }, {
-      icon: '🔐',
-      label: '瀏覽權限',
-      desc: '部門/工號卡控',
-      open: () => setShowAccessPanel(true)
-    }, {
-      icon: '📈',
-      label: '使用統計',
-      desc: '登入次數/使用率',
-      open: () => setShowUsagePanel(true)
-    }, {
-      icon: '📜',
-      label: '異動紀錄',
-      desc: '操作稽核',
-      open: () => setShowAuditPanel(true)
-    }].map(item => /*#__PURE__*/React.createElement("button", {
-      key: item.label,
-      onClick: () => {
-        setShowAdminMenu(false);
-        item.open();
-      },
-      className: `w-full text-left px-3.5 py-2 transition flex items-center gap-2.5 ${item.cls || 'hover:bg-slate-100'}`
-    }, /*#__PURE__*/React.createElement("span", {
-      className: "text-base"
-    }, item.icon), /*#__PURE__*/React.createElement("span", {
-      className: "min-w-0"
-    }, /*#__PURE__*/React.createElement("span", {
-      className: "block text-xs font-bold text-slate-800"
-    }, item.label), /*#__PURE__*/React.createElement("span", {
-      className: "block text-[10px] text-slate-500"
-    }, item.desc))))))), /*#__PURE__*/React.createElement("div", {
+    }, "\u2699\uFE0F \u7BA1\u7406 ", showAdminMenu ? '▴' : '▾')), /*#__PURE__*/React.createElement("div", {
       className: "text-right leading-tight"
     }, /*#__PURE__*/React.createElement("div", {
       className: "font-bold text-sm"
@@ -3065,7 +3024,65 @@ function App() {
       strokeLinejoin: "round",
       strokeWidth: 2,
       d: "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-    })))))), dataLoading ? /*#__PURE__*/React.createElement(LoadingScreen, null) : dataError ? /*#__PURE__*/React.createElement(ErrorScreen, {
+    })))))), showAdminMenu && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "fixed inset-0 z-[60]",
+      onClick: () => setShowAdminMenu(false)
+    }), /*#__PURE__*/React.createElement("div", {
+      className: "fixed z-[70] w-44 bg-white rounded-xl shadow-2xl modal-card border border-slate-300 py-1.5 overflow-hidden",
+      style: {
+        top: adminMenuPos.top,
+        right: adminMenuPos.right
+      },
+      role: "menu"
+    }, [
+    // 補登總開關(2026-09-13 從工具列移進來):改全體寫入權限的系統設定,放在第一項並用琥珀色標示 ON 狀態。
+    // 關閉的入口另有兩處:此處、以及開啟時畫面上的琥珀橫幅「關閉歷史補登」。
+    // ⚠ 標籤寫「動作」、小字寫「現況」(2026-09-13 使用者問):原本標籤是「歷史補登:僅限當週」這種狀態描述,
+    //   點下去卻做相反的事,其他四項都是「點了會去哪」,只有這項要先讀小字才知道是開還是關。
+    //   名稱全站統一叫「歷史補登」(橫幅、toast 原本叫「豁免期」「調正歷史進度」,同一件事三個名字)。
+    {
+      icon: allowRetroCheckin ? '🔒' : '🔓',
+      label: allowRetroCheckin ? '關閉歷史補登' : '開放歷史補登',
+      desc: allowRetroCheckin ? '目前：開放中，全體可補登歷史週次' : '目前：僅限當週回報',
+      open: toggleRetroCheckin,
+      cls: allowRetroCheckin ? 'bg-amber-100 hover:bg-amber-200' : ''
+    }, {
+      icon: '👥',
+      label: '成員管理',
+      desc: '新增/移除/改名',
+      open: () => setShowMemberPanel(true)
+    }, {
+      icon: '🔐',
+      label: '瀏覽權限',
+      desc: '部門/工號卡控',
+      open: () => setShowAccessPanel(true)
+    }, {
+      icon: '📈',
+      label: '使用統計',
+      desc: '登入次數/使用率',
+      open: () => setShowUsagePanel(true)
+    }, {
+      icon: '📜',
+      label: '異動紀錄',
+      desc: '操作稽核',
+      open: () => setShowAuditPanel(true)
+    }].map(item => /*#__PURE__*/React.createElement("button", {
+      key: item.label,
+      role: "menuitem",
+      onClick: () => {
+        setShowAdminMenu(false);
+        item.open();
+      },
+      className: `w-full text-left px-3.5 py-2 transition flex items-center gap-2.5 ${item.cls || 'hover:bg-slate-100'}`
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "text-base"
+    }, item.icon), /*#__PURE__*/React.createElement("span", {
+      className: "min-w-0"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "block text-xs font-bold text-slate-800"
+    }, item.label), /*#__PURE__*/React.createElement("span", {
+      className: "block text-[10px] text-slate-500"
+    }, item.desc)))))), dataLoading ? /*#__PURE__*/React.createElement(LoadingScreen, null) : dataError ? /*#__PURE__*/React.createElement(ErrorScreen, {
       message: dataError,
       onRetry: loadBootstrap
     }) : !currentUser ? /*#__PURE__*/React.createElement(LoginScreen, {
@@ -3110,7 +3127,7 @@ function App() {
       className: "font-black text-slate-900 text-sm"
     }, "W", String(currentWeek).padStart(2, '0')), /*#__PURE__*/React.createElement("span", {
       className: "ml-1 text-[10px] font-bold text-slate-700"
-    }, ownerFilter === 'all' ? '全隊' : ownerFilter, "\u6982\u6CC1")), /*#__PURE__*/React.createElement("div", {
+    }, ownerFilter === 'all' ? '全員' : ownerFilter, "\u6982\u6CC1")), /*#__PURE__*/React.createElement("div", {
       className: `flex items-center flex-shrink-0 ${ultraTightStatsBar ? 'min-w-[120px]' : 'min-w-[150px]'}`
     }, /*#__PURE__*/React.createElement("div", {
       className: "flex-1 h-2 bg-slate-300 rounded-full overflow-hidden"
@@ -3685,14 +3702,7 @@ function App() {
           className: "flex-shrink-0 ml-1 -my-1 px-1.5 py-1 rounded-full text-[10px] font-bold leading-none whitespace-nowrap bg-sky-100 text-sky-800 border border-sky-300 hover:bg-sky-200 transition disabled:cursor-default"
         }, /*#__PURE__*/React.createElement("span", {
           "aria-hidden": "true"
-        }, subExpanded ? '▾' : '▸'), " ", subCount), /*#__PURE__*/React.createElement("button", {
-          onClick: e => {
-            e.stopPropagation();
-            setDeliverableProj(proj);
-          },
-          className: `flex-shrink-0 px-1 py-1.5 -my-1.5 text-[12px] leading-none transition hover:scale-125 ${proj.deliverable ? 'opacity-90' : 'opacity-25 hover:opacity-70'}`,
-          title: proj.deliverable || proj.mpSaving ? `具體產出項目：${proj.deliverable || '（未填寫）'}${proj.mpSaving ? `\n💡 MP Saving：${proj.mpSaving}` : ''}` : '具體產出項目（尚未填寫，點擊檢視/填寫）'
-        }, "\uD83C\uDFAF"), (() => {
+        }, subExpanded ? '▾' : '▸'), " ", subCount), (() => {
           const soon = proj.tasks.filter(isTaskDeadlineSoon);
           if (soon.length === 0) return null;
           const remain = Math.min(...soon.map(t => t.end - todayWeek + 1));
@@ -3721,7 +3731,14 @@ function App() {
           onClick: () => handleDeleteProject(proj),
           className: "w-5 h-5 flex items-center justify-center rounded text-red-500 hover:bg-red-100",
           title: "\u522A\u9664\u5C08\u6848"
-        }, "\uD83D\uDDD1")))), /*#__PURE__*/React.createElement("td", {
+        }, "\uD83D\uDDD1")), /*#__PURE__*/React.createElement("button", {
+          onClick: e => {
+            e.stopPropagation();
+            setDeliverableProj(proj);
+          },
+          className: `flex-shrink-0 px-1 py-1.5 -my-1.5 text-[12px] leading-none transition hover:scale-125 ${proj.deliverable ? 'opacity-90' : 'opacity-25 hover:opacity-70'}`,
+          title: proj.deliverable || proj.mpSaving ? `具體產出項目：${proj.deliverable || '（未填寫）'}${proj.mpSaving ? `\n💡 MP Saving：${proj.mpSaving}` : ''}` : '具體產出項目（尚未填寫，點擊檢視/填寫）'
+        }, "\uD83C\uDFAF"))), /*#__PURE__*/React.createElement("td", {
           colSpan: weeksTotal,
           className: `p-0 relative ${rowBorder}`,
           style: {

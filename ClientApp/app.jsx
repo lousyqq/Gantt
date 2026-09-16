@@ -1162,6 +1162,7 @@ function App() {
   const [showAccessPanel, setShowAccessPanel] = useState(false); // 主管:瀏覽權限卡控面板(遷移 11)
   const [showUsagePanel, setShowUsagePanel] = useState(false);   // 主管:使用統計面板(登入次數,遷移 13)
   const [showAdminMenu, setShowAdminMenu] = useState(false);     // 主管:header「⚙️ 管理」下拉選單(收納低頻管理入口)
+  const [adminMenuPos, setAdminMenuPos] = useState({ top: 0, right: 0 });       // fixed 定位座標(選單本體放在 header 外,見 2026-09-16 註解)
   const [showDisplayMenu, setShowDisplayMenu] = useState(false); // 工具列「顯示 ▾」下拉(展開/收合全部成員群組、子區間)
   const [displayMenuPos, setDisplayMenuPos] = useState({ top: 0, right: 0 });   // fixed 定位座標(工具列是 overflow 容器,absolute 會被裁掉)
   const [showDeadlinePanel, setShowDeadlinePanel] = useState(false); // 即將到期清單面板(頂部 ⏰ 晶片點開)
@@ -2265,44 +2266,14 @@ function App() {
                 <div className="relative">
                   {/* aria-expanded/haspopup 不可省:視覺上有 ▾/▴ 可以判斷開合,讀螢幕器只念得到「管理 按鈕」,
                       不知道這顆會展開選單、也不知道現在是開是關(全站折疊類元素都由 clickable 的 opts.expanded 補這個) */}
-                  <button onClick={() => setShowAdminMenu(v => !v)}
+                  {/* 選單本體不在這裡:見 </header> 後面的 showAdminMenu 區塊(2026-09-16 使用者截圖:選單被甘特月份列／週次列蓋住,
+                      「成員管理／瀏覽權限」點不到)。座標在點開當下從按鈕算,與「顯示 ▾」同一套做法。 */}
+                  <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAdminMenuPos({ top: r.bottom + 6, right: window.innerWidth - r.right }); setShowAdminMenu(v => !v); }}
                     aria-expanded={showAdminMenu} aria-haspopup="true"
                     className={`px-3 py-1.5 rounded-md text-xs font-bold shadow transition border border-white/20 text-white ${showAdminMenu ? 'bg-white/25' : 'bg-white/10 hover:bg-white/20'}`}
                     title="管理功能：歷史補登開關、成員管理、瀏覽權限、使用統計、異動紀錄">
                     ⚙️ 管理 {showAdminMenu ? '▴' : '▾'}
                   </button>
-                  {showAdminMenu && (
-                    <>
-                      {/* 選單無輸入內容,點選單外關閉不會遺失資料(輸入型視窗「不點外關閉」慣例的例外) */}
-                      <div className="fixed inset-0 z-[60]" onClick={() => setShowAdminMenu(false)}></div>
-                      <div className="absolute right-0 top-full mt-1.5 z-[70] w-44 bg-white rounded-xl shadow-2xl border border-slate-300 py-1.5 overflow-hidden">
-                        {[
-                          // 補登總開關(2026-09-13 從工具列移進來):改全體寫入權限的系統設定,放在第一項並用琥珀色標示 ON 狀態。
-                          // 關閉的入口另有兩處:此處、以及開啟時畫面上的琥珀橫幅「關閉歷史補登」。
-                          // ⚠ 標籤寫「動作」、小字寫「現況」(2026-09-13 使用者問):原本標籤是「歷史補登:僅限當週」這種狀態描述,
-                          //   點下去卻做相反的事,其他四項都是「點了會去哪」,只有這項要先讀小字才知道是開還是關。
-                          //   名稱全站統一叫「歷史補登」(橫幅、toast 原本叫「豁免期」「調正歷史進度」,同一件事三個名字)。
-                          { icon: allowRetroCheckin ? '🔒' : '🔓', label: allowRetroCheckin ? '關閉歷史補登' : '開放歷史補登',
-                            desc: allowRetroCheckin ? '目前：開放中，全體可補登歷史週次' : '目前：僅限當週回報', open: toggleRetroCheckin,
-                            cls: allowRetroCheckin ? 'bg-amber-100 hover:bg-amber-200' : '' },
-                          { icon: '👥', label: '成員管理', desc: '新增/移除/改名', open: () => setShowMemberPanel(true) },
-                          { icon: '🔐', label: '瀏覽權限', desc: '部門/工號卡控', open: () => setShowAccessPanel(true) },
-                          { icon: '📈', label: '使用統計', desc: '登入次數/使用率', open: () => setShowUsagePanel(true) },
-                          { icon: '📜', label: '異動紀錄', desc: '操作稽核', open: () => setShowAuditPanel(true) }
-                        ].map(item => (
-                          <button key={item.label}
-                            onClick={() => { setShowAdminMenu(false); item.open(); }}
-                            className={`w-full text-left px-3.5 py-2 transition flex items-center gap-2.5 ${item.cls || 'hover:bg-slate-100'}`}>
-                            <span className="text-base">{item.icon}</span>
-                            <span className="min-w-0">
-                              <span className="block text-xs font-bold text-slate-800">{item.label}</span>
-                              <span className="block text-[10px] text-slate-500">{item.desc}</span>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
                 </div>
               )}
               <div className="text-right leading-tight">
@@ -2329,6 +2300,42 @@ function App() {
           </div>
         )}
       </header>
+
+      {/* 「⚙️ 管理」的選單本體放在 header **外面**(2026-09-16 修,使用者截圖):header 是 z-50 的 flex item＝自己一個 stacking context,
+          裡面的 absolute z-[70] 對外只算 50,而甘特的 sticky thead 也是 z-50、DOM 在後 → 選單下半（成員管理／瀏覽權限）被月份列／
+          週次列蓋住、點不到。與「顯示 ▾」同一個坑、同一個解法:選單當 header 的兄弟節點、fixed 定位、座標在點開當下從按鈕算。 */}
+      {showAdminMenu && (
+        <>
+          {/* 選單無輸入內容,點選單外關閉不會遺失資料(輸入型視窗「不點外關閉」慣例的例外) */}
+          <div className="fixed inset-0 z-[60]" onClick={() => setShowAdminMenu(false)}></div>
+          <div className="fixed z-[70] w-44 bg-white rounded-xl shadow-2xl modal-card border border-slate-300 py-1.5 overflow-hidden" style={{ top: adminMenuPos.top, right: adminMenuPos.right }} role="menu">
+            {[
+              // 補登總開關(2026-09-13 從工具列移進來):改全體寫入權限的系統設定,放在第一項並用琥珀色標示 ON 狀態。
+              // 關閉的入口另有兩處:此處、以及開啟時畫面上的琥珀橫幅「關閉歷史補登」。
+              // ⚠ 標籤寫「動作」、小字寫「現況」(2026-09-13 使用者問):原本標籤是「歷史補登:僅限當週」這種狀態描述,
+              //   點下去卻做相反的事,其他四項都是「點了會去哪」,只有這項要先讀小字才知道是開還是關。
+              //   名稱全站統一叫「歷史補登」(橫幅、toast 原本叫「豁免期」「調正歷史進度」,同一件事三個名字)。
+              { icon: allowRetroCheckin ? '🔒' : '🔓', label: allowRetroCheckin ? '關閉歷史補登' : '開放歷史補登',
+                desc: allowRetroCheckin ? '目前：開放中，全體可補登歷史週次' : '目前：僅限當週回報', open: toggleRetroCheckin,
+                cls: allowRetroCheckin ? 'bg-amber-100 hover:bg-amber-200' : '' },
+              { icon: '👥', label: '成員管理', desc: '新增/移除/改名', open: () => setShowMemberPanel(true) },
+              { icon: '🔐', label: '瀏覽權限', desc: '部門/工號卡控', open: () => setShowAccessPanel(true) },
+              { icon: '📈', label: '使用統計', desc: '登入次數/使用率', open: () => setShowUsagePanel(true) },
+              { icon: '📜', label: '異動紀錄', desc: '操作稽核', open: () => setShowAuditPanel(true) }
+            ].map(item => (
+              <button key={item.label} role="menuitem"
+                onClick={() => { setShowAdminMenu(false); item.open(); }}
+                className={`w-full text-left px-3.5 py-2 transition flex items-center gap-2.5 ${item.cls || 'hover:bg-slate-100'}`}>
+                <span className="text-base">{item.icon}</span>
+                <span className="min-w-0">
+                  <span className="block text-xs font-bold text-slate-800">{item.label}</span>
+                  <span className="block text-[10px] text-slate-500">{item.desc}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {dataLoading ? (
         <LoadingScreen />
@@ -2364,9 +2371,10 @@ function App() {
             <div className={`py-2 border-b border-slate-300 bg-gradient-to-r from-slate-50 to-white flex items-center text-xs overflow-x-auto ${ultraTightStatsBar ? 'px-2 gap-2 gap-y-1 flex-wrap' : 'px-4 gap-3'}`}>
               {/* 統計範圍要寫出來:這排數字現在跟著成員下拉走,標題不講清楚就會變成「同一個字看到兩組數字」 */}
               {/* 不重複月份:header 的週數選擇器已經寫著 2026/09,同一畫面兩次是噪音(2026-09-13) */}
+              {/* 「全員」不是「全隊」(2026-09-16 使用者:科技業用「隊」形容一個組別很突兀);與成員下拉的「全部成員」同一個語彙 */}
               <div className="flex items-center flex-shrink-0">
                 <span className="font-black text-slate-900 text-sm">W{String(currentWeek).padStart(2, '0')}</span>
-                <span className="ml-1 text-[10px] font-bold text-slate-700">{ownerFilter === 'all' ? '全隊' : ownerFilter}概況</span>
+                <span className="ml-1 text-[10px] font-bold text-slate-700">{ownerFilter === 'all' ? '全員' : ownerFilter}概況</span>
               </div>
               {/* 回報率進度條 */}
               <div className={`flex items-center flex-shrink-0 ${ultraTightStatsBar ? 'min-w-[120px]' : 'min-w-[150px]'}`}>
@@ -2803,16 +2811,6 @@ function App() {
                                   <span aria-hidden="true">{subExpanded ? '▾' : '▸'}</span> {subCount}
                                 </button>
                               )}
-                              {/* 具體產出項目(專案執行完畢後的成果)入口:已填=實色,未填=淡色;負責人與主管可編輯,其他人唯讀 */}
-                              {/* 熱區:原本只有 16×12(WCAG 2.5.8 要 24×24)。垂直用 -my-1.5/py-1.5 撐開並抵銷,
-                                  列高完全不變;水平改用 px-1 取代原本的 ml-1(左內距同時當作與名稱的間隔),
-                                  名稱欄只讓出 4px。 */}
-                              <button
-                                onClick={(e) => { e.stopPropagation(); setDeliverableProj(proj); }}
-                                className={`flex-shrink-0 px-1 py-1.5 -my-1.5 text-[12px] leading-none transition hover:scale-125 ${proj.deliverable ? 'opacity-90' : 'opacity-25 hover:opacity-70'}`}
-                                title={proj.deliverable || proj.mpSaving
-                                  ? `具體產出項目：${proj.deliverable || '（未填寫）'}${proj.mpSaving ? `\n💡 MP Saving：${proj.mpSaving}` : ''}`
-                                  : '具體產出項目（尚未填寫，點擊檢視/填寫）'}>🎯</button>
                               {/* 到期徽章放在「凍結」的左欄:橫向捲動到別的月份時提醒依然可見 */}
                               {(() => {
                                 const soon = proj.tasks.filter(isTaskDeadlineSoon);
@@ -2838,6 +2836,19 @@ function App() {
                                     className="w-5 h-5 flex items-center justify-center rounded text-red-500 hover:bg-red-100" title="刪除專案">🗑</button>
                                 </div>
                               )}
+                              {/* 具體產出項目(專案執行完畢後的成果)入口:已填=實色,未填=淡色;負責人與主管可編輯,其他人唯讀 */}
+                              {/* 熱區:原本只有 16×12(WCAG 2.5.8 要 24×24)。垂直用 -my-1.5/py-1.5 撐開並抵銷,
+                                  列高完全不變;水平改用 px-1 取代原本的 ml-1(左內距同時當作與名稱的間隔),
+                                  名稱欄只讓出 4px。 */}
+                              {/* ⚠ 放在列尾、⏰ 晶片與 hover 的 ＋✎🗑 之後(2026-09-16):它常駐的理由是「主管從外層一眼看出哪幾案沒填產出」,
+                                  要一眼看就得排成同一直線。原本排在晶片前面,80 案裡 11 案帶「⏰ 剩N週」的 🎯 被推左 60px、
+                                  滑過列時又被 ＋✎🗑 再推一次,掃描時得逐列找。名稱欄 flex-1 吃掉剩餘寬度,最後一個元素自然靠右對齊。 */}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setDeliverableProj(proj); }}
+                                className={`flex-shrink-0 px-1 py-1.5 -my-1.5 text-[12px] leading-none transition hover:scale-125 ${proj.deliverable ? 'opacity-90' : 'opacity-25 hover:opacity-70'}`}
+                                title={proj.deliverable || proj.mpSaving
+                                  ? `具體產出項目：${proj.deliverable || '（未填寫）'}${proj.mpSaving ? `\n💡 MP Saving：${proj.mpSaving}` : ''}`
+                                  : '具體產出項目（尚未填寫，點擊檢視/填寫）'}>🎯</button>
                             </div>
                           </td>
 
