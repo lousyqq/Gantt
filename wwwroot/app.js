@@ -457,11 +457,59 @@ const ReqMark = () => /*#__PURE__*/React.createElement("span", {
 // 抽成元件的原因不只是去重:圖示鈕沒有任何文字,少了 aria-label 讀螢幕器只會念「按鈕」,
 // 使用者不知道那是關閉還是刪除;集中在一處才不會下次新增彈窗又漏掉。
 // SVG 本身掛 aria-hidden——它是純裝飾,語意由 aria-label 提供,否則會被重複朗讀。
+// ── 使用手冊的情境式連結(2026-09-21) ─────────────────────────────────────
+// 企業軟體的實況是「沒人主動看手冊,卡住的那一刻才需要」:每個彈窗/面板標題列的 ? 直接開到手冊講**這個畫面**的段落,
+// 不必回目錄找。手冊 URL 要帶 role/theme/site(與 header 的書本連結同一套),但彈窗拿不到 App 的 state,
+// 所以走模組層變數、由 App 每次 render 同步(與 SUB_CHECKIN 同一種做法;這三個值只影響手冊分頁的初始外觀,晚一拍無妨)。
+let MANUAL_CTX = {
+  role: 'member',
+  dark: false,
+  site: ''
+};
+const manualUrl = anchor => `${API_BASE}/${encodeURIComponent('使用者手冊.html')}?role=${MANUAL_CTX.role === 'manager' ? 'manager' : 'member'}&theme=${MANUAL_CTX.dark ? 'dark' : 'light'}` + (MANUAL_CTX.site ? `&site=${encodeURIComponent(MANUAL_CTX.site)}` : '') + (anchor ? `#${anchor}` : '');
+// 標題列的「?」:與旁邊的 ✕ 同一組樣式(className 由 CloseButton 的 help 一併帶入),24×24 熱區。
+// 是連結不是按鈕(開新分頁),aria-label 是唯一可及名稱。
+const HelpLink = ({
+  anchor,
+  className = 'text-white/70 hover:text-white p-1'
+}) => /*#__PURE__*/React.createElement("a", {
+  href: manualUrl(anchor),
+  target: "_blank",
+  rel: "noopener noreferrer",
+  className: `${className} inline-flex items-center justify-center`,
+  "aria-label": "\u958B\u555F\u4F7F\u7528\u624B\u518A\u7684\u76F8\u95DC\u8AAA\u660E\uFF08\u65B0\u5206\u9801\uFF09",
+  title: "\u4F7F\u7528\u624B\u518A\uFF1A\u9019\u500B\u756B\u9762\u7684\u8AAA\u660E\uFF08\u958B\u65B0\u5206\u9801\uFF09"
+}, /*#__PURE__*/React.createElement("svg", {
+  className: "w-5 h-5",
+  fill: "none",
+  viewBox: "0 0 24 24",
+  stroke: "currentColor",
+  "aria-hidden": "true"
+}, /*#__PURE__*/React.createElement("circle", {
+  cx: "12",
+  cy: "12",
+  r: "9",
+  strokeWidth: 2
+}), /*#__PURE__*/React.createElement("path", {
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  strokeWidth: 2,
+  d: "M9.5 9.5a2.5 2.5 0 015 0c0 1.5-2.5 2-2.5 3.5M12 17h.01"
+})));
+
+// help="手冊錨點":在 ✕ 左邊多一顆「?」(2026-09-21)。放在 CloseButton 裡而不是各彈窗自己擺:
+// 15 個彈窗只要各加一個 prop,樣式與位置就一致,也不會下次新增彈窗漏掉。
 const CloseButton = ({
   onClick,
   className = 'text-white/70 hover:text-white p-1',
-  label = '關閉'
-}) => /*#__PURE__*/React.createElement("button", {
+  label = '關閉',
+  help
+}) => /*#__PURE__*/React.createElement("span", {
+  className: "inline-flex items-center gap-0.5 flex-shrink-0"
+}, help && /*#__PURE__*/React.createElement(HelpLink, {
+  anchor: help,
+  className: className
+}), /*#__PURE__*/React.createElement("button", {
   onClick: onClick,
   "aria-label": label,
   title: label,
@@ -477,7 +525,7 @@ const CloseButton = ({
   strokeLinejoin: "round",
   strokeWidth: 2,
   d: "M6 18L18 6M6 6l12 12"
-})));
+}))));
 
 // ── 打卡回報的「文件連結」(選填) ────────────────────────────────────────────
 // 主管讀週報時最常做的下一個動作就是「去把那份文件打開」,原本得自己去信件/檔案總管翻;
@@ -1258,6 +1306,12 @@ function App() {
     document.documentElement.classList.toggle('dark', isDark);
     savePref('dark', isDark);
   }, [isDark]);
+  // 手冊連結的情境(role/theme/site)同步給模組層 manualUrl():彈窗標題列的「?」才能帶對身分與主題(見 HelpLink 說明)
+  MANUAL_CTX = {
+    role,
+    dark: isDark,
+    site: siteName
+  };
   const [isCompact, setIsCompact] = useState(() => readPrefs().compact === true); // 緊湊模式偏好:重整後沿用
   const [isOverview, setIsOverview] = useState(false); // 年度總覽:52 週自動縮放進一個畫面寬,無水平捲軸(唯讀瀏覽視角)
   const [isResults, setIsResults] = useState(false); // 成果清單:集中檢閱所有專案具體成果項目與 MP 節省統計
@@ -2987,7 +3041,7 @@ function App() {
     }, currentUser), /*#__PURE__*/React.createElement("div", {
       className: "text-[10px] text-white/80"
     }, role === 'manager' ? '主管' : '成員', empId ? ` · 工號 ${empId}` : '')), /*#__PURE__*/React.createElement("a", {
-      href: `${API_BASE}/${encodeURIComponent('使用者手冊.html')}?role=${role === 'manager' ? 'manager' : 'member'}&theme=${isDark ? 'dark' : 'light'}`,
+      href: manualUrl(role === 'manager' ? 's-quick-manager' : 's-quick-member'),
       target: "_blank",
       rel: "noopener noreferrer",
       className: "p-1.5 hover:bg-white/20 rounded-lg transition text-white/80 hover:text-white bg-white/5 w-8 h-8 flex items-center justify-center",
@@ -3526,7 +3580,9 @@ function App() {
       className: "p-10 text-center text-slate-500"
     }, /*#__PURE__*/React.createElement(EmptyFilterState, {
       filters: activeFilters,
-      onClearAll: clearAllFilters
+      onClearAll: clearAllFilters,
+      emptyTitle: role === 'member' ? '目前還沒有你的專案' : undefined,
+      emptyNote: role === 'member' ? `${scheduleYear} 年度尚未為你建立任何專案。專案與計畫區間由主管建立，請洽管理部主管；建好之後這裡就會出現你的甘特圖，本週有排到的區間會以紅框提醒打卡。` : undefined
     }))) : groupedProjects.map(group => {
       const isCollapsed = collapsedOwners.has(group.owner);
       let gActive = 0,
@@ -3577,7 +3633,9 @@ function App() {
         }
       }, group.owner[0]), group.owner, /*#__PURE__*/React.createElement("span", {
         className: "ml-2 px-1.5 py-0.5 bg-white ctl-raised text-blue-600 rounded text-[10px] font-medium border border-blue-100"
-      }, group.projects.length, " \u9805"), gActive > 0 && /*#__PURE__*/React.createElement("div", {
+      }, group.projects.length, " \u9805"), group.projects.length === 0 && role === 'manager' && !isOverview && /*#__PURE__*/React.createElement("span", {
+        className: "ml-2 text-[10px] font-medium text-slate-600"
+      }, "\u5C1A\u7121\u5C08\u6848 \u2014 \u6309\u53F3\u5074\u300C\uFF0B \u65B0\u589E\u5C08\u6848\u300D\u958B\u59CB\u6392\u7A0B"), gActive > 0 && /*#__PURE__*/React.createElement("div", {
         className: "ml-2 flex items-center gap-1.5"
       }, !isOverview && /*#__PURE__*/React.createElement("div", {
         className: "w-16 h-1.5 bg-white rounded-full overflow-hidden border border-blue-100"
@@ -4407,9 +4465,12 @@ function StatCount({
 //   ②**就地給出口** —— 原本週檢視只寫「調整搜尋關鍵字或清除篩選後再試一次」,
 //     清除鈕卻遠在工具列;成果清單更只有一句「符合篩選條件的專案項目為空」,連該做什麼都沒說。
 // 每個條件各給一顆清除鈕(使用者通常只想拿掉其中一個,不是全部重來),兩個以上才多給「清除全部」。
+// emptyTitle/emptyNote:沒有任何篩選條件時顯示的標題與說明。預設是「找不到」的語氣;真的沒資料(新成員名下還沒有專案)
+// 的情境要換成講「該找誰」的文案,否則新人第一次登入看到「找不到符合條件的專案」只會以為自己操作錯了(2026-09-21)。
 function EmptyFilterState({
   filters = [],
   onClearAll,
+  emptyTitle = '找不到符合條件的專案',
   emptyNote = '這個年度目前沒有專案。'
 }) {
   const btn = 'px-2.5 py-1 rounded-lg bg-white border border-slate-400 text-[11px] font-bold text-slate-700 hover:bg-slate-100 hover:border-blue-500 transition';
@@ -4418,9 +4479,9 @@ function EmptyFilterState({
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-3xl mb-2",
     "aria-hidden": "true"
-  }, "\uD83D\uDD0D"), /*#__PURE__*/React.createElement("div", {
+  }, filters.length === 0 ? '📭' : '🔍'), /*#__PURE__*/React.createElement("div", {
     className: "font-bold text-slate-700"
-  }, "\u627E\u4E0D\u5230\u7B26\u5408\u689D\u4EF6\u7684\u5C08\u6848"), filters.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, filters.length === 0 ? emptyTitle : '找不到符合條件的專案'), filters.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "mt-1 text-xs text-slate-600"
   }, emptyNote) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "mt-1 text-xs text-slate-600"
@@ -5328,6 +5389,7 @@ function TaskModal({
     className: "text-xs text-white/85 font-medium mt-1"
   }, task.name, "\u30FBW", String(task.start).padStart(2, '0'), "\u2013W", String(task.end).padStart(2, '0'), task.nid ? `・NID ${task.nid}` : '')), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: isManager ? 'h-interval' : 'h-checkin',
     className: "text-white/60 hover:text-white flex-shrink-0"
   })), /*#__PURE__*/React.createElement("div", {
     className: "p-6 space-y-6 overflow-y-auto min-h-0"
@@ -5393,6 +5455,7 @@ function ExtraNoteModal({
       }
     }, "\uD83D\uDD12 W", currentWeek, " \u975E\u5C08\u6848\u5DE5\u4F5C\uFF08\u552F\u8B80\uFF09"), /*#__PURE__*/React.createElement(CloseButton, {
       onClick: onClose,
+      help: "h-extra",
       className: "text-white/60 hover:text-white"
     })), /*#__PURE__*/React.createElement("div", {
       className: "p-6"
@@ -5435,6 +5498,7 @@ function ExtraNoteModal({
       }
     }, "\uD83D\uDCDD \u586B\u5BEB W", currentWeek, " \u975E\u5C08\u6848\u5DE5\u4F5C", targetUser ? `（${targetUser}）` : ''), /*#__PURE__*/React.createElement(CloseButton, {
       onClick: onClose,
+      help: "h-extra",
       className: "text-white/60 hover:text-white"
     })), /*#__PURE__*/React.createElement("div", {
       className: "p-6"
@@ -5542,6 +5606,7 @@ function DeliverableModal({
     }
   }, proj.name, "\uFF08\u8CA0\u8CAC\u4EBA\uFF1A", proj.owner, "\uFF09")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: "h-deliverable",
     className: "text-white/70 hover:text-white flex-shrink-0"
   })), /*#__PURE__*/React.createElement("div", {
     className: "p-6"
@@ -5664,6 +5729,7 @@ function WeeklyPlanModal({
       }
     }, "\uD83D\uDD12 W", currentWeek, " \u4E0B\u9031\u9810\u8A08\u5DE5\u4F5C\uFF08\u552F\u8B80\uFF09"), /*#__PURE__*/React.createElement(CloseButton, {
       onClick: onClose,
+      help: "h-plan",
       className: "text-white/60 hover:text-white"
     })), /*#__PURE__*/React.createElement("div", {
       className: "p-6"
@@ -5703,6 +5769,7 @@ function WeeklyPlanModal({
     }
   }, "\uD83D\uDCC5 \u586B\u5BEB W", currentWeek, " \u4E0B\u9031\u9810\u8A08\u57F7\u884C\u5DE5\u4F5C", targetUser ? `（${targetUser}）` : ''), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: "h-plan",
     className: "text-white/60 hover:text-white"
   })), /*#__PURE__*/React.createElement("div", {
     className: "p-6"
@@ -5788,6 +5855,7 @@ function DeadlinePanel({
     }
   }, "\u5269\u9918 \u22642 \u9031\uFF0C\u6216\u5DF2\u8D70\u904E 70% \u6642\u7A0B\u4E14\u5269\u9918 \u2264", DEADLINE_RATIO_MAX_REMAIN, " \u9031\u7684\u8A08\u756B\u5340\u9593")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: "h-deadline",
     className: "text-white/70 hover:text-white p-1"
   })), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 overflow-y-auto p-4 space-y-2.5"
@@ -5875,6 +5943,7 @@ function PendingPanel({
     className: `text-xs mt-0.5 ${retro ? 'text-amber-200' : 'text-blue-200'}`
   }, weekRangeLabel(scheduleYear, currentWeek), "\u30FB", retro ? '主管已開放補登：可修改此週任務打卡、非專案事項與下週預計工作' : '整合本週排定任務打卡 ＋ 每週必填工作預計')), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: retro ? 'h-retro' : 's-report',
     className: "text-white/60 hover:text-white p-1"
   })), /*#__PURE__*/React.createElement("div", {
     className: "bg-white/10 rounded-xl p-3 border border-white/20"
@@ -6111,6 +6180,7 @@ function ManagerWeekPanel({
     className: "text-xs text-amber-200 mt-0.5"
   }, "\u4EE3\u6210\u54E1\u88DC\u767B/\u4FEE\u6B63\u6B64\u9031\u56DE\u5831\uFF0C\u7570\u52D5\u6703\u6A19\u8A18\u4E3B\u7BA1\u4FEE\u6B63\u4E26\u7559\u4E0B\u7A3D\u6838\u7D00\u9304")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: "h-weekedit",
     className: "text-white/60 hover:text-white p-1"
   })), /*#__PURE__*/React.createElement("div", {
     className: "bg-white/10 rounded-xl p-3 border border-white/20 flex items-center gap-2"
@@ -6222,6 +6292,7 @@ function CommentModal({
     }
   }, "\u4E3B\u7BA1\u5EFA\u8B70(\u9078\u586B)\uFF0C\u5132\u5B58\u5F8C\u5168\u9AD4\u6210\u54E1\u65BC\u5718\u968A\u7E3D\u7D50\u770B\u677F\u53EF\u898B")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: "h-comment",
     className: "text-white/60 hover:text-white"
   })), /*#__PURE__*/React.createElement("div", {
     className: "p-6"
@@ -6646,6 +6717,7 @@ function WeeklyReportDashboard({
       title: "\u8907\u88FD\u6574\u4EFD\u5718\u968A\u9031\u5831\u6587\u5B57"
     }, copied ? '✓ 已複製' : narrowPanel ? '📋 複製全部' : '📋 複製週報文字'), /*#__PURE__*/React.createElement(CloseButton, {
       onClick: onClose,
+      help: "s-dash",
       className: "text-white hover:bg-white/20 p-2 rounded-full"
     }))), /*#__PURE__*/React.createElement("div", {
       className: `bg-white py-2 border-b border-slate-300 flex items-center gap-2 flex-wrap ${narrowPanel ? 'px-3' : 'px-6'}`
@@ -6839,6 +6911,7 @@ function ProjectEditModal({
     className: "text-xs text-blue-200 mt-0.5"
   }, "\u8CA0\u8CAC\u4EBA\uFF1A", info.owner)), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: "h-newproject",
     className: "text-white/60 hover:text-white"
   })), /*#__PURE__*/React.createElement("div", {
     className: "p-6 space-y-4"
@@ -6979,6 +7052,7 @@ function IntervalModal({
     className: "text-xs text-blue-200 mt-0.5 truncate max-w-[300px]"
   }, project.name)), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: "h-interval",
     className: "text-white/60 hover:text-white"
   })), /*#__PURE__*/React.createElement("div", {
     className: "p-6 space-y-4"
@@ -7244,6 +7318,7 @@ function UsageStatsPanel({
     }
   }, "\u767B\u5165\u6B21\u6578\uFF08\u542B\u91CD\u65B0\u6574\u7406\u81EA\u52D5\u767B\u5165\uFF09\uFF0C\u8A55\u4F30\u7DB2\u9801\u4F7F\u7528\u7387")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: "h-usage",
     className: "text-white/70 hover:text-white p-1"
   })), /*#__PURE__*/React.createElement("div", {
     className: "bg-white px-5 py-2 border-b border-slate-300 flex items-center gap-1.5"
@@ -7503,6 +7578,7 @@ function AccessPanel({
     }
   }, "\u4F9D\u4EBA\u54E1\u540D\u518A\u90E8\u9580(DEPT_1/2/3)\u6216\u5DE5\u865F\u767D\u540D\u55AE\u5361\u63A7\uFF0C\u4EFB\u4E00\u898F\u5247\u7B26\u5408\u5373\u53EF\u700F\u89BD")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: "h-access",
     className: "text-white/70 hover:text-white p-1"
   })), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 overflow-y-auto p-5 space-y-5"
@@ -7719,6 +7795,7 @@ function MemberPanel({
     className: "text-xs text-blue-200 mt-0.5"
   }, "\u65B0\u589E\u7684\u6210\u54E1\u5373\u53EF\u767B\u5165\u56DE\u5831\uFF0C\u4E26\u53EF\u70BA\u5176\u5B89\u6392\u5C08\u6848")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: "h-members",
     className: "text-white/60 hover:text-white p-1"
   })), /*#__PURE__*/React.createElement("div", {
     className: "p-4 border-b border-slate-300 bg-slate-100"
@@ -7906,6 +7983,7 @@ function AuditPanel({
     className: "text-xs text-blue-200 mt-0.5"
   }, "\u64CD\u4F5C\u7A3D\u6838\uFF08\u8AB0\u3001\u4F55\u6642\u3001\u505A\u4E86\u4EC0\u9EBC\uFF09")), /*#__PURE__*/React.createElement(CloseButton, {
     onClick: onClose,
+    help: "h-audit",
     className: "text-white/60 hover:text-white p-1"
   })), /*#__PURE__*/React.createElement("div", {
     className: "p-3 border-b border-slate-300 bg-slate-100 space-y-2"

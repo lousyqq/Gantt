@@ -305,12 +305,37 @@ const ReqMark = () => <span className="text-red-600 font-black ml-0.5" title="�
 // 抽成元件的原因不只是去重:圖示鈕沒有任何文字,少了 aria-label 讀螢幕器只會念「按鈕」,
 // 使用者不知道那是關閉還是刪除;集中在一處才不會下次新增彈窗又漏掉。
 // SVG 本身掛 aria-hidden——它是純裝飾,語意由 aria-label 提供,否則會被重複朗讀。
-const CloseButton = ({ onClick, className = 'text-white/70 hover:text-white p-1', label = '關閉' }) => (
-  <button onClick={onClick} aria-label={label} title={label} className={className}>
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+// ── 使用手冊的情境式連結(2026-09-21) ─────────────────────────────────────
+// 企業軟體的實況是「沒人主動看手冊,卡住的那一刻才需要」:每個彈窗/面板標題列的 ? 直接開到手冊講**這個畫面**的段落,
+// 不必回目錄找。手冊 URL 要帶 role/theme/site(與 header 的書本連結同一套),但彈窗拿不到 App 的 state,
+// 所以走模組層變數、由 App 每次 render 同步(與 SUB_CHECKIN 同一種做法;這三個值只影響手冊分頁的初始外觀,晚一拍無妨)。
+let MANUAL_CTX = { role: 'member', dark: false, site: '' };
+const manualUrl = (anchor) =>
+  `${API_BASE}/${encodeURIComponent('使用者手冊.html')}?role=${MANUAL_CTX.role === 'manager' ? 'manager' : 'member'}&theme=${MANUAL_CTX.dark ? 'dark' : 'light'}`
+  + (MANUAL_CTX.site ? `&site=${encodeURIComponent(MANUAL_CTX.site)}` : '') + (anchor ? `#${anchor}` : '');
+// 標題列的「?」:與旁邊的 ✕ 同一組樣式(className 由 CloseButton 的 help 一併帶入),24×24 熱區。
+// 是連結不是按鈕(開新分頁),aria-label 是唯一可及名稱。
+const HelpLink = ({ anchor, className = 'text-white/70 hover:text-white p-1' }) => (
+  <a href={manualUrl(anchor)} target="_blank" rel="noopener noreferrer" className={`${className} inline-flex items-center justify-center`}
+    aria-label="開啟使用手冊的相關說明（新分頁）" title="使用手冊：這個畫面的說明（開新分頁）">
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" strokeWidth={2} />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.5 9.5a2.5 2.5 0 015 0c0 1.5-2.5 2-2.5 3.5M12 17h.01" />
     </svg>
-  </button>
+  </a>
+);
+
+// help="手冊錨點":在 ✕ 左邊多一顆「?」(2026-09-21)。放在 CloseButton 裡而不是各彈窗自己擺:
+// 15 個彈窗只要各加一個 prop,樣式與位置就一致,也不會下次新增彈窗漏掉。
+const CloseButton = ({ onClick, className = 'text-white/70 hover:text-white p-1', label = '關閉', help }) => (
+  <span className="inline-flex items-center gap-0.5 flex-shrink-0">
+    {help && <HelpLink anchor={help} className={className} />}
+    <button onClick={onClick} aria-label={label} title={label} className={className}>
+      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </span>
 );
 
 // ── 打卡回報的「文件連結」(選填) ────────────────────────────────────────────
@@ -973,6 +998,8 @@ function App() {
     document.documentElement.classList.toggle('dark', isDark);
     savePref('dark', isDark);
   }, [isDark]);
+  // 手冊連結的情境(role/theme/site)同步給模組層 manualUrl():彈窗標題列的「?」才能帶對身分與主題(見 HelpLink 說明)
+  MANUAL_CTX = { role, dark: isDark, site: siteName };
   const [isCompact, setIsCompact] = useState(() => readPrefs().compact === true);   // 緊湊模式偏好:重整後沿用
   const [isOverview, setIsOverview] = useState(false);   // 年度總覽:52 週自動縮放進一個畫面寬,無水平捲軸(唯讀瀏覽視角)
   const [isResults, setIsResults] = useState(false);     // 成果清單:集中檢閱所有專案具體成果項目與 MP 節省統計
@@ -2284,7 +2311,10 @@ function App() {
                   放 header 帳號區而不放 ⚙️ 管理:成員也要看得到(⚙️ 只有主管有)。帶 role 讓手冊直接停在該身分的章節、
                   帶 theme 與系統當下主題一致(深色系統跳出一頁白底很刺眼)。是連結不是按鈕(開新分頁),故用 <a>;
                   無文字 → aria-label 是唯一可及名稱。SVG 用 currentColor,與旁邊登出鈕同一套寫法。 */}
-              <a href={`${API_BASE}/${encodeURIComponent('使用者手冊.html')}?role=${role === 'manager' ? 'manager' : 'member'}&theme=${isDark ? 'dark' : 'light'}`}
+              {/* 帶 site 讓手冊標題顯示同一個群組名稱(多站台部署,2026-09-21):手冊本身不碰 API,取不到就顯示不帶群組的「專案追蹤總表」。
+                  錨點直接落在該身分的「快速上手」卡(#s-quick-member／#s-quick-manager):原本只做篩選、頁面仍停在封面,
+                  使用者還得自己往下找「我是誰」。 */}
+              <a href={manualUrl(role === 'manager' ? 's-quick-manager' : 's-quick-member')}
                 target="_blank" rel="noopener noreferrer"
                 className="p-1.5 hover:bg-white/20 rounded-lg transition text-white/80 hover:text-white bg-white/5 w-8 h-8 flex items-center justify-center"
                 aria-label="開啟使用手冊（新分頁）" title="使用手冊（開新分頁）">
@@ -2700,7 +2730,13 @@ function App() {
               <tbody className="text-xs">
                 {groupedProjects.length === 0 ? (
                   <tr><td colSpan={weeksTotal + 3} className="p-10 text-center text-slate-500">
-                    <EmptyFilterState filters={activeFilters} onClearAll={clearAllFilters} />
+                    {/* 成員名下沒有專案時要講「該找誰」(2026-09-21):成員不能自己建專案,原本的「找不到符合條件的專案」
+                        會讓新人以為自己操作錯了。主管看到這格只會是「篩選後 0 筆」(無篩選時每位成員都有群組列),沿用預設文案。 */}
+                    <EmptyFilterState filters={activeFilters} onClearAll={clearAllFilters}
+                      emptyTitle={role === 'member' ? '目前還沒有你的專案' : undefined}
+                      emptyNote={role === 'member'
+                        ? `${scheduleYear} 年度尚未為你建立任何專案。專案與計畫區間由主管建立，請洽管理部主管；建好之後這裡就會出現你的甘特圖，本週有排到的區間會以紅框提醒打卡。`
+                        : undefined} />
                   </td></tr>
                 ) : groupedProjects.map((group) => {
                   const isCollapsed = collapsedOwners.has(group.owner);
@@ -2726,6 +2762,10 @@ function App() {
                             <div className="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs mr-2 flex-shrink-0" style={{ backgroundColor: BRAND_BTN }}>{group.owner[0]}</div>
                             {group.owner}
                             <span className="ml-2 px-1.5 py-0.5 bg-white ctl-raised text-blue-600 rounded text-[10px] font-medium border border-blue-100">{group.projects.length} 項</span>
+                            {/* 空群組(剛加入的新成員)只有一列空白＋右側一顆小鈕,主管不一定會注意到;講一句「下一步」(2026-09-21) */}
+                            {group.projects.length === 0 && role === 'manager' && !isOverview && (
+                              <span className="ml-2 text-[10px] font-medium text-slate-600">尚無專案 — 按右側「＋ 新增專案」開始排程</span>
+                            )}
                             {gActive > 0 && (
                               <div className="ml-2 flex items-center gap-1.5">
                                 {!isOverview && (
@@ -3383,12 +3423,14 @@ function StatCount({ label, value, dotClass, valueClass = 'text-slate-800', titl
 //   ②**就地給出口** —— 原本週檢視只寫「調整搜尋關鍵字或清除篩選後再試一次」,
 //     清除鈕卻遠在工具列;成果清單更只有一句「符合篩選條件的專案項目為空」,連該做什麼都沒說。
 // 每個條件各給一顆清除鈕(使用者通常只想拿掉其中一個,不是全部重來),兩個以上才多給「清除全部」。
-function EmptyFilterState({ filters = [], onClearAll, emptyNote = '這個年度目前沒有專案。' }) {
+// emptyTitle/emptyNote:沒有任何篩選條件時顯示的標題與說明。預設是「找不到」的語氣;真的沒資料(新成員名下還沒有專案)
+// 的情境要換成講「該找誰」的文案,否則新人第一次登入看到「找不到符合條件的專案」只會以為自己操作錯了(2026-09-21)。
+function EmptyFilterState({ filters = [], onClearAll, emptyTitle = '找不到符合條件的專案', emptyNote = '這個年度目前沒有專案。' }) {
   const btn = 'px-2.5 py-1 rounded-lg bg-white border border-slate-400 text-[11px] font-bold text-slate-700 hover:bg-slate-100 hover:border-blue-500 transition';
   return (
     <div className="py-10 text-center">
-      <div className="text-3xl mb-2" aria-hidden="true">🔍</div>
-      <div className="font-bold text-slate-700">找不到符合條件的專案</div>
+      <div className="text-3xl mb-2" aria-hidden="true">{filters.length === 0 ? '📭' : '🔍'}</div>
+      <div className="font-bold text-slate-700">{filters.length === 0 ? emptyTitle : '找不到符合條件的專案'}</div>
       {filters.length === 0 ? (
         <div className="mt-1 text-xs text-slate-600">{emptyNote}</div>
       ) : (
@@ -4069,7 +4111,7 @@ function TaskModal({ info, role, currentUser, currentWeek, todayWeek, isReportin
               {task.name}・W{String(task.start).padStart(2, '0')}–W{String(task.end).padStart(2, '0')}{task.nid ? `・NID ${task.nid}` : ''}
             </div>
           </div>
-          <CloseButton onClick={onClose} className="text-white/60 hover:text-white flex-shrink-0" />
+          <CloseButton onClick={onClose} help={isManager ? 'h-interval' : 'h-checkin'} className="text-white/60 hover:text-white flex-shrink-0" />
         </div>
 
         {/* 版面順序照「使用者來做什麼」排,不照資料結構排(2026-09-13):
@@ -4113,7 +4155,7 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, future = false, ta
         <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
           <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#475569' }}>
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🔒 W{currentWeek} 非專案工作（唯讀）</h3>
-            <CloseButton onClick={onClose} className="text-white/60 hover:text-white" />
+            <CloseButton onClick={onClose} help="h-extra" className="text-white/60 hover:text-white" />
           </div>
           <div className="p-6">
             <p className="text-xs text-slate-500 mb-3">{future ? `W${currentWeek} 尚未到，不開放預先填寫。` : '歷史週次僅供瀏覽，無法修改。'}</p>
@@ -4140,7 +4182,7 @@ function ExtraNoteModal({ currentWeek, initialNote, readOnly, future = false, ta
       <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#C2410C' }}>
           <h3 className="font-bold text-lg flex items-center" style={{ color: '#FFFFFF' }}>📝 填寫 W{currentWeek} 非專案工作{targetUser ? `（${targetUser}）` : ''}</h3>
-          <CloseButton onClick={onClose} className="text-white/60 hover:text-white" />
+          <CloseButton onClick={onClose} help="h-extra" className="text-white/60 hover:text-white" />
         </div>
         <div className="p-6">
           {targetUser && (
@@ -4206,7 +4248,7 @@ function DeliverableModal({ proj, role, currentUser, onClose, onSave }) {
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🎯 具體產出與 MP 效益</h3>
             <p className="text-xs mt-0.5 break-words leading-snug" style={{ color: '#FEF3C7' }}>{proj.name}（負責人：{proj.owner}）</p>
           </div>
-          <CloseButton onClick={onClose} className="text-white/70 hover:text-white flex-shrink-0" />
+          <CloseButton onClick={onClose} help="h-deliverable" className="text-white/70 hover:text-white flex-shrink-0" />
         </div>
         <div className="p-6">
           <p className="text-sm text-slate-500 mb-4 border-l-4 border-amber-400 pl-3">
@@ -4285,7 +4327,7 @@ function WeeklyPlanModal({ currentWeek, weeksTotal = WEEKS_TOTAL, initialNote, r
         <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
           <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#475569' }}>
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🔒 W{currentWeek} 下週預計工作（唯讀）</h3>
-            <CloseButton onClick={onClose} className="text-white/60 hover:text-white" />
+            <CloseButton onClick={onClose} help="h-plan" className="text-white/60 hover:text-white" />
           </div>
           <div className="p-6">
             <p className="text-xs text-slate-500 mb-3">{future ? `W${currentWeek} 尚未到，不開放預先填寫。` : '歷史週次僅供瀏覽，無法修改。'}</p>
@@ -4311,7 +4353,7 @@ function WeeklyPlanModal({ currentWeek, weeksTotal = WEEKS_TOTAL, initialNote, r
       <div className="bg-white rounded-2xl shadow-2xl modal-card w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 text-white flex justify-between items-center" style={{ backgroundColor: '#6366F1' }}>
           <h3 className="font-bold text-lg flex items-center" style={{ color: '#FFFFFF' }}>📅 填寫 W{currentWeek} 下週預計執行工作{targetUser ? `（${targetUser}）` : ''}</h3>
-          <CloseButton onClick={onClose} className="text-white/60 hover:text-white" />
+          <CloseButton onClick={onClose} help="h-plan" className="text-white/60 hover:text-white" />
         </div>
         <div className="p-6">
           {targetUser && (
@@ -4368,7 +4410,7 @@ function DeadlinePanel({ items, onClose, onSelect }) {
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>⏰ 即將到期清單</h3>
             <p className="text-xs mt-0.5" style={{ color: '#FFF7ED' }}>剩餘 ≤2 週，或已走過 70% 時程且剩餘 ≤{DEADLINE_RATIO_MAX_REMAIN} 週的計畫區間</p>
           </div>
-          <CloseButton onClick={onClose} className="text-white/70 hover:text-white p-1" />
+          <CloseButton onClick={onClose} help="h-deadline" className="text-white/70 hover:text-white p-1" />
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
           {items.length === 0 ? (
@@ -4422,7 +4464,7 @@ function PendingPanel({ pending = [], completed = [], currentWeek, weeksTotal = 
               {/* 副標帶日期區間:跨年的短週(W53＝12/27–12/31、W01＝1/1–1/2)看日期就知道「這週」指哪幾天 */}
               <p className={`text-xs mt-0.5 ${retro ? 'text-amber-200' : 'text-blue-200'}`}>{weekRangeLabel(scheduleYear, currentWeek)}・{retro ? '主管已開放補登：可修改此週任務打卡、非專案事項與下週預計工作' : '整合本週排定任務打卡 ＋ 每週必填工作預計'}</p>
             </div>
-            <CloseButton onClick={onClose} className="text-white/60 hover:text-white p-1" />
+            <CloseButton onClick={onClose} help={retro ? 'h-retro' : 's-report'} className="text-white/60 hover:text-white p-1" />
           </div>
           <div className="bg-white/10 rounded-xl p-3 border border-white/20">
             <div className="flex justify-between items-center text-xs font-bold mb-1.5">
@@ -4632,7 +4674,7 @@ function ManagerWeekPanel({ week, historical = false, users = [], projects, task
               <h3 className="font-bold text-lg">🛠 W{wk} 回報編輯（主管）</h3>
               <p className="text-xs text-amber-200 mt-0.5">代成員補登/修正此週回報，異動會標記主管修正並留下稽核紀錄</p>
             </div>
-            <CloseButton onClick={onClose} className="text-white/60 hover:text-white p-1" />
+            <CloseButton onClick={onClose} help="h-weekedit" className="text-white/60 hover:text-white p-1" />
           </div>
           <div className="bg-white/10 rounded-xl p-3 border border-white/20 flex items-center gap-2">
             <span className="text-xs font-bold whitespace-nowrap">編輯成員</span>
@@ -4738,7 +4780,7 @@ function CommentModal({ member, currentWeek, initialComment, meta, onClose, onSa
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>💬 回覆 {member} 的 W{String(currentWeek).padStart(2, '0')} 週報</h3>
             <p className="text-xs mt-0.5" style={{ color: '#EDE9FE' }}>主管建議(選填)，儲存後全體成員於團隊總結看板可見</p>
           </div>
-          <CloseButton onClick={onClose} className="text-white/60 hover:text-white" />
+          <CloseButton onClick={onClose} help="h-comment" className="text-white/60 hover:text-white" />
         </div>
         <div className="p-6">
           {initialComment ? (
@@ -5078,7 +5120,7 @@ function WeeklyReportDashboard({ currentWeek, year, users, projects, taskLogs, s
             title="複製整份團隊週報文字">
             {copied ? '✓ 已複製' : (narrowPanel ? '📋 複製全部' : '📋 複製週報文字')}
           </button>
-          <CloseButton onClick={onClose} className="text-white hover:bg-white/20 p-2 rounded-full" />
+          <CloseButton onClick={onClose} help="s-dash" className="text-white hover:bg-white/20 p-2 rounded-full" />
         </div>
       </div>
 
@@ -5269,7 +5311,7 @@ function ProjectEditModal({ info, existingCategories, users = [], onClose, onSav
             <h3 className="font-bold text-lg">{isEdit ? '✎ 編輯專案' : '＋ 新增專案'}</h3>
             <p className="text-xs text-blue-200 mt-0.5">負責人：{info.owner}</p>
           </div>
-          <CloseButton onClick={onClose} className="text-white/60 hover:text-white" />
+          <CloseButton onClick={onClose} help="h-newproject" className="text-white/60 hover:text-white" />
         </div>
         <div className="p-6 space-y-4">
           <div>
@@ -5352,7 +5394,7 @@ function IntervalModal({ project, currentWeek, weeksTotal = WEEKS_TOTAL, onClose
             <h3 className="font-bold text-lg">＋ 新增計畫區間</h3>
             <p className="text-xs text-blue-200 mt-0.5 truncate max-w-[300px]">{project.name}</p>
           </div>
-          <CloseButton onClick={onClose} className="text-white/60 hover:text-white" />
+          <CloseButton onClick={onClose} help="h-interval" className="text-white/60 hover:text-white" />
         </div>
         <div className="p-6 space-y-4">
           <div>
@@ -5488,7 +5530,7 @@ function UsageStatsPanel({ onClose }) {
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>📈 使用統計</h3>
             <p className="text-xs mt-0.5" style={{ color: '#CCFBF1' }}>登入次數（含重新整理自動登入），評估網頁使用率</p>
           </div>
-          <CloseButton onClick={onClose} className="text-white/70 hover:text-white p-1" />
+          <CloseButton onClick={onClose} help="h-usage" className="text-white/70 hover:text-white p-1" />
         </div>
 
         {/* 統計區間切換 */}
@@ -5689,7 +5731,7 @@ function AccessPanel({ currentUser, role, empId, showToast, onClose }) {
             <h3 className="font-bold text-lg" style={{ color: '#FFFFFF' }}>🔐 頁面瀏覽權限</h3>
             <p className="text-xs mt-0.5" style={{ color: '#FECDD3' }}>依人員名冊部門(DEPT_1/2/3)或工號白名單卡控，任一規則符合即可瀏覽</p>
           </div>
-          <CloseButton onClick={onClose} className="text-white/70 hover:text-white p-1" />
+          <CloseButton onClick={onClose} help="h-access" className="text-white/70 hover:text-white p-1" />
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
@@ -5874,7 +5916,7 @@ function MemberPanel({ users, projects, year, onAdd, onRename, onDelete, onClose
             <h3 className="font-bold text-lg">👥 成員管理</h3>
             <p className="text-xs text-blue-200 mt-0.5">新增的成員即可登入回報，並可為其安排專案</p>
           </div>
-          <CloseButton onClick={onClose} className="text-white/60 hover:text-white p-1" />
+          <CloseButton onClick={onClose} help="h-members" className="text-white/60 hover:text-white p-1" />
         </div>
 
         <div className="p-4 border-b border-slate-300 bg-slate-100">
@@ -6009,7 +6051,7 @@ function AuditPanel({ onClose }) {
             <h3 className="font-bold text-lg">📜 異動紀錄</h3>
             <p className="text-xs text-blue-200 mt-0.5">操作稽核（誰、何時、做了什麼）</p>
           </div>
-          <CloseButton onClick={onClose} className="text-white/60 hover:text-white p-1" />
+          <CloseButton onClick={onClose} help="h-audit" className="text-white/60 hover:text-white p-1" />
         </div>
         <div className="p-3 border-b border-slate-300 bg-slate-100 space-y-2">
           <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="在篩選結果中搜尋：人員 / 動作 / 專案 / 內容…"

@@ -613,8 +613,27 @@ dotnet run --project Gantt.csproj --urls http://localhost:5099
 **其他行為**
 - `API_BASE` 執行期自動偵測部署根路徑（IIS 子目錄相容），勿寫死。
 - **使用手冊入口＝header 帳號區的書本圖示 `<a target="_blank">`**（2026-09-13）：手冊寫了 13 章卻沒有任何入口，使用者根本不知道有這份。
-  手冊本體移到 `wwwroot/使用者手冊.html`（隨 publish 上線、不需另外複製）；連結為 `${API_BASE}/使用者手冊.html?role=member|manager&theme=dark|light`
-  ——手冊端讀 `?role` 直接停在該身分的章節（會寫進它自己的 `msd_manual_role`）、`?theme` 只蓋這一次不存（手冊自己的切換鈕才是明確選擇）。
+  手冊本體移到 `wwwroot/使用者手冊.html`（隨 publish 上線、不需另外複製）；連結為 `${API_BASE}/使用者手冊.html?role=member|manager&theme=dark|light&site=群組名`
+  ——手冊端讀 `?role` 直接停在該身分的章節（會寫進它自己的 `msd_manual_role`）、`?theme` 只蓋這一次不存（手冊自己的切換鈕才是明確選擇）、
+  `?site`（2026-09-21）套進所有 `.site-name` 與 `document.title`，沒帶就顯示不含群組的「專案追蹤總表」——手冊裡**不要再寫死「MSD」**。
+  ⚠ 手冊的章節編號由 JS 依 DOM 順序補上（`h2 .n` 與目錄同源），新增／調動章節不必逐一改號碼；內文交叉引用一律用 `<a href="#s-xxx">` 或章節名稱，
+  不寫「見 8.3」這種數字。角色篩選有三層：`section[data-role]`、快速上手的 `[data-role-block]`、速查表 `#lookup tr[data-role]`，加內容時記得標。
+  ⚠ 手冊第 02 章「快速上手（依角色）」＝各角色的操作流程＋「我想…→ 去哪裡點」速查表，是給新使用者的入口；功能異動若改了入口位置或按鈕名稱，
+  **先改這一章再改各細節章節**（使用者最先讀的是這裡）。
+- **情境式幫助＝每個彈窗／面板標題列的「?」**（2026-09-21；企業實況是沒人主動看手冊、卡住那一刻才需要）：`<CloseButton help="錨點" />`
+  會在 ✕ 左邊多一顆 `<HelpLink>`，開新分頁到 `manualUrl(anchor)`＝`使用者手冊.html?role=&theme=&site=#錨點`。
+  role/theme/site 走模組層 `MANUAL_CTX`（App 每次 render 同步，與 `SUB_CHECKIN` 同一種做法）——彈窗拿不到 App state、又不值得為此加 prop。
+  **新增彈窗一律帶 `help`**，錨點對照：打卡 `h-checkin`（成員）／`h-interval`（主管開 TaskModal）、非專案 `h-extra`、下週預計 `h-plan`、
+  產出 `h-deliverable`、到期清單 `h-deadline`、回報中心 `s-report`／補登 `h-retro`、🛠 `h-weekedit`、主管回覆 `h-comment`、看板 `s-dash`、
+  專案 `h-newproject`、區間 `h-interval`、使用統計 `h-usage`、瀏覽權限 `h-access`、成員 `h-members`、異動紀錄 `h-audit`。
+  手冊端 `revealHash()`：錨點落在目前身分被濾掉的章節就切回「全部內容」、在 `<details>` 裡就先展開、**瞬間捲動**（`scroll-behavior:smooth`
+  在嵌入式／背景分頁環境實測永遠停在頂端，與 CSS transition 不推進是同一類問題）。header 書本鈕落在 `#s-quick-member|manager`（角色卡）。
+  手冊章節現況（16 章）：先讀這裡 01–05（含 04 的 SVG 畫面線框圖＋19 個編號說明）／成員 06 回報、07 **子區間（獨立章，其餘三處只留一句＋連結）**／
+  主管 08–11／高階主管 12／附錄 13–16（16＝更新紀錄，每條一句「操作上會感覺到」的變化＋連結，功能異動時**要加一條**）。
+  目錄群組名固定「先讀這裡／成員／主管／高階主管／附錄」（角色分組是直接開檔者的定位依據，勿改成「功能說明」這種無資訊量的詞），
+  角色卡在目錄有子連結（`data-toc`）、整組被濾掉的群組標題會一起藏。
+- **空狀態要講「該找誰」**：成員名下沒有專案時甘特圖顯示「目前還沒有你的專案…請洽管理部主管」（`EmptyFilterState` 的 `emptyTitle`／`emptyNote`），
+  主管看到 0 項的新成員群組列會有「尚無專案 — 按右側「＋ 新增專案」開始排程」。原本兩處都只有「找不到符合條件的專案」，新人會以為自己操作錯。
   ⚠ 放 header 不放 ⚙️ 管理：成員也要看得到（⚙️ 只有主管有）。⚠ 是連結不是按鈕（開新分頁），用 `<a>` 且 `aria-label` 是唯一可及名稱。
   ⚠ 手冊 URL 的中文檔名用 `encodeURIComponent`，IIS 與 Kestrel 都能正確解碼；不要為了 URL 好看改英文檔名（四份文件與記憶都以此名稱指涉）。
 - 離線策略：連不到後端顯示 ErrorScreen，不塞假資料。
