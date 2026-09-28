@@ -134,12 +134,33 @@ static async Task<bool> SettingOn(SqlConnection conn, string key)
 bool SubCheckinOn() => app.Configuration.GetValue<bool>("Features:SubIntervalCheckin", false);
 
 const int DocUrlMax = 500;
+// 🚨 **檢查之前一定要先正規化**(2026-09-28 修)。CanonUrl 做的就是 WHATWG URL parser 的前置處理:
+//    ①去掉頭尾的 C0 控制字元與空白 ②移除字串中所有 tab／CR／LF。瀏覽器本來就會做這兩件事,
+//    所以正常網址與含空白的檔案路徑結果完全不變(⚠ 只移除 tab/CR/LF,不可連路徑中間的空白一起清)。
+//    不先做的話下面的 scheme 檢查形同虛設——實測 8 個 payload 有 7 個繞過:
+//    `java\tscript:` `java\nscript:` `java\rscript:` `javascript:` `\0javascript:` `JaVaScRi\tpt:` `dat\ta:`
+//    全部通過驗證,而瀏覽器把它們還原成 javascript:／data:。
+// ⚠ **維持 blocklist,不要改成 scheme 白名單**:實測既有資料有 `Notes://…`(Lotus Notes),
+//    企業內的自訂 scheme 無法事先列舉,白名單會擋掉使用者已經在用的連結。
+// ⚠ 與前端的 canonUrl／isUnsafeUrl 是同一套規則,**兩邊要一起改**。
+static string CanonUrl(string? url)
+{
+    // 先 Trim() 保留原本的行為(它也吃得到全形空白等 Unicode 空白),再剝 C0 控制字元、最後移除 tab/CR/LF
+    // ⚠ 用**逐字字串** @"" 讓 `\x00`／`\x20` 由 Regex 引擎解析(它固定吃 2 位十六進位),不要寫成一般字串:
+    //    C# 的 `\x` 轉義是**變長的**(1~4 位),後面若剛好接上十六進位字元就會被吃進去變成完全不同的字元。
+    //    也不要放字面控制字元——那會讓整個 .cs 被 grep／ripgrep 判定為 binary 而整份跳過(2026-09-29 修)。
+    var s = System.Text.RegularExpressions.Regex.Replace((url ?? "").Trim(), @"^[\x00-\x20]+|[\x00-\x20]+$", "");
+    return System.Text.RegularExpressions.Regex.Replace(s, @"[\t\n\r]", "");
+}
+// 寫進 DB 的值也走同一份正規化:**驗過什麼就存什麼**,不會出現「驗的是 A、存/渲染的是 B」。
+// null 要維持 null(SP 內以 NULLIF 處理空字串＝使用者清空連結)。
+static string? CanonDocUrl(string? url) => url is null ? null : CanonUrl(url);
 IResult? ValidateDocUrl(string? url)
 {
-    var s = (url ?? "").Trim();
+    var s = CanonUrl(url);
     if (s.Length == 0) return null;
     if (s.Length > DocUrlMax) return Bad($"文件連結請勿超過 {DocUrlMax} 個字元（目前 {s.Length} 個）。");
-    if (System.Text.RegularExpressions.Regex.IsMatch(s, @"^\s*(javascript|data|vbscript)\s*:", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+    if (System.Text.RegularExpressions.Regex.IsMatch(s, @"^(javascript|data|vbscript)\s*:", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
         return Bad("文件連結格式不正確，請貼上網址（http/https）或檔案路徑。");
     return null;
 }
@@ -445,7 +466,7 @@ app.MapPost("/api/weekly-log", async (WeeklyLogReq req) =>
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
         // 空字串照樣送:SP 內 NULLIF 會轉成 NULL,使用者才能把已填的連結清空
-        cmd.Parameters.AddWithValue("@DocUrl", (object?)req.DocUrl?.Trim() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@DocUrl", (object?)CanonDocUrl(req.DocUrl) ?? DBNull.Value);
         // 子區間打卡(遷移 20):**只在有值時才傳 @SubId**——遠端尚未跑遷移 20 時 SP 沒這個參數,
         // 一律傳會讓所有打卡(含對計畫區間的)整個壞掉;不傳則舊 SP 照常運作。
         if (req.SubId is int subId) cmd.Parameters.AddWithValue("@SubId", subId);
@@ -474,7 +495,7 @@ app.MapPost("/api/extra-note", async (ExtraNoteReq req) =>
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
         // 空字串照樣送:SP 內 NULLIF 會轉成 NULL,使用者才能把已填的連結清空
-        cmd.Parameters.AddWithValue("@DocUrl", (object?)req.DocUrl?.Trim() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@DocUrl", (object?)CanonDocUrl(req.DocUrl) ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -499,7 +520,7 @@ app.MapPost("/api/weekly-plan", async (WeeklyPlanReq req) =>
         cmd.Parameters.AddWithValue("@Actor", req.Actor);
         cmd.Parameters.AddWithValue("@ActorRole", (object?)req.ActorRole ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@ActorEmpId", (object?)req.ActorEmpId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@DocUrl", (object?)req.DocUrl?.Trim() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@DocUrl", (object?)CanonDocUrl(req.DocUrl) ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync();
         return Results.Ok(new { success = true });
     }
@@ -1050,6 +1071,20 @@ app.MapGet("/api/audit-log", async (int? top, string? from, string? to, string? 
                         }
                         break;
                     }
+                    // ★ 重點關注(usp_ToggleProjectStar)。⚠ 它寫的 EntityType 是 **"Projects"(複數)**,與其餘 SP 的單數命名不一致;
+                    //    不改 DB 是因為歷史資料已經是這個值(實測 36 筆),改了也還是得同時認兩種,徒增一支遷移。
+                    //    沒有這個 case 時 summary 會掉到 fallback＝裸的 NewValue → 面板上整列只顯示「1」或「0」,
+                    //    而 EntityId 是專案 id(如 612)也看不出是哪個專案(實測佔全部稽核紀錄的 8.9%)。
+                    //    ⚠ 前端的 AUDIT_ENTITY_ALIASES 與本端點的「對象類型」篩選也要把複數歸到「專案」,三處是一組。
+                    case "Projects":
+                    {
+                        var starOn = (newV ?? "").Trim() is "1" or "true" or "True";
+                        var pw = projInfo.TryGetValue(entityId ?? "", out var pstar)
+                            ? $"「{pstar.Name}」（負責人：{pstar.Owner}）" : "";
+                        return starOn
+                            ? $"標記重點關注專案{pw}（成果清單的 ★）"
+                            : $"取消重點關注專案{pw}（成果清單的 ★）";
+                    }
                     case "Task":
                     {
                         var projName = taskInfo.TryGetValue(entityId ?? "", out var t) ? t.Proj : null;
@@ -1125,6 +1160,17 @@ app.MapGet("/api/audit-log", async (int? top, string? from, string? to, string? 
                             "DELETE" => $"移除成員「{entityId}」（其歷史回報保留）",
                             _ => ""
                         };
+                    // 瀏覽權限規則(usp_AddAccessRule／usp_DeleteAccessRule)。兩者的 Action 同樣是 'ACCESSRULE',
+                    // 差別在**新增寫 NewValue、刪除寫 OldValue**——而前端的 fallback 是 `summary || newValue || detail`,
+                    // 三個都空的刪除那筆會在面板上顯示成**整行空白**(實測 5 筆裡 1 筆)。這是影響全體瀏覽權限的紀錄,
+                    // 不能只剩晶片＋操作者＋時間,所以在這裡就把句子組出來(SP 已經把完整白話寫進 Old/NewValue)。
+                    case "AccessRule":
+                    {
+                        if (!string.IsNullOrWhiteSpace(newV)) return newV!;
+                        if (!string.IsNullOrWhiteSpace(oldV)) return oldV!;
+                        return string.IsNullOrWhiteSpace(entityId)
+                            ? "異動瀏覽權限規則" : $"異動瀏覽權限規則：{entityId}";
+                    }
                     // 系統設定:原本沒有這個 case,summary 就掉到最後的 fallback = NewValue,
                     // 面板上只會顯示一個孤零零的「false」/「true」——同一份清單裡專案類都是完整句子,
                     // 唯獨影響全體權限的設定看不懂改了什麼。
@@ -1170,7 +1216,14 @@ app.MapGet("/api/audit-log", async (int? top, string? from, string? to, string? 
         if (!string.IsNullOrWhiteSpace(actionFilter))
         { conds.Add("Action = @action"); filters.Add(new SqlParameter("@action", actionFilter)); }
         if (!string.IsNullOrWhiteSpace(entityTypeFilter))
-        { conds.Add("EntityType = @etype"); filters.Add(new SqlParameter("@etype", entityTypeFilter)); }
+        {
+            // ⚠ 「專案」要一併帶出 usp_ToggleProjectStar 寫下的複數 EntityType(見上方 case "Projects"),
+            //    否則★重點關注那批在下拉篩選裡**永遠查不到**(實測 Project 69 筆／Projects 36 筆,兩組互斥)。
+            if (entityTypeFilter == "Project")
+                conds.Add("EntityType IN ('Project','Projects')");
+            else
+            { conds.Add("EntityType = @etype"); filters.Add(new SqlParameter("@etype", entityTypeFilter)); }
+        }
         var whereSql = conds.Count > 0 ? " WHERE " + string.Join(" AND ", conds) : "";
 
         // 符合條件的總筆數(不受 TOP 限制):讓前端能提示「符合 N 筆，顯示最近 n 筆」,

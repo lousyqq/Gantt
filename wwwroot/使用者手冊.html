@@ -277,7 +277,6 @@ kbd{
 .sw.exec{background:#15803D;border-color:#166534}
 .sw.mon{background:#0369A1;border-color:#075985}
 .sw.not{background:#64748B;border-color:#475569}
-.sw.part{background:#D97706;border-color:#B45309}
 .sw.pend{background:var(--surface);border:2px solid #F87171}
 .sw.hl{background:#DBEAFE;border:2px solid #3B82F6}
 
@@ -339,7 +338,7 @@ footer{
   <h1>使用者手冊</h1>
   <p class="lede">每週在甘特圖上回報進度、由主管評分與講評、再由高階主管檢視全年度產出。這份手冊按角色拆開：先看「<a href="#s-quick">快速上手</a>」用 5 分鐘走完你這個角色的流程，需要細節時再往下翻各章；在系統裡卡住時，按任一視窗右上角的 <span class="ui">?</span> 會直接開到相關說明。</p>
   <div class="meta">
-    <span><b>適用版本</b> 2026-09-21</span>
+    <span><b>適用版本</b> 2026-09-29</span>
     <span><b>年度</b> 2026（53 週）／2027（53 週）</span>
     <span><b>使用對象</b> 團隊成員、管理部主管、高階主管</span>
   </div>
@@ -396,9 +395,9 @@ footer{
     <h3>👤 成員：5 分鐘上手</h3>
     <ol class="steps">
       <li><b>登入</b>在登入畫面下半部點<strong>自己的名字</strong>（沒有密碼）。右上角會顯示你的名字與「成員」。</li>
-      <li><b>看懂自己的甘特圖</b>登入後畫面只顯示<strong>你自己的專案</strong>（工具列的成員下拉預設是你）。黃色斜紋條＝主管幫你排的計畫區間；直立的紅線＝本週；條上出現<strong>紅框＋❗</strong>＝這條區間本週該打卡、還沒打。</li>
+      <li><b>看懂自己的甘特圖</b>登入後畫面只顯示<strong>你自己的專案</strong>（工具列的成員下拉預設是你）。黃色斜紋條＝主管幫你排的計畫區間；直立的紅線＝本週；<strong>本週那一格被紅框框起來</strong>＝這條區間本週該打卡、還沒打。</li>
       <li><b>打開回報中心</b>按 header 的 <span class="ui">📋 本週回報中心</span>（紅色數字＝還沒完成的項目數）。面板由上到下三區：①本週待打卡任務 ②下週預計執行工作（必填）③非專案事項（選填）。</li>
-      <li><b>逐一打卡</b>點任一筆待打卡任務 → 選狀態（<strong>有執行／Monitor／未執行</strong> 三選一）→ 寫工作說明（選「有執行」時必填）→ 可選貼一個文件連結 → <span class="ui">儲存進度回報</span>。想照抄上週：狀態還沒選時按 <span class="ui">↩ 沿用上次回報</span> 一鍵帶入。</li>
+      <li><b>逐一打卡</b>點任一筆待打卡任務 → 選狀態（<strong>有執行／Monitor／未執行</strong> 三選一）→ 寫工作說明（選「有執行」時必填）→ 可選貼一個文件連結 → <span class="ui">儲存進度回報</span>。想照抄上週：狀態還沒選時按 <span class="ui">↩ 沿用上次回報</span> 一鍵帶入。<strong>存完會自動回到這份清單</strong>（那一列立刻變成已回報），可以一項接一項往下做。</li>
       <li><b>填下週預計</b>回到回報中心點「下週預計執行工作」→ 寫下一週打算做什麼 → 儲存。這一項<strong>每週必填</strong>，沒填會一直算在紅色數字裡。</li>
       <li><b>（選填）非專案事項</b>臨時支援、會議、教育訓練等不屬於專案的工作寫在這裡，主管在看板看得到。</li>
       <li><b>看到 🎉 就完成了</b>三件事都齊全時回報中心底部會變成綠色的「🎉 本週回報已全數完成」。之後這週內隨時可以回來改（回報中心最下方「已完成打卡任務」→ 修改）。</li>
@@ -407,7 +406,7 @@ footer{
 
     <h4>成員的一週長什麼樣</h4>
     <ul class="flow">
-      <li><span class="box"><b>週日</b><small>新的一週開始，本週該打卡的條出現紅框</small></span></li>
+      <li><span class="box"><b>週日</b><small>新的一週開始，該打卡的條會在當週那一格亮紅框</small></span></li>
       <li><span class="box"><b>週間</b><small>做到哪就打卡到哪，可以反覆修改</small></span></li>
       <li><span class="box"><b>週末前</b><small>三件事齊全，🎉 完成；主管開始評分</small></span></li>
       <li><span class="box"><b>下週</b><small>上週變成唯讀；需要改要請主管開「歷史補登」</small></span></li>
@@ -460,7 +459,7 @@ footer{
       <li><b>逐人檢視</b>點成員列展開；<strong>點任一張任務卡片，左側甘特圖對應的那條區間會亮藍色</strong>，邊講邊指很方便；再點一次取消。卡片上的文件圖示可直接開啟成員附的文件。</li>
       <li><b>評分</b>點甘特條（或從看板定位後點條）開啟視窗，已回報的任務下方有「主管評分微調」五顆按鈕（0.3／0.5／0.8／0.9／1），點下去立即生效。成員回報後預設 1 分，未回報 0 分。</li>
       <li><b>主管回覆</b>看板成員列右側的 <span class="ui">主管回覆</span>，針對「這位成員的這一週」留一段話，<strong>全員都看得到</strong>（紫色）。已回覆會變成 <span class="ui">✓ 已回覆</span>。</li>
-      <li><b>代成員修正</b>成員填錯或漏填時，header 的 <span class="ui">🛠 編輯 W○○ 回報</span> 可代任一成員修任務打卡、非專案、下週預計（會標「✏️ 主管修正」）。要讓成員<strong>自己</strong>補以前的週，用 <span class="ui">⚙️ 管理 → 🔓 開放歷史補登</span>，用完記得關。</li>
+      <li><b>代成員修正</b>成員填錯或漏填時，header 的 <span class="ui">🛠 編輯 W○○ 回報</span> 可代任一成員修任務打卡、非專案、下週預計（會標「✏️ 主管修正」）。<strong>改完會自動回到這份清單、而且記得你正在編輯哪位成員</strong>，一位成員十幾項可以一路做完。要讓成員<strong>自己</strong>補以前的週，用 <span class="ui">⚙️ 管理 → 🔓 開放歷史補登</span>，用完記得關。</li>
       <li><b>產出週報</b>看板標題列的 <span class="ui">⬇️ 匯出 Excel</span>（當週全員，兩個工作表）或 <span class="ui">📋 複製週報文字</span>；單一成員用其列上的 <span class="ui">複製週報</span>。</li>
     </ol>
     <div class="note warn">
@@ -515,6 +514,7 @@ footer{
         <tr data-role="member manager exec"><td>跳到某一週</td><td>header「系統週數」的數字可直接輸入後按 Enter；‹ › 一週一週</td><td><span class="tag all">全體</span></td></tr>
         <tr data-role="member manager exec"><td>只看某位成員</td><td>工具列的成員下拉（三種檢視共用，切檢視不會重設）</td><td><span class="tag all">全體</span></td></tr>
         <tr data-role="member manager exec"><td>一頁看更多列</td><td>工具列 <span class="ui">緊湊模式</span>；「顯示 ▾」可一次收合全部群組／子區間</td><td><span class="tag all">全體</span></td></tr>
+        <tr data-role="member manager exec"><td>專案名稱被截成「…」看不到全名</td><td>拖曳表頭「專案名稱」<strong>右邊的框線</strong>加寬（雙擊還原）</td><td><span class="tag all">全體</span></td></tr>
         <tr data-role="member manager exec"><td>換深色／淺色</td><td>header 右側 🌙／☀️</td><td><span class="tag all">全體</span></td></tr>
       </tbody>
     </table>
@@ -591,8 +591,8 @@ footer{
     <rect x="556" y="65" width="194" height="14" rx="4" class="box"/>
     <rect x="561" y="69" width="9" height="6" fill="url(#wf-plan)" stroke="#B45309" stroke-width=".6"/><text x="572" y="74.5" class="t" font-size="6">計畫</text>
     <rect x="590" y="69" width="9" height="6" fill="url(#wf-sub)" stroke="rgba(15,118,110,.75)" stroke-width=".6"/><text x="601" y="74.5" class="t" font-size="6">子區間</text>
-    <rect x="626" y="69" width="9" height="6" fill="none" stroke="#F87171" stroke-width="1.4"/><text x="637" y="74.5" class="t" font-size="6">❗待回報</text>
-    <line x1="668" y1="67" x2="668" y2="77" stroke="var(--rule)"/><text x="672" y="74.5" class="tm" font-size="6">⌨ H 回本週・←→ 平移</text>
+    <rect x="626" y="69" width="9" height="6" fill="none" stroke="#F87171" stroke-width="1.4"/><text x="637" y="74.5" class="t" font-size="6">待回報</text>
+    <line x1="668" y1="67" x2="668" y2="77" stroke="var(--rule)"/><text x="672" y="74.5" class="tm" font-size="6">⌨ H 回本週・←→ 平移・↑↓ 捲動</text>
     <!-- gantt header -->
     <rect x="0" y="84" width="760" height="16" fill="var(--navy)"/>
     <text x="8" y="94.5" class="tw" font-size="6.5" font-weight="700">No</text><text x="28" y="94.5" class="tw" font-size="6.5" font-weight="700">分類</text><text x="70" y="94.5" class="tw" font-size="6.5" font-weight="700">專案名稱</text>
@@ -621,7 +621,7 @@ footer{
     <text x="182" y="156.5" class="tm" font-size="7">＋ ✎ 🗑</text><text x="232" y="157" font-size="8">🎯</text>
     <rect x="340" y="143" width="240" height="20" rx="3" fill="url(#wf-plan)" stroke="#B45309" stroke-width=".8"/>
     <rect x="338" y="141" width="244" height="24" rx="4" fill="none" stroke="#F87171" stroke-width="2"/>
-    <text x="346" y="154" font-size="7" fill="#78350F" font-weight="700">系統上線與驗證 ❗</text>
+    <text x="346" y="154" font-size="7" fill="#78350F" font-weight="700">系統上線與驗證</text>
     <circle cx="355" cy="159" r="2.8" fill="#15803D"/><circle cx="385" cy="159" r="2.8" fill="#15803D"/><circle cx="415" cy="159" r="2.8" fill="#0369A1"/><circle cx="445" cy="159" r="2.8" fill="#15803D"/><circle cx="475" cy="159" r="2.8" fill="#64748B"/><circle cx="505" cy="159" r="2.8" fill="#15803D"/>
     <line x1="0" y1="170" x2="760" y2="170" stroke="var(--rule)"/>
     <!-- sub rows -->
@@ -672,10 +672,10 @@ footer{
     <li><span class="co">11</span><span class="ui">⏰ 即將到期 n ›</span>：快到期的計畫區間清單，點了可直接跳到那條。</li>
     <li><span class="co">12</span><b>圖例</b>：甘特條的顏色意義，常駐可見。</li>
     <li><span class="co">13</span><b>月份／週次表頭</b>：點週次可切到那一週；紅色數字＝目前檢視的週。</li>
-    <li><span class="co">14</span><b>成員群組列</b>：點整列收合／展開；「本週回報 x/y」是這個人本週交了幾筆。主管在列尾有 <span class="ui">＋ 新增專案</span>。</li>
-    <li><span class="co">15</span><b>專案列</b>：⠿ 拖曳（主管）→ 類型 → 名稱 → <span class="ui">▾ n</span> 子區間展開 → ⏰ 剩N週 → 滑過才出現的 ＋✎🗑（主管）→ 🎯 產出（淡色＝未填）。</li>
+    <li><span class="co">14</span><b>成員群組列</b>：點整列收合／展開；「本週回報 x/y」是這個人本週交了幾筆，「🎯 產出 x/y」是有幾案已填具體產出。主管在列尾有 <span class="ui">＋ 新增專案</span>。</li>
+    <li><span class="co">15</span><b>專案列</b>：⠿ 拖曳（主管）→ 類型 → 名稱 → <span class="ui">▾ n</span> 子區間展開（青綠色；藍色的 <span class="ui">▸ n 條區間</span> 展開的則是計畫區間）→ ⏰ 剩N週 → 滑過才出現的 ＋✎🗑（主管）→ 🎯 產出（淡色＝未填）。</li>
     <li><span class="co">16</span><b>計畫區間條</b>：黃色斜紋＝排定的起訖週；條上色點＝各週回報狀態。<strong>點條開視窗</strong>打卡或改排程。</li>
-    <li><span class="co">17</span><b>紅框＋❗</b>＝本週排定但還沒回報，要打卡。</li>
+    <li><span class="co">17</span><b>當週那一格的紅框</b>＝本週排定但還沒回報，要打卡。紅框只框<strong>當週那一格</strong>（不是整條），所以它同時告訴你「是哪一週要交」；同一畫面上所有待回報的紅框都落在當週紅線上，排成一直行。</li>
     <li><span class="co">18</span><b>子區間列</b>：青綠條、縮排＋導引線，淡黃底帶＝所屬計畫區間的範圍。</li>
     <li><span class="co">19</span><b>本週紅線</b>：目前檢視的週；該欄背景也帶淡紅。</li>
   </ol>
@@ -689,14 +689,15 @@ footer{
           <tr><td><b>Header</b>（深藍列）</td><td>群組名稱、<b>系統週數</b>（‹ › 或直接輸入數字；旁邊是該週的日期區間）、依身分不同的入口——成員：<span class="ui">📋 本週回報中心</span>；主管：<span class="ui">🛠 編輯 W○○ 回報</span>、<span class="ui">⚙️ 管理 ▾</span>；兩者都有 <span class="ui">📊 W○○ 團隊總結</span>——接著是身分、<b>使用手冊</b>（書本圖示，開新分頁、會自動停在你身分的章節）、深色切換、登出。</td></tr>
           <tr><td><b>工具列</b></td><td>搜尋框、a~e 類型篩選（晶片只顯示四字短名，滑過去看全名）、成員下拉、年度下拉、三段檢視切換（週檢視／年度總覽／成果清單）、<span class="ui">⚡ 回到本週</span>（已在本週時是白底外框、離開本週才變深色；隨時可按來重新置中）、<span class="ui">緊湊模式／寬鬆模式</span>（列高較矮、一頁看更多列；螢幕夠寬時週欄會自動放寬填滿，不必橫向捲動）、<span class="ui">顯示 ▾</span>（一次展開／收合全部成員群組或子區間）。</td></tr>
           <tr id="h-deadline"><td><b>概況列</b></td><td>「W○○ 全員概況」（成員下拉選了某人則顯示「○○概況」）：回報完成度進度條、狀態計數（綠＝有執行、藍＝Monitor、灰＝未執行；「未回報」有數字時轉琥珀色提醒。這四個只是統計、不能點；要找是誰沒交，開「📊 團隊總結」）、<span class="ui">⏰ 即將到期 n ›</span>（剩 ≤2 週，或已走過 70% 且剩 ≤4 週的計畫區間；點開有清單，點清單項目會定位並開啟那條區間）、甘特色義圖例、鍵盤提示。</td></tr>
-          <tr><td><b>甘特圖</b></td><td>左側凍結欄（No／分類／專案名稱）＋右側 53 週的時間軸。</td></tr>
+          <tr><td><b>甘特圖</b></td><td>左側凍結欄（No／分類／專案名稱）＋右側 53 週的時間軸。<b>「專案名稱」欄的寬度可以自己調</b>——見下方「專案名稱欄太窄看不到全名」。</td></tr>
         </tbody>
       </table>
     </div>
     <dl class="kv">
-      <dt>成員群組列</dt><dd>藍底、成員名字＋「n 項」＋「本週回報 x/y」小進度條。點整列可收合／展開該成員的專案。<span class="tag manager">主管</span>列尾有 <span class="ui">＋ 新增專案</span>；剛加入、還沒有專案的成員會顯示「尚無專案 — 按右側「＋ 新增專案」開始排程」。</dd>
-      <dt>專案列</dt><dd>由左到右：<span class="tag manager">主管</span>拖曳把手 <span class="ui">⠿</span> → 類型晶片（A~E）→ 專案名稱（滑過去看 NID）→ 有子區間時的 <span class="ui">▾ n</span> 展開／收合晶片 → 快到期時的「⏰ 剩N週」→ <span class="tag manager">主管</span>滑過列才浮出的 <span class="ui">＋</span><span class="ui">✎</span><span class="ui">🗑</span> → 列尾常駐的 <span class="ui">🎯</span>（產出；已填實色、未填淡色）。</dd>
-      <dt>子區間列</dt><dd>專案列底下縮排的子列，名稱欄以樹狀導引線接到專案。詳見<a href="#s-subs">子區間</a>章。</dd>
+      <dt>成員群組列</dt><dd>藍底、成員名字＋「n 項」＋「本週回報 x/y」小進度條＋「🎯 產出 x/y」（這個人有幾案已填具體產出；全部填完會轉綠。螢幕較窄時這一項會收起來）。點整列可收合／展開該成員的專案。<span class="tag manager">主管</span>列尾有 <span class="ui">＋ 新增專案</span>；剛加入、還沒有專案的成員會顯示「尚無專案 — 按右側「＋ 新增專案」開始排程」。</dd>
+      <dt>專案列</dt><dd>由左到右：<span class="tag manager">主管</span>拖曳把手 <span class="ui">⠿</span> → 類型晶片（A~E）→ 專案名稱（滑過去看 NID）→ 有子區間時的 <span class="ui">▾ n</span> 展開／收合晶片（<strong>青綠色＝展開出來的是子區間</strong>）→ 快到期時的「⏰ 剩N週」→ <span class="tag manager">主管</span>滑過列才浮出的 <span class="ui">＋</span><span class="ui">✎</span><span class="ui">🗑</span> → 列尾常駐的 <span class="ui">🎯</span>（產出；已填實色、未填淡色）。</dd>
+      <dt>同一專案的第二列（<span class="ui">↳</span>）</dt><dd>一個專案只佔一列，所有計畫區間都畫在上面；子區間掛在底下的縮排子列，<strong>一條子區間一列</strong>。<br><strong>有週次互相重疊的計畫區間時</strong>（例如「測試B機台 W01–W40」與「測試C機台 W20–W30」同時在跑），專案列會改畫<strong>一條涵蓋整個專案的黃條</strong>（不寫名稱），名稱右邊出現 <span class="ui">▸ n 條區間</span>（<strong>藍色＝展開出來的是計畫區間</strong>，與青綠色的子區間晶片分得開）：<strong>收起來時這個專案就是一列</strong>；點晶片（或點那條黃條）展開，每條計畫區間才各佔一列，名稱欄以淡色 <span class="ui">↳</span> 開頭、左邊有灰色直軌表示「這些都是同一個專案」（<strong>No 與分類只寫在第一列</strong>），它們的子區間再掛在各自那列下面。中間真的沒有排程的週次，整體條會斷開，不會假裝那段在做事。</dd>
+      <dt>子區間列</dt><dd>計畫區間底下縮排的子列，名稱欄以樹狀導引線接到它所屬的那條計畫區間。詳見<a href="#s-subs">子區間</a>章。</dd>
       <dt>時間軸</dt><dd>上方兩列表頭：月份列與週次列（點週次可把「系統週數」切到那一週）。直立紅線＝目前檢視的週。</dd>
     </dl>
   </details>
@@ -708,19 +709,27 @@ footer{
     <span class="i"><span class="sw exec"></span>有執行</span>
     <span class="i"><span class="sw mon"></span>Monitor</span>
     <span class="i"><span class="sw not"></span>未執行</span>
-    <span class="i"><span class="sw part"></span>子區間只交一部分</span>
-    <span class="i"><span class="sw pend"></span>本週排定但尚未回報</span>
+    <span class="i"><span class="sw pend"></span>本週排定但尚未回報（框在當週那一格）</span>
     <span class="i"><span class="sw hl"></span>從看板點卡片後的高亮</span>
   </div>
-  <p>黃色斜紋條＝這個專案排定要做的週次區間；條上的彩色小點＝該週的回報狀態。滑鼠停在條上會出現細節浮框（區間起訖、專案／區間 NID、底下的子區間、本週狀態與說明、歷史回報、是否附了文件連結）。</p>
+  <p>黃色斜紋條＝這個專案排定要做的週次區間；條上的彩色小點＝該週的回報狀態，<strong>就只有上面這三種顏色</strong>。一條上面如果同時有好幾個要回報的東西（收合起來的專案整體條、或底下切了子區間的計畫區間條），那一週<strong>只要有任一個回「有執行」就顯示綠色</strong>（優先序 有執行 › Monitor › 未執行，還沒交的不影響顏色）；<strong>要看誰還沒交，請看紅框與<a href="#s-dash">團隊總結看板</a>的「回報 x/y」</strong>。滑鼠停在條上會出現細節浮框（區間起訖、專案／區間 NID、底下的子區間、本週狀態與說明、歷史回報、是否附了文件連結）。</p>
   <p><strong>點一下甘特條</strong>就會開啟該區間的視窗——成員在這裡打卡，主管在這裡改排程與評分。有些計畫區間底下還會切「子區間」（青綠色的縮排子列），做法與規則見<a href="#s-subs">子區間</a>章。</p>
+
+  <h3 id="h-namecol">專案名稱欄太窄看不到全名</h3>
+  <p>專案名稱旁邊常常還擠著好幾個晶片（類型、<span class="ui">▾ n</span>／<span class="ui">▸ n 條區間</span>、<span class="ui">⏰ 剩N週</span>、<span class="ui">🎯</span>），名字長一點就會被截成「…」。<strong>把滑鼠移到表頭「專案名稱」的右邊框線上，游標會變成左右箭頭，按住拖曳就能改欄寬</strong>（拖的時候會有一條藍色參考線告訴你放開後會落在哪）。<strong>雙擊</strong>同一個位置即還原預設寬度。</p>
+  <p>調好的寬度會記在這台電腦上，下次開啟沿用；週檢視與年度總覽共用同一個設定。</p>
+  <div class="note">
+    <p class="h">變寬是有代價的</p>
+    <p>名稱欄變寬，右邊的時間軸就會變窄（緊湊模式下週欄會自動變窄，以維持「整年一畫面」）——這是取捨，看你今天是在找專案還是在看排程。系統會限制最寬只能到畫面的四成左右，不會讓甘特圖被擠掉。</p>
+  </div>
+  <p>只用鍵盤時：用 <kbd>Tab</kbd> 走到那根分隔線（在「專案名稱」表頭裡），<kbd>←</kbd> <kbd>→</kbd> 每次調 20 像素（按住 <kbd>Shift</kbd> 為 5 像素微調），<kbd>Home</kbd> 還原預設。</p>
 
   <h3>成員下拉會一路跟著你</h3>
   <p>工具列的成員下拉是<strong>三種檢視共用的同一個篩選</strong>，切換檢視不會被重設。登入時的預設值：成員＝只看自己、主管＝全部成員。</p>
 
   <div class="note">
     <p class="h">畫面變窄時控制項會自動收起</p>
-    <p>開啟團隊總結看板、或在 1366 以下的筆電／投影機使用時，工具列會把「找資料」用的搜尋框與類型晶片收起來，把空間讓給甘特圖。變寬（或關掉看板）就會自動恢復，不是故障。</p>
+    <p>空間不夠時，工具列會把「找資料」用的控制項讓出來給甘特圖，<strong>分兩步</strong>：先收 <strong>a~e 類型晶片</strong>（開啟團隊總結看板時也會收——講評當下通常不會臨時改篩選條件），畫面真的很窄（例如 1024 又開著看板）才連 <strong>搜尋框</strong> 一起收。變寬或關掉看板就會自動恢復，不是故障。<strong>已經選了的晶片或打了的關鍵字一律會留著</strong>（連同清除鈕），才不會看不出畫面為什麼只剩部分專案。</p>
   </div>
 </section>
 
@@ -763,6 +772,7 @@ footer{
     </div>
   </div>
   <p>三項都完成後，面板底部會變成綠色的 <span class="ui">🎉 本週回報已全數完成！返回總表 ›</span>；還沒完成則是「暫存離開（尚有 n 項待完成）」——可以隨時關掉再回來。已交的任務列在面板最下方「🟢 本週已完成打卡任務」，點 <span class="ui">修改 ›</span> 可以改。</p>
+  <p><b>點一項進去填完，會自動回到這份清單</b>（存檔、取消、按 <kbd>Esc</kbd> 都一樣），捲動位置停在原地、剛填好的那一列會立刻變成已回報，可以一項接一項往下做，不必每次重開面板。唯一的例外是<b>最後一項任務交完</b>——這時系統會直接把「下週預計執行工作」推到眼前，填完才回到清單。</p>
 
   <h3 id="h-checkin">任務打卡</h3>
   <p>從回報中心點任務，或直接<strong>點甘特圖上的條</strong>，都會開啟同一個視窗，但版面順序會依你從哪裡開而不同：<strong>從回報中心／補登面板開</strong>，或成員點自己本週要打卡的條 → 最上面就是<strong>本週回報</strong>（不用捲動），「前幾週回報」與「排程與子區間」收在下方；<strong>從甘特條開</strong>（主管、或點的不是本週要打卡的區間）→ 最上面是<strong>排程與子區間</strong>（已展開），前幾週回報與本週回報在下方（不是本週排定的區間就不顯示本週回報那塊）。標題列會固定在視窗頂端不跟著捲動，往下捲時也看得到這是哪個專案、哪條區間。</p>
@@ -818,13 +828,12 @@ footer{
   <div class="legend">
     <span class="i"><span class="sw plan"></span>計畫區間</span>
     <span class="i"><span class="sw sub"></span>子區間</span>
-    <span class="i"><span class="sw part"></span>子區間只交一部分（父條色點）</span>
     <span class="i"><span class="sw hl"></span>從看板點卡片後的高亮</span>
   </div>
   <ul>
     <li>有子區間的專案，名稱右側多一顆 <span class="ui">▾ 3</span> 晶片；底下以<strong>縮排的子列</strong>逐條顯示（一個子區間一列，重疊的階段自然排成階梯），名稱欄有樹狀導引線（├／└）接到專案，子列上的淡黃底帶＝所屬計畫區間的範圍。</li>
     <li>子區間的條是<strong>青綠斜紋</strong>，與黃色的計畫區間一眼分得開；和計畫區間一樣<strong>不會因為過去了或還沒開始而變色</strong>（條只表示排程，不表示完成度）。滑鼠移上去會浮出說明框：這條計畫區間底下所有子區間（滑到的那條以 ▸ 標出）、本週回報狀態與內容、歷史回報。</li>
-    <li>點 <span class="ui">▾ n</span> 可收合／展開，系統會記住。要一次全收／全展，用工具列 <span class="ui">顯示 ▾</span>。週檢視預設展開、年度總覽預設收合。搜尋命中子區間名稱時該專案會暫時自動展開（清掉搜尋就恢復）。</li>
+    <li>點 <span class="ui">▾ n</span> 可收合／展開，系統會記住。要一次全收／全展，用工具列 <span class="ui">顯示 ▾</span>。週檢視預設展開、年度總覽預設收合。搜尋命中子區間名稱時，<strong>它所在的那一列</strong>會暫時自動展開（清掉搜尋就恢復）——年度總覽預設是收合的，靠的就是這個才搜得到。</li>
     <li>藍色高亮只在你從團隊總結看板點卡片時出現：點子區間的卡就只亮那一條子區間（收著會自動展開），點計畫區間的卡就只亮計畫區間。</li>
   </ul>
 
@@ -857,8 +866,8 @@ footer{
   <details class="adv">
     <summary>子區間打卡開啟後的細節規則</summary>
     <ul>
-      <li><b>紅框只框要打卡的那條</b>：有子區間在跑就框子區間、計畫區間本身不框；把子列收合起來時改由計畫區間的條標紅框提醒。</li>
-      <li><b>計畫區間的條顯示彙總</b>：全部子區間都交了＝該狀態色點；只交一部分＝<strong>琥珀色</strong>色點；滑鼠停上去逐條列出誰交了誰沒交。</li>
+      <li><b>紅框只框要打卡的那條</b>：有子區間在跑就框子區間、計畫區間本身不框；把子列收合起來時改由計畫區間的條標紅框提醒。（紅框一律只框<strong>當週那一格</strong>，不是整條。）</li>
+      <li><b>計畫區間的條顯示彙總</b>：那一週<strong>只要有任一個子區間回「有執行」，條上就是綠色</strong>（優先序 有執行 › Monitor › 未執行，還沒交的子區間不影響顏色）；滑鼠停上去逐條列出誰交了誰沒交。</li>
       <li><b>得分仍以計畫區間計</b>：區間該週分數＝各子區間分數的平均（未回報算 0），主管逐子區間評分。看板「回報 x/y」以子區間計、「得分 x/z」以計畫區間計，兩個分母刻意不同。</li>
       <li><b>切子區間之前已回報過的週</b>維持以計畫區間為單位，不會回頭要求補子區間。</li>
       <li><b>已有回報紀錄的子區間只有主管能刪</b>；刪除可復原。</li>
@@ -899,7 +908,7 @@ footer{
   <p>同一位成員底下的專案可拖曳最左側的 <span class="ui">⠿</span> 把手調整順序（拖專案名稱是選字、不是拖曳）；藍色線標出放開後會落在哪。<strong>搜尋或類型篩選啟用時，拖曳排序會暫停</strong>——畫面上不是完整清單，拖了會排錯。</p>
 
   <h3>🎯 具體產出與 MP 效益</h3>
-  <p>專案名稱列最右邊的 🎯 圖示開啟。填「預計交付的具體產出成果」與「MP Saving」（選填）。<strong>負責人自己也能填</strong>（建議請負責人填、主管審）；未填的專案圖示是淡色，從外層一眼就看得出哪幾案還沒填，成果清單的「⚠️ 待補充產出效益」卡片也會列出。</p>
+  <p>專案名稱列最右邊的 🎯 圖示開啟。填「預計交付的具體產出成果」與「MP Saving」（選填）。<strong>負責人自己也能填</strong>（建議請負責人填、主管審）；未填的專案圖示是淡色，從外層一眼就看得出哪幾案還沒填。每位成員的群組列還有「<strong>🎯 產出 x/y</strong>」告訴你那個人有幾案已填（全部填完轉綠），成果清單的「⚠️ 待補充產出效益」卡片則可以直接篩出還沒填的名單。</p>
 
   <h3>成員群組列</h3>
   <p>點群組列可收合／展開該成員的專案；列上「本週回報 x/y」是這位成員本週的回報數。沒有專案的新成員也會有群組列，才能為他新增第一個專案。</p>
@@ -1057,15 +1066,18 @@ footer{
   </ul>
   <p>若篩到一筆都不剩，畫面會列出<strong>目前生效中的每一個條件</strong>並各給一顆清除鈕（兩個以上會多給「清除全部條件」），不會只丟一句「找不到資料」。</p>
 
-  <h3>鍵盤快捷鍵</h3>
+  <h3 id="s-shortcuts">鍵盤快捷鍵</h3>
   <div class="tablewrap">
     <table>
       <thead><tr><th class="mono">按鍵</th><th>作用</th></tr></thead>
       <tbody>
         <tr><td class="mono"><kbd>H</kbd> / <kbd>Home</kbd></td><td>回到本週並置中（非本年度時＝切回今年）</td></tr>
         <tr><td class="mono"><kbd>←</kbd> <kbd>→</kbd></td><td>左右平移 4 週</td></tr>
-        <tr><td class="mono"><kbd>Shift</kbd>＋<kbd>←</kbd> <kbd>→</kbd></td><td>微移 1 週</td></tr>
-        <tr><td class="mono"><kbd>Tab</kbd> → <kbd>↑</kbd> <kbd>↓</kbd></td><td>進入甘特區後上下切換甘特條</td></tr>
+        <tr><td class="mono"><kbd>↑</kbd> <kbd>↓</kbd></td><td>上下捲動甘特圖 4 列</td></tr>
+        <tr><td class="mono"><kbd>Shift</kbd>＋<kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td>微移 1 週／1 列</td></tr>
+        <tr><td class="mono"><kbd>Tab</kbd> → <kbd>Alt</kbd>＋<kbd>↑</kbd> <kbd>↓</kbd></td><td>進入甘特條（或名稱欄的 🎯 產出鈕）之後，在同一欄的各列之間切換；<kbd>Enter</kbd> 開啟</td></tr>
+        <tr><td class="mono"><kbd>Shift</kbd>＋<kbd>Tab</kbd></td><td>（主管）焦點停在某一列時，該列名稱欄的 <span class="ui">＋ 新增計畫區間</span>／<span class="ui">✎ 編輯專案</span>／<span class="ui">🗑 刪除專案</span> 會現形（平常只在滑鼠移過去時出現），往回按即可選到它們</td></tr>
+        <tr><td class="mono"><kbd>Tab</kbd> → <kbd>←</kbd> <kbd>→</kbd> / <kbd>Home</kbd></td><td>焦點停在「專案名稱」表頭右緣的分隔線上時＝<b>調整名稱欄寬度</b>（每次 20 像素，<kbd>Shift</kbd> 為 5；<kbd>Home</kbd> 還原預設）。見<a href="#h-namecol">專案名稱欄太窄看不到全名</a></td></tr>
         <tr><td class="mono"><kbd>Enter</kbd></td><td>開啟目前選取的甘特條；單行輸入欄按下即送出表單</td></tr>
         <tr><td class="mono"><kbd>Esc</kbd></td><td>關閉最上層視窗（含看板、下拉選單）；有未儲存內容時會先確認</td></tr>
       </tbody>
@@ -1156,6 +1168,27 @@ footer{
   <h2><span class="n">16</span>更新紀錄<span class="tags"><span class="tag all">全體</span></span></h2>
   <p>已經在用的人看這裡就好：每一條是一個「操作上會感覺到」的變化，點連結到對應章節。</p>
   <ul class="changelog">
+    <li><span class="d">2026-09-29</span><span><b>子區間的展開／收合、搜尋、看板高亮在「一列有好幾條計畫區間」時會失效，已修好</b>。一個專案若有<b>週次沒有重疊的多條計畫區間</b>（例如「SPEC 提供 W14–W17」接著「測試C機台 W20–W30」），它們會畫在同一列上；當子區間掛在<b>後面</b>那一條時，以下三件事會對那一列沒有作用：①工具列 <span class="ui">顯示 ▾</span> 的「收合／展開全部子區間」跳過它 ②搜尋子區間名稱時它不會自動展開（<b>年度總覽</b>預設收合，等於整個搜不到）③從<a href="#s-dash">團隊總結看板</a>點該子區間的卡片時那一列不會展開，高亮的子區間看不到。三者都不會有任何錯誤訊息，所以會像「這個功能時好時壞」。<b>現在一律以「那一列」為單位，全部正常。</b></span></li>
+    <li><span class="d">2026-09-29</span><span><b>鍵盤：用 Alt＋↑↓ 走到「收合起來的專案整體條」之後，Tab 離開再回來不會再跳回甘特區第一條</b>（會停在你剛才所在的那一條）。見<a href="#s-shortcuts">鍵盤快捷鍵</a>。</span></li>
+    <li><span class="d">2026-09-28</span><span><b>甘特條上的 ❗ 拿掉了，待回報只看當週那一格的紅框</b>。❗ 是畫在<b>條的最前端</b>，而一條區間常常橫跨大半年——真正在畫面上的那一段看不到它，得先一路往左捲到起點才找得到，等於一個看不到的提醒。紅框則永遠落在<b>當週那一欄</b>，也就是你本來就在看的位置。<b>什麼情況算待回報完全沒變</b>，只是不再多一個記號；條上的 <span class="ui">⏰</span>（即將到期）照舊。見<a href="#s-ui">畫面導覽</a>。</span></li>
+    <li><span class="d">2026-09-28</span><span><b>異動紀錄裡兩種原本看不懂的紀錄補好了</b>（主管）。<b>★ 重點關注</b>的變更以前整列只顯示一個「1」或「0」、對象欄還寫成英文，現在會寫成「標記／取消重點關注專案「○○○」（負責人：△△）」；而且用<b>「對象類型 → 專案」也篩得到了</b>（以前這一批不管怎麼篩都出不來）。<b>刪除瀏覽權限規則</b>那一筆以前整行是空白的，現在會寫出刪掉的是哪一條規則。見<a href="#h-audit">異動紀錄</a>。</span></li>
+    <li><span class="d">2026-09-28</span><span><b>1600 寬的螢幕上，團隊總結看板的「主管回覆」鈕不會再被切掉</b>。面板寬度剛好卡在臨界值時會用全長版面、但其實放不下，六位成員的<span class="ui">主管回覆</span>都被裁掉一角、標題也被截斷。現在這個寬度改用窄版（標題顯示「團隊總結」、卡片內容改成單欄，反而比原本兩欄更好讀），按鈕完整。<b>1366 與 1920 的畫面沒有任何變化。</b>見<a href="#s-dash">團隊總結看板</a>。</span></li>
+    <li><span class="d">2026-09-28</span><span><b>文件連結的安全檢查變嚴格了</b>。極少數用特殊寫法偽裝成網址、實際上會在瀏覽器裡執行程式的連結，以前檢查不出來，現在填寫時與送出時都會擋下並提示重填。<b>一般網址、網路磁碟與本機路徑（檔名含空白也沒問題）、Notes 連結都照常可用</b>，既有已填的連結不受影響。見<a href="#h-doclink">文件連結</a>。</span></li>
+    <li><span class="d">2026-09-28</span><span><b>待回報的紅框看得清楚了</b>。紅框所在的那一格本來就是當週欄（粉紅底＋正中央一條紅色的當週線），原本的框顏色太淡、又比格子寬了一點，三樣紅疊在一起會被看成「格線變粗」而不是標記。現在框改成<b>深紅色、加上一層很淡的紅底，而且剛好貼齊當週那一欄</b>，年度總覽這種條很細的地方也看得出來。<b>什麼情況會亮紅框、框在哪一格都沒有變</b>；概況列右邊的圖例同步換色。見<a href="#s-ui">畫面導覽</a>。</span></li>
+    <li><span class="d">2026-09-28</span><span><b>「專案名稱」欄的寬度可以自己拖了</b>。名稱旁邊擠著類型、展開、<span class="ui">⏰ 剩N週</span>、<span class="ui">🎯</span> 這些晶片，名字長一點就被截成「…」（最糟的情況只剩七個字左右）。現在<b>把滑鼠移到表頭「專案名稱」的右邊框線上，按住就能拖寬</b>，<b>雙擊還原</b>預設；寬度會記在這台電腦上。純鍵盤可用 <kbd>Tab</kbd> 走到那根分隔線後用 <kbd>←</kbd> <kbd>→</kbd> 調整。見<a href="#h-namecol">專案名稱欄太窄看不到全名</a>。</span></li>
+    <li><span class="d">2026-09-28</span><span><b>從清單點進去填完，會自動回到清單</b>。<a href="#s-report">本週回報中心</a>、歷史補登、主管的 <span class="ui">🛠 編輯回報</span>、<span class="ui">⏰ 即將到期</span>四個清單，以前點一項進去、存完就被丟回甘特圖，要處理下一項得重開清單、再從頭往下捲（一週十幾項就是十幾趟）。現在<b>存檔、取消、按 Esc 都會回到原來的清單，捲動位置停在原地，剛填好的那一列會立刻變成「已回報」</b>。主管的 <span class="ui">🛠</span> 面板還會<b>記住你正在編輯哪位成員</b>，不會每次跳回第一個人。</span></li>
+    <li><span class="d">2026-09-27</span><span><b>複製出去的週報、待回報名單會顯示自己的群組名稱</b>。四個群組（MSD／IMD／EMS1／EMS2）用的是同一套系統，但以前複製出來的抬頭一律寫成「【MSD W○○ 週報】」；現在會跟著畫面標題顯示自己的群組，貼到通訊軟體不會再標錯單位。見<a href="#s-dash">團隊總結看板</a>。</span></li>
+    <li><span class="d">2026-09-27</span><span><b>不用滑鼠也能新增／編輯／刪除專案了</b>（主管）。名稱欄的 <span class="ui">＋</span>／<span class="ui">✎</span>／<span class="ui">🗑</span> 原本只有滑鼠移過去才出現，純鍵盤操作完全按不到；現在<b>焦點停在那一列（例如用 Tab 進到甘特條或 🎯 產出鈕）時它們也會現形</b>，按 <kbd>Shift</kbd>＋<kbd>Tab</kbd> 往回就能選到。同批修好<b>關閉視窗後焦點會回到原本按下的那顆按鈕</b>（以前會掉回頁面最前面，鍵盤使用者每關一次就要重新 Tab 一遍）。見<a href="#s-shortcuts">鍵盤快捷鍵</a>。</span></li>
+    <li><span class="d">2026-09-27</span><span>各成員的<b>群組列多了「🎯 產出 x/y」</b>，一眼看得出那個人有幾案已填具體產出（全部填完會轉綠；螢幕較窄時會收起來）。見<a href="#h-deliverable">具體產出與 MP Saving</a>。</span></li>
+    <li><span class="d">2026-09-26</span><span><b>兩種展開晶片改用不同顏色</b>。名稱欄的展開鈕原本都是藍色，但它們其實展開的是不同東西：<b><span class="ui">▸ n 條區間</span>（藍）</b>展開的是計畫區間、<b><span class="ui">▾ n</span>（青綠）</b>展開的是子區間。現在晶片的顏色就是展開後會出現的那種條的顏色（青綠＝子區間條），不必記。見<a href="#s-ui">畫面導覽</a>。</span></li>
+    <li><span class="d">2026-09-26</span><span><b>待回報的紅框改成只框「當週那一格」</b>，不再把整條區間框起來。原本排一整年的專案，紅框就是一條橫跨整個畫面的長方形——看得到「這案沒交」，卻看不出是哪一週要交，而且整排紅色反而讓人分不出輕重。現在所有待回報的紅框都落在當週紅線上、排成一直行，一眼就知道這週有幾件沒交。<b>什麼情況會亮紅框完全沒變</b>，只是框的位置變了。（當時條上還留著一個 ❗ 前綴，已於 09-28 一併拿掉，見上方那一條。）見<a href="#s-ui">畫面導覽</a>。</span></li>
+    <li><span class="d">2026-09-26</span><span><b>甘特條上的色點只剩三種顏色</b>（綠＝有執行、藍＝Monitor、灰＝未執行）。一條甘特條有時代表好幾個回報單位（收合的專案整體條、或底下有子區間的計畫區間條），<b>那一週只要有任一個單位回「有執行」，條上就是綠色</b>（優先序 有執行 › Monitor › 未執行，還沒交的單位不影響顏色）。原本「有人還沒交」會畫成第四種琥珀色，容易被當成畫面壞掉、又會把已經交的綠色蓋掉，已經移除；<b>要找誰還沒交請看紅框與 <a href="#s-dash">團隊總結看板</a>的「回報 x/y」</b>。見<a href="#s-ui">畫面導覽</a>。</span></li>
+    <li><span class="d">2026-09-26</span><span><b>搜尋框不會再跟著類型晶片一起消失了</b>。畫面變窄或開著團隊總結看板時，現在只先收 <b>a~e 類型晶片</b>，搜尋框留到真的很窄（例如 1024 又開著看板）才收——1920 開看板、1280 筆電都看得到它。順帶把幾個比較小的按鈕點擊區放大到手指／滑鼠好按的尺寸（名稱欄的 <b>▾ n</b>／<b>▸ n 條區間</b>、群組列的 <b>＋ 新增專案</b>、類型晶片、header 的週次輸入框），<b>列高與版面完全沒變</b>。見<a href="#s-ui">畫面導覽</a>。</span></li>
+    <li><span class="d">2026-09-26</span><span><b>展開後的三層比較好認了</b>。名稱欄的縮排改成<b>逐層往右</b>（專案 → 計畫區間 <span class="ui">↳</span> → 子區間），原本第二層的區間名稱反而比專案名稱更靠左，一整塊看起來會糊在一起。另外收合狀態的那條「涵蓋整個專案」的黃條，斜紋方向與底下的計畫區間條相反，方便分辨兩者。<b>條的顏色、位置、操作方式都沒有變。</b>見<a href="#s-ui">畫面導覽</a>。</span></li>
+    <li><span class="d">2026-09-26</span><span><b>有重疊計畫區間的專案，收起來就是一列一條</b>。專案列改畫一條涵蓋整個專案的黃條，名稱右邊多一顆 <b>▸ n 條區間</b>；點它（或點那條黃條）才把每條區間展開成各自一列，子區間仍接在自己那條下面。<b>沒有重疊的專案畫面完全沒變。</b>收起來時色點與待回報紅框由那條黃條代為顯示，所以不展開也看得出這週交了沒。見<a href="#s-ui">畫面導覽</a>。</span></li>
+    <li><span class="d">2026-09-26</span><span><b>鍵盤 ↑↓ 可以上下捲動甘特圖了</b>（一次 4 列，按住 Shift 為 1 列），與 <b>←→ 平移</b>成對；<b>H 回本週</b>不變。用 Tab 進到甘特條之後，改用 <b>Alt＋↑↓</b> 在條與條之間切換、Enter 開啟該條的視窗。</span></li>
+    <li><span class="d">2026-09-26</span><span>甘特圖捲到最左邊時，<b>從 W01 開始的區間條會完整顯示左端</b>（原本左側欄位的陰影會蓋掉條的左緣，看起來像被切掉一截）。捲動後陰影才出現，也順便提示「左邊還有內容」。</span></li>
+    <li><span class="d">2026-09-22</span><span><b>同一個專案裡週次重疊的計畫區間會自動分成上下兩列</b>（以前會疊在一起互相蓋住，重疊那幾週的狀態點看不到也點不開）。重疊＝兩件平行的事，<b>本來就要各打一次卡</b>，這點沒有改變。</span></li>
     <li><span class="d">2026-09-21</span><span><b>每個視窗右上角多了「?」</b>，直接開到手冊講那個畫面的段落；header 的書本圖示改成直接停在你身分的<a href="#s-quick">快速上手</a>。新成員名下還沒有專案時，甘特圖會說明該找誰。</span></li>
     <li><span class="d">2026-09-16</span><span>⚙️ 管理選單不再被甘特表頭蓋住；🎯 產出圖示固定在專案列最右邊；拖曳排序的藍色目標線與實際落點一致。</span></li>
     <li><span class="d">2026-09-15</span><span><b>緊湊模式</b>在寬螢幕會自動把週欄放寬填滿（1920 可整年一頁不橫向捲動）；表頭固定時不再透出底下的甘特條。</span></li>
@@ -1169,7 +1202,7 @@ footer{
 </section>
 
 <footer>
-  <p><span class="site-name">專案追蹤總表</span> · 使用者手冊 — 對應 2026-09-21 版功能。卡住時先按該視窗右上角的「?」，會直接開到相關說明。系統操作問題請洽管理部主管；連線、權限與部署問題請洽 IT。</p>
+  <p><span class="site-name">專案追蹤總表</span> · 使用者手冊 — 對應 2026-09-29 版功能。卡住時先按該視窗右上角的「?」，會直接開到相關說明。系統操作問題請洽管理部主管；連線、權限與部署問題請洽 IT。</p>
 </footer>
 
 </main>

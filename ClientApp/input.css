@@ -28,6 +28,13 @@
   --gantt-row-hover: #EFF6FF;    /* 專案列 hover */
   --frozen-bg: #FFFFFF;          /* 凍結資料格底色(=bg-white);用於封住欄位間的次像素縫隙 */
   --gantt-sub-band: rgba(253,237,184,0.45);   /* 子區間列上「父區間範圍」的淡色底帶(父條奶油色的淡版) */
+  /* 計畫區間分層(2026-09-22)的「群組軌」:名稱欄最左緣 3px,貫穿同一個專案的所有列(含第二層以後的區間列與子區間列)。
+     只在真的有重疊分層時才畫。要比列底線(slate-300 #CBD5E1)明顯一階才看得出是同一組,又不能搶過資料本身。 */
+  /* ⚠ 取 slate-400(#94A3B8)＝與子區間列的樹狀導引線(border-slate-400)同色,兩者讀成同一族。
+     初版 #A9B8CE 對白底只有 2.01,投影就消失了——而 WBS 模式下一個專案可能佔 34 列,專案列一捲出畫面,
+     這條軌就是唯一在說「這些列是同一個專案」的東西,不能是裝飾等級。
+     也不要比導引線更深:它在階層上更外圍,比子項的線還重就反過來了。 */
+  --gantt-lane-rail: #94A3B8;
   --brand-btn: #001F5B;          /* 品牌主行動鈕/圖示磚(登入頁);深色下提亮 */
   /* 「即將到期」標題列:#EA580C 太亮,連純白副標都只有 3.56(淺色下亦然)。
      深色下轉深一階 → 副標 4.95、標題 5.26。淺色維持原色不動。 */
@@ -44,6 +51,7 @@
   --gantt-row-hover: #17233A;
   --frozen-bg: #1E293B;
   --gantt-sub-band: rgba(253,230,138,0.13);   /* 深底上奶油色要很淡,否則整條變土黃;13% 剛好看得出範圍 */
+  --gantt-lane-rail: #5A6B84;   /* 深色的面板底是 #1E293B,軌要比它亮才看得到(與實心中性鈕 bg-slate-700 同階) */
   --brand-btn: #2563EB;
   --hdr-deadline: #C2410C;
 }
@@ -173,6 +181,11 @@
 .dark .hover\:bg-red-100:hover { background-color:#8D3636; }
 .dark .text-red-600,.dark .text-red-700,.dark .text-red-800 { color:#FCA5A5; }
 .dark .border-red-200,.dark .border-red-300 { border-color:#C53D3D; }
+/* 待回報標記(<PendingMark> 與概況列圖例)：深色下要**更亮**不是更深——當週欄底是 #5B2323，
+   原生 #DC2626 對它只有 1.56（比淺色模式還糟）；#F87171 對它 2.70、對混了當週線的 #A22525 也還看得出來。
+   ⚠ 這兩個 class 只有待回報標記在用，日後補紅色階梯時不要把它們一起壓暗。 */
+.dark .border-red-600 { border-color:#F87171; }
+.dark .bg-red-600\/10 { background-color:rgba(248,113,113,0.16); }
 
 /* orange */
 .dark .bg-orange-50,.dark .bg-orange-50\/70 { background-color:#472F18; }
@@ -221,6 +234,8 @@
 /* teal */
 .dark .bg-teal-50 { background-color:#143B37; }
 .dark .bg-teal-100 { background-color:#1B4D4A; }
+/* 子區間展開鈕 hover:比 -100 再上一階(與 sky 那組 -100→-200 同一種階梯) */
+.dark .hover\:bg-teal-200:hover { background-color:#226059; }
 .dark .text-teal-600,.dark .text-teal-700,.dark .text-teal-800 { color:#5EEAD4; }
 .dark .border-teal-200,.dark .border-teal-300 { border-color:#1E6B64; }
 
@@ -348,3 +363,41 @@ thead :where(button, a, input, select):focus-visible,
 .week-input { -moz-appearance: textfield; appearance: textfield; }
 .week-input::-webkit-outer-spin-button,
 .week-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* =====================================================================
+   凍結欄右緣的陰影 —— 只在「真的橫向捲動時」才畫（2026-09-26）
+   那圈陰影是 2px 純白封縫（--frozen-bg，用於封住欄位間的次像素縫隙）＋右偏 4px／模糊 8px 的灰影，
+   而凍結格是 z-30、甘特條是 z-10 → 陰影一律畫在條上面。
+   ⚠ scrollLeft=0 時底下根本沒有東西要遮，這圈陰影卻剛好蓋在**從 W01 開始**的條的左緣：
+     1px 邊框被白條整個抹掉、後面約 10px 再被灰影壓暗一層 → 讀起來像「這條被切掉一截、延伸到凍結欄底下」，
+     真正從 W01 開始的排程反而看不出起點在哪（使用者回報）。
+   捲動之後陰影才有意義（底下真的有條滑過去），順便就是「左邊還有內容」的訊號 → 由 app.jsx 的
+   syncFrozenShadow() 在容器上掛 .gantt-xscroll（class 直接改 DOM、不進 state，捲動不重算整張表）。
+   ⚠ No／分類 兩欄的封縫**維持行內樣式不動**：它們的 2px 落在下一個凍結欄底下（同為 z-30、DOM 在後者勝），
+     本來就碰不到甘特區，沒有這個問題。
+   ===================================================================== */
+.frz-name, .frz-head, .frz-group { box-shadow: none; }
+.gantt-xscroll .frz-name  { box-shadow: 2px 0 0 0 var(--frozen-bg), 4px 0 8px rgba(0, 0, 0, 0.08); }
+.gantt-xscroll .frz-head  { box-shadow: 3px 0 6px rgba(0, 0, 0, 0.08); }
+.gantt-xscroll .frz-group { box-shadow: 3px 0 6px rgba(0, 0, 0, 0.06); }
+
+/* =====================================================================
+   「專案名稱」欄的調寬把手（2026-09-28）
+   把手本身是透明的 8px 熱區（w-2 -right-1，跨在格線上），滑過去才顯現一條藍線 ——
+   常駐可見的話 53 週的甘特表頭上會多一條與「當週金線」搶眼的直線，而它一年也拖不到幾次。
+   ⚠ 熱區 8px 是刻意的：格線只有 1px，貼著 1px 拖會抓不到（WCAG 2.5.8 講的是點擊「目標」不是視覺尺寸，
+     這裡以熱區達標，視覺維持不加粗）。
+   ⚠ 鍵盤焦點外框必須看得見：把手沒有文字也沒有背景，全域 :focus-visible 的 outline 落在透明區塊上
+     仍然畫得出來（outline 畫的是元素的框，不是內容），所以這裡只補「focus 時把藍線一起點亮」，
+     不要改成 outline:none。
+   ===================================================================== */
+.col-resizer::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;
+  background: var(--brand-btn, #001F5B); opacity: 0; transition: opacity .12s;
+}
+.col-resizer:hover::after, .col-resizer:focus-visible::after { opacity: 1; }
+/* 拖曳中：整頁維持 col-resize 游標並禁止選取文字（游標一旦離開把手就變回箭頭的話，會像拖曳中斷了） */
+body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none !important; }
+/* 參考線是常駐節點、只切 hidden（拖曳中掛載新節點＝多一次整頁重繪，正是要避開的）。
+   瀏覽器 UA 樣式本來就有 [hidden]{display:none}，這裡明寫一份免得日後被別的規則蓋掉。 */
+[hidden] { display: none !important; }

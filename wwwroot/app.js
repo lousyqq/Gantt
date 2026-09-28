@@ -235,15 +235,66 @@ const weekUnits = (task, week, taskLogs, subLogs) => {
     legacy: false
   };
 };
-// 甘特父條上的週色點:父層有紀錄 → 該狀態;子區間模式 → 全部回報完取「最積極」的狀態,只回報一部分 → 'partial'(琥珀)
-const PARTIAL_DOT = 'bg-amber-500';
+// ── 甘特條上的週色點:彙總一律取「最積極」的狀態 ──────────────────────────────────
+// 🚨 **色點只有三種顏色＝三種回報狀態,不可以有第四種**(2026-09-26 使用者規則,勿再引入)。
+//   一條甘特條常常代表**好幾個回報單位**(子區間模式的父條＝該週各子區間;重疊專案的整體條＝該週各計畫區間),
+//   彙總規則就一句:**該週只要有任一個單位回「有執行」,整條就是有執行的綠色**——
+//   優先序 有執行 > Monitor > 未執行,**還沒交的單位直接略過**(不影響已交的那些要顯示什麼顏色)。
+// ⚠ 原本「沒交齊＝琥珀 partial」已移除:使用者看到第四種顏色的直覺是「壞掉」而不是「部分回報」
+//   (與「子條不依階段變樣式」「父條不因過去了就變灰」同一條通則——這張圖上多一種樣貌就是多一套要學的語彙)。
+//   「誰還沒交」本來就有專屬通道:成員看甘特條的**紅框**、主管看團隊總結看板的「回報 x/y」與複製待回報名單,
+//   不需要在色點上再講一次(講了還會把已交的綠色蓋掉)。
+const DOT_PRIORITY = ['executed', 'monitor', 'not_executed'];
+const pickDotStatus = statuses => DOT_PRIORITY.find(s => statuses.includes(s)) || statuses[0] || null;
 const unitsDotStatus = wu => {
   if (wu.reported === 0) return null;
   if (wu.mode === 'task') return wu.units[0].log.status;
-  if (wu.reported < wu.total) return 'partial';
-  const st = wu.units.map(u => u.log.status);
-  return st.includes('executed') ? 'executed' : st.includes('monitor') ? 'monitor' : 'not_executed';
+  return pickDotStatus(wu.units.filter(u => u.log).map(u => u.log.status));
 };
+// ── 待回報標記:紅框「框當週那一格」,不框整條(2026-09-26 使用者決定) ─────────────
+// 原本 `ring-2 ring-red-400 ring-offset-1` 掛在條本身,而條寬＝整個計畫區間 → **紅框的音量跟排程長度走**:
+// 同樣是一件沒交的事,排一整年的案子紅框 1664px、排三個月的 352px,差 4.7 倍。實測成員(裕隆)視角
+// 6 個待回報的框線長度合計 14,552px、其中三個佔滿整個甘特區 98%,紅色從「指標」退化成「背景」,
+// 而且 1664px 寬的框**說不出是哪一週要交**。改成定寬一格後合計 600px(−96%),六個還會在當週線上排成一直行。
+// ⚠ 判斷邏輯完全沒動(`isPending`／`summary.pending`／`subPending` 照舊),動的只有畫在哪裡。
+// ⚠ 優先序維持「待回報 > 即將到期」:pending 時條本身不掛任何 ring(橘框不得補上來),
+//   否則 3 條同時 pending＋到期的會換成整條的橘框,等於白改(實測裕隆 6 條裡就有 3 條是這種)。
+//   到期在條上仍有 ⏰ emoji,藍色高亮則仍掛在條上(它要標的就是「整條」)。
+// ⚠ 位置用**畫布座標**(整列 weeksTotal 等分)不是條內座標:條掛 `overflow-hidden`,
+//   放進條裡的話外框會被裁掉。所以它是條的**兄弟節點**,由呼叫處給 top/bottom 對齊該列的條。
+// 🚨 **框是 inset `border-2` ＋ 12% 紅底,不是 `ring` + `ring-offset`**(2026-09-28 修):標記所在的那一格
+//   本來就已經有兩樣紅的東西——當週欄底 `bg-red-50/70` 與**畫在該欄正中央**的當週線 `rgba(220,38,38,.55)`
+//   (見甘特列的格線層)。初版 `ring-2 ring-red-400 ring-offset-1` 因此有三個問題,量出來是:
+//   ①`#F87171` 與當週線混色後的 `#EC8484` 對比只有 **1.08** → 一格裡三道等亮的紅直線,讀成「格線變粗」而不是標記;
+//   ②`#F87171` 對粉紅底只有 **2.60**(對白底 2.77),連圖形物件的 3:1 都不到,投影再打折;
+//   ③`ring-offset-1`＋`ring-2` 畫在 border box **外面** → 總覽 28.3px 的欄位上實際佔 34.3px,左右各溢出鄰欄 21%,
+//     一個專門用來說「是哪一週」的標記自己跨了三欄。
+//   現行 `#DC2626` 對粉紅底 **4.51**、對當週線 **1.87**(框比線重才分得出誰是誰),`box-border` 讓它剛好等於一欄。
+// 🚨 **12% 紅底不可省**:總覽的條只有 16px 高,只畫外框＝一個空方格(長區間的條名連同 ❗ 早就捲出畫面,
+//   那一格旁邊什麼線索都沒有);填了底才從「空框」變成「被標記的那一格」。
+// ⚠ `.dark .border-red-600` 要**映射成亮紅 `#F87171`**(input.css):深色下當週欄是 `#5B2323`,`#DC2626` 對它
+//   只剩 1.56——比改之前還差。深底要的是更亮的紅不是更深的紅(同 `.dark .text-red-600 → #FCA5A5` 的做法)。
+// 🚨 **條上不再畫 ❗ 前綴,待回報只剩這個紅框**(2026-09-28 使用者決定,推翻同月稍早的「❗ 維持不動」)。
+//   當初留 ❗ 的理由是「橫向捲走當週欄後,它還在說這一條有事」——但 ❗ 是畫在**條的起點**,
+//   而條常常橫跨大半年:起點早就捲出畫面,真正看得到的那一段反而什麼都沒有,等於一個看不到的提示。
+//   紅框則永遠落在**當週那一欄**,也就是使用者本來就在看的位置,訊號不會跑掉。
+// ⚠ 所以 ❗ 也不要改成「畫在條的可視段落」之類的補救:那是把一個記號做成兩種位置,更難讀;
+//   一個回報單位＝一個紅框,就這樣。⏰ 到期的 emoji **不受影響照舊**(它講的是整條的屬性,不是某一週)。
+const PendingMark = ({
+  weeksTotal,
+  week,
+  top,
+  bottom
+}) => /*#__PURE__*/React.createElement("div", {
+  className: "absolute pointer-events-none rounded-sm box-border border-2 border-red-600 bg-red-600/10 z-20",
+  "aria-hidden": "true",
+  style: {
+    left: `${(week - 1) * (100 / weeksTotal)}%`,
+    width: `${100 / weeksTotal}%`,
+    top,
+    bottom
+  }
+});
 // ⚠ 概況列的四顆狀態晶片是**純計數**,不是篩選鈕(2026-09-14 使用者決定移除篩選;2026-08-10 做了「未回報」、09-13 擴成四顆)。
 //   移除理由:篩出來的是 20 列整年甘特,主管還是不知道「哪一條」該交;「誰還沒交／誰沒做」看板已經回答得更好
 //   (每人「回報 0/5」＋複製待回報名單＋點卡片高亮那條)。同一件事兩條路只是多一套要學、多一堆特例要維護。
@@ -254,6 +305,47 @@ const NO_UNITS = Object.freeze({
   pending: [],
   completed: []
 }); // 「沒有待回報清單」的固定空值(非本年度／未來週)
+
+// --- 計畫區間分層(2026-09-22) ---
+// 同一專案的計畫區間全部絕對定位在同一格、上下邊界相同,週次一重疊後畫的就整段蓋掉先畫的:
+// 那幾週看不到色點、hover 不到、點不開,兩條同時待回報也只亮得出一個紅框——而且不會報錯,主管不會知道少看了一條。
+// 解法＝貪婪分層:依起始週掃過,放進第一個「與已放的條都不重疊」的層;重疊的才被推到下一層,各佔一列。
+// ⚠ 不重疊的專案永遠只有一層 → 渲染結果與分層前**完全相同**(導入時實測 69 案 0 案重疊,可直接用「畫面沒變」當回歸測試)。
+// ⚠ 排序依**起始週**而不是 Tasks.SortOrder(使用者 2026-09-22 決定):SortOrder 只有建立順序、畫面上沒有任何地方能調整,
+//    依它分層的話主管想把某條擺上面卻做不到;依起始週是甘特圖的自然讀法。同起始週再比迄週、最後比 id 保證穩定。
+// ⚠ 回傳至少一層(空陣列),沒有計畫區間的專案照樣要畫出那一列。
+const laneSplit = tasks => {
+  const sorted = [...(tasks || [])].sort((a, b) => a.start - b.start || a.end - b.end || (a.id > b.id ? 1 : a.id < b.id ? -1 : 0));
+  const lanes = [];
+  sorted.forEach(t => {
+    const lane = lanes.find(L => L.every(x => x.end < t.start || x.start > t.end));
+    if (lane) lane.push(t);else lanes.push([t]);
+  });
+  return lanes.length ? lanes : [[]];
+};
+// --- 專案列的「整體條」(2026-09-26 使用者決定) ---
+// 有重疊的專案收合時,專案列不畫各條、改畫「所有計畫區間的週次聯集」——長相與單一區間那條完全一樣,
+// 所以**每個專案收合後都只有一列**。⚠ 用聯集不是 min~max:中間真的沒排程的週要斷開,
+// 一條實心拉到底會暗示那段在做事(例:專案執行 W10–21＋驗收 W40–50,中間 18 週是空的)。
+// 相鄰(end+1 === next.start)也併成一段,免得兩段中間留一條看不出意義的細縫。
+const unionSpans = tasks => {
+  const out = [];
+  [...(tasks || [])].sort((a, b) => a.start - b.start || a.end - b.end).forEach(t => {
+    const last = out[out.length - 1];
+    if (last && t.start <= last.end + 1) last.end = Math.max(last.end, t.end);else out.push({
+      start: t.start,
+      end: t.end
+    });
+  });
+  return out;
+};
+// 一層的展開收合鍵＝該層第一條計畫區間的 id(層是算出來的、沒有自己的 id;第一條依起始週固定,不會因為新增別條而跳掉)
+const laneKeyOf = lane => lane && lane.length ? lane[0].id : null;
+// 某條計畫區間所屬的層鍵(看板點卡片要展開「那一條所在的層」而不是整個專案)
+const laneKeyOfTask = (tasks, taskId) => {
+  const lane = laneSplit(tasks).find(L => L.some(t => t.id === taskId));
+  return laneKeyOf(lane);
+};
 
 // --- 2. 資料來源:改由後端 API 讀寫 Gantt 資料庫 (取代原本寫死的 INITIAL_PROJECTS) ---
 // 自動偵測部署根路徑:本地為 ''(→ /api/...)、IIS 子應用程式(如 /Gantt/)則為 '/Gantt'(→ /Gantt/api/...)
@@ -348,6 +440,19 @@ const smoothScrollLeftTo = (el, left) => {
     if (Math.abs(el.scrollLeft - from) < 1 && Math.abs(target - from) >= 1) el.scrollTo(target, el.scrollTop);
   }, 250);
 };
+// 垂直版（↑↓ 捲動甘特版面）。保底邏輯與上面同一套，理由也一樣：smooth 在嵌入式／背景分頁可能靜默不推進。
+const smoothScrollTopTo = (el, top) => {
+  if (!el) return;
+  const from = el.scrollTop;
+  const target = Math.max(0, top);
+  el.scrollTo({
+    top: target,
+    behavior: 'smooth'
+  });
+  setTimeout(() => {
+    if (Math.abs(el.scrollTop - from) < 1 && Math.abs(target - from) >= 1) el.scrollTo(el.scrollLeft, target);
+  }, 250);
+};
 
 // --- 版面自適應(投影機/低解析度筆電) ---
 // 投影會議實測:1366×768 下「凍結欄 490 + 團隊看板 672」就吃掉 85% 畫面寬,中間甘特圖幾乎不剩。
@@ -373,7 +478,34 @@ const useViewportWidth = () => {
 // 登入／登出／關閉團隊看板都回到這個值,避免各處各寫一份而漂移。
 const defaultOwnerFilter = (role, user) => role === 'member' && user ? user : 'all';
 const STICKY_LEAD_W = 70; // 凍結欄前兩格:No(28)+分類(42)
-const nameColWidth = vw => Math.round(Math.min(420, Math.max(200, vw * 0.22))); // 專案名稱欄(1920→420=原值)
+// 成員群組列要多放「產出 x/y」所需的凍結欄寬(實測 2026-09-27,1920 主管週檢視):
+// 箭頭 16＋頭像 24＋姓名＋「n 項」38.1＋「本週回報 x/y」148.8＋「產出 x/y」74.8＋「＋ 新增專案」70.5＋間距
+// ＝ **462.2**,而凍結欄內寬 ≈ frozenW − 5。
+// ⚠ 這一列在 1366 下**本來就超編**:不含產出晶片就要 379.4,可用只有 366 → 「本週回報 0/12」早就折成兩行
+//   (群組列 37px → 51px,與本次修改無關)。所以窄螢幕不是「要不要擠進去」而是「本來就擠不下」,一律不顯示,
+//   免得再多推一項。逐列的空心/實心靶不受影響,任何寬度都在。
+const GROUP_DELIV_MIN_FROZEN_W = 470;
+const nameColWidth = vw => Math.round(Math.min(420, Math.max(200, vw * 0.22))); // 專案名稱欄的**自動**寬(1920→420=原值)
+// ── 名稱欄可由使用者拖曳調寬(表頭右緣的把手;存 gantt_prefs.nameColW,null＝沿用上面的自動值) ──────────
+// 2026-09-28 新增。起因:名稱欄的**固定開銷**在最壞情況會吃掉 ~243px(px-2 16＋⠿ 17＋類型晶片 30＋
+// 「▸ n 條區間」78＋「⏰ 剩N週」78＋🎯 24),1920 下 420 的欄寬只剩 **~115px ≈ 7 個中文字**給專案名——
+// 而那恰好是最需要看清楚名字的列(多條區間又快到期)。
+// 🚨 **為什麼是「可調」而不是把 420 改成更大的固定值**:
+//   ①名稱長度是**資料**決定的,而同一份程式發佈到四個站台(MSD／IMD／EMS1／EMS2),命名習慣差很多
+//     ——`b.[FDC Enhancement for R…]` 這種帶前綴＋方括號的長名是 MSD 的習慣,對名稱短的群組加寬就是白吃甘特。
+//   ②它是**零和**的:緊湊模式的 weekW 直接吃它(見 fitWeekW),名稱欄每加 53px、週欄就少 1px。
+//     這個交換「今天在找專案 vs 今天在看排程」只有使用者自己判斷得準。
+// ⚠ 被否決的替代方案(勿再提):名稱換行成兩行(列高 40 塞不下 15px×2,且有／無換行的列高不一致
+//   ＝「只有某些列才有的差異會被讀成壞掉」);縮掉 ⏰ 或 🎯(兩者都是使用者明確定案過的,見下方 projNameInner)。
+// ⚠ 上限 640 是**實測邊界**:1926 緊湊下 fitWeekW 仍算得到 22(=WEEK_W_COMPACT_MIN)＝整年一畫面保得住,
+//   再寬就會吐橫向捲軸。下限沿用自動值的 200(ladderStep／subParentChipW 的 300 門檻邏輯因此完全不必動)。
+// ⚠ 上限還要再吃一層 `viewportW * 0.4`:偏好是存在「這台電腦」上的,桌機存了 640、接上 1024 投影機時
+//   原樣套過去會讓凍結欄佔掉 69% 畫面。1024→410／1366→546／1920→640。
+const NAME_COL_MIN = 200;
+const NAME_COL_MAX = 640;
+const NAME_COL_KEY_STEP = 20; // 鍵盤 ←→ 的級距(Shift 為 5px 微調)
+const nameColLimit = vw => Math.max(NAME_COL_MIN, Math.min(NAME_COL_MAX, Math.round(vw * 0.4)));
+const clampNameCol = (w, vw) => Math.max(NAME_COL_MIN, Math.min(nameColLimit(vw), Math.round(w)));
 const WEEK_W_RELAXED = 32; // 週檢視寬鬆模式的週欄寬(固定,橫向捲)
 const WEEK_W_COMPACT_MIN = 22; // 緊湊模式的週欄下限;整年塞得下時會放大到最多 WEEK_W_RELAXED(見 App 內 weekW)
 const SCROLLBAR_W = 17; // Windows 傳統垂直捲軸寬,算「塞不塞得下」時要扣掉
@@ -382,15 +514,25 @@ const reportPanelWidth = vw => Math.round(Math.min(672, Math.max(400, vw * 0.35)
 
 // 兩條工具列「全部控制項攤開」所需的自然寬度(實測值,主管+週檢視=最寬的情況)。
 // 主內容區可用寬(availW)低於它就必須收起「找資料」那組,否則 flex-nowrap + overflow-x-auto
-// 會吐出橫向捲軸——實測 概況列 1188、控制列 1338,故 1280 溢出 58、1024 溢出 164/314。
+// 會吐出橫向捲軸。
 // ⚠ 原本收控制項**只看看板是否開啟**,完全不看視窗本身多寬 → 1366 以下的筆電/投影機一律中招,
 //   而這正是本專案最在意的環境(看板沒開時反而沒有任何保護)。
-// ⚠ 兩條分開設門檻,不要合成一個:概況列只要 1188,若跟著控制列的 1345 一起收,
-//   1280 會白白失去還放得下的全隊狀態晶片。
+// ⚠ 兩條分開設門檻,不要合成一個:概況列需要的比控制列少,跟著一起收會白白失去還放得下的狀態晶片。
 // ⚠ 值可略高於實測值留餘裕(中文字寬會隨字體載入狀態浮動),但**絕不可高到 1366 也被收**:
 //   1366 是投影機基準解析度,它放得下完整工具列,收掉只會讓投影情境比現在更差。
-const STATS_BAR_FULL_W = 1200; // 第一條:概況數字＋全隊狀態晶片＋圖例＋鍵盤提示
-const TOOLBAR_FULL_W = 1345; // 第二條:搜尋框＋a~e 晶片＋成員/年度/檢視/密度/補登/展開收合
+// 🚨 **門檻過高等於白收**(2026-09-26 實測修正):舊值 1200/1345 是 2026-09-13 之前量的,當時工具列還有
+//   「展開｜收合」＋「子區間 ▾｜▸」四顆文字鈕、補登總開關、六字類型晶片;那批收進「顯示 ▾」與 ⚙️ 管理之後
+//   工具列已經瘦了近 180px,常數卻沒跟著降 → 1920 開看板(availW 1248)收掉搜尋框＋晶片共 528px,
+//   收完卻留下 **674px 的空白 flex-1**(實測),1280 筆電連看板都沒開也一樣收。
+//   現行值＝逐項量測的自然寬度:概況列 **1085**、工具列 **1165**(選中一顆類型晶片、多出「清除」鈕的
+//   最壞情況為 **1199**),各留約 40px 給中文字寬浮動。要再調整前**先量一次**(見下方 availW 附近的量法)。
+const STATS_BAR_FULL_W = 1120; // 第一條:概況數字＋全隊狀態晶片＋圖例＋鍵盤提示(實測需 1085)
+const TOOLBAR_FULL_W = 1240; // 第二條:搜尋框＋a~e 晶片＋成員/年度/檢視/密度/展開收合(實測最壞 1199)
+// 搜尋框自己的門檻(**比 TOOLBAR_FULL_W 低很多**):工具列改成兩段式收合——
+// 空間不足時先收「a~e 類型晶片」(386px,低頻,且搜尋框本來就能取代它),搜尋框留到最後才收。
+// 理由:搜尋框是 80 列裡找專案的唯一快速路徑,而它只佔 176px;收掉晶片之後整條只需要 ~810px,
+// 在 1024 甚至 1920+看板(availW 1248)都放得下,沒有理由跟著晶片一起消失。
+const TOOLBAR_SEARCH_W = 860; // 低於它才連搜尋框一起收(收完仍需 ~630px)
 // 概況列的「極窄」門檻:收掉狀態晶片與鍵盤提示之後,這排仍有三塊不可刪的東西——
 // 標題 118＋進度條 150＋圖例 302,加上 padding 32 與 3 個 gap 36 = **646**。
 // 1024 投影機開看板時 availW 只有 624 → 溢位 22px,那一列自己吐出橫向捲軸(實測)。
@@ -411,6 +553,25 @@ const STATS_BAR_MIN_W = 700;
 const MIN_OVERVIEW_WEEK_W = 20;
 // ⏰ 即將到期的「時程已過 70%」規則另加「剩餘 ≤ 這個週數」的上限(見 isTaskDeadlineSoon)
 const DEADLINE_RATIO_MAX_REMAIN = 4;
+// 甘特凍結欄的展開/收合晶片(子區間「▾ n」、重疊專案的「▸ n 條區間」)——**三處共用同一份**,
+// 分開寫的話下次只會改到其中一個(2026-09-26 的點擊區就是這樣漏掉的)。
+// 🚨 **顏色綁「它會展開出什麼」,不是兩層共用一色**(2026-09-26 使用者回報「左半部下拉都是藍色很混亂」):
+//   kind='sub' → **teal**,展開出來的子條就是 teal;kind='proj' → **sky**,展開出來的是計畫區間列。
+//   原本兩層同色(全 sky),當初的註解還寫著「使用者不必分辨」——實際用起來正好相反:同一個專案區塊裡
+//   四顆一模一樣的藍膠囊排在四個縮排上,點下去展開的卻是不同階層的東西。實測全表 16 顆裡 **13 顆是子區間層**,
+//   改色後整張表只剩 3 顆藍的(就是真正的專案層),而且 teal 晶片會**預告**展開後出現的 teal 子條＝自我說明。
+// ⚠ 專案層**不要改用琥珀**(雖然它展開出來的是琥珀色的計畫區間條):收合的重疊專案同一列還會有
+//   `⏰ 剩N週` 橘晶片(實測 3 顆專案層晶片裡有 2 顆是這種),再加上最左邊的 `B` 類型晶片(yellow),
+//   一列會變成三顆黃橘色的東西。sky 與這兩者都分得開,留著。
+// ⚠ teal 與 `c.` 類型晶片(`bg-teal-100 text-teal-800 border-teal-400`)同色系:實測目前 9 個 c 型專案
+//   **沒有任何一個有子區間**,且兩者一個在名稱最左(x≈100)、一個在名稱之後(x≈425),不會相鄰。
+//   日後若出現 c 型＋子區間的專案再看要不要處理,現在不為它多開一個色相。
+// ⚠ 點擊區高度 24px(WCAG 2.5.8 AA):py-1.5＋文字 10px＋上下框線＝24,-my-2 抵銷掉多出來的 padding
+//   所以**列高完全不變**(與 🎯 產出鈕 -my-1.5/py-1.5 同一種寫法,實測列高 40／28 不變)。
+//   原本是 py-1/-my-1 ＝ 20px,低於全站自訂的 24 下限。
+// ⚠ 年度總覽維持 20px:那裡父列只有 24px 高,塞 24px 的晶片會與列的上下邊界完全貼齊;
+//   總覽的核心前提是「整年一畫面」,與「甘特條 15px 刻意不加高」同一個取捨。
+const laneChipCls = (isOverview, kind = 'sub') => `flex-shrink-0 ml-1 px-1.5 rounded-full text-[10px] font-bold leading-none whitespace-nowrap border transition disabled:cursor-default ${kind === 'proj' ? 'bg-sky-100 text-sky-800 border-sky-300 hover:bg-sky-200' : 'bg-teal-100 text-teal-800 border-teal-300 hover:bg-teal-200'} ${isOverview ? 'py-1 -my-1' : 'py-1.5 -my-2'}`;
 
 // 彈窗「未儲存內容」旗標:表單型視窗(打卡/非專案/下週預計/產出/專案/區間)輸入時設 true、
 // 視窗卸載時自動清除;ESC 關窗前檢查,避免打到一半的內容被默默丟棄
@@ -531,15 +692,35 @@ const CloseButton = ({
 // 主管讀週報時最常做的下一個動作就是「去把那份文件打開」,原本得自己去信件/檔案總管翻;
 // 回報時順手貼上連結,看板與彈窗就能直接點開。
 const DOC_URL_MAX = 500; // 與 WeeklyLogs.DocUrl NVARCHAR(500) 一致
+// 🚨 **檢查之前一定要先正規化**(2026-09-28 修):`canonUrl` 做的兩件事就是 WHATWG URL parser 的前置處理——
+//    ①去掉頭尾的 C0 控制字元與空白 ②移除字串中所有 tab／CR／LF。瀏覽器本來就會做,所以對正常網址、
+//    以及含空白的檔案路徑(`\\server\share\my file.xlsx`)**完全不改變結果**(注意:只移除 tab/CR/LF,
+//    不能連「路徑中間的空白」一起清掉,那會拆掉合法路徑)。
+//    不先做的話,下面的 scheme 檢查形同虛設:實測 8 個 payload 有 **7 個繞過**,而瀏覽器照樣還原成 javascript:／data: ——
+//      `java\tscript:` `java\nscript:` `java\rscript:` `javascript:` `\0javascript:` `JaVaScRi\tpt:` `dat\ta:`
+//    當時唯一擋住它的是 DocLink 的 `target="_blank"`(Chrome 禁止在新分頁做 javascript:/data: 頂層導覽);
+//    同一個 href 掛在沒有 target 的 <a> 上實測就會執行——也就是說防線其實是瀏覽器政策,不是這支驗證。
+// ⚠ **維持 blocklist、不要改成 scheme 白名單**:實測既有資料裡有 `Notes://…`(Lotus Notes),
+//    企業內會用到的自訂 scheme 無法事先列舉,白名單會直接擋掉使用者已經在用的連結。
+// ⚠ 三個地方要吃同一份正規化(驗證／產生 href／送出前),否則會變成「驗的是 A、渲染的是 B」。
+//    後端 ValidateDocUrl／CanonDocUrl 是同一套規則,**兩邊要一起改**。
+// ⚠ `.trim()` 不可省(2026-09-29 修):後端 CanonUrl 第一步就是 `.Trim()`,它吃得到**全形空白／nbsp** 等
+//    非 ASCII 的 Unicode 空白,而下面的 `[\x00-\x20]` 只涵蓋 ASCII。少了它兩邊規則就不一致——
+//    實測 `\u3000portal.company.com/doc/1`(中文輸入法很容易貼進來的全形空白)不會被補上 https://,
+//    href 變成相對路徑 → 點下去 404;而後端仍會把它 Trim 掉,變成「驗的是 A、存的是 B」。
+// ⚠ 字元類別寫 `\x00-\x20` 的**轉義**、不要放字面控制字元:字面 NUL 會讓整個檔案被 grep／ripgrep
+//    判定為 binary 而整份跳過(搜不到任何東西),語意則完全相同。
+const canonUrl = u => String(u ?? '').trim().replace(/^[\x00-\x20]+|[\x00-\x20]+$/g, '') // 頭尾的 C0 控制字元與空白(parser 會剝掉)
+.replace(/[\t\n\r]/g, ''); // 字串中所有 tab/CR/LF(parser 會整個移除)
 // 🚨 這個值會被放進 <a href>,而且是「主管一定會點」的連結——不擋等於一個儲存型 XSS。
 //    後端 /api/weekly-log 也擋一次(這裡擋不住直接打 API 的情況)。
-const isUnsafeUrl = u => /^\s*(javascript|data|vbscript)\s*:/i.test(u || '');
+const isUnsafeUrl = u => /^(javascript|data|vbscript)\s*:/i.test(canonUrl(u));
 const isHttpUrl = u => /^https?:\/\//i.test((u || '').trim());
 // 使用者常直接貼「portal.company.com/doc/1」這種沒有 scheme 的網址。原樣放進 href 會被當成
 // **相對路徑** → 點下去跳到本站的 /portal.company.com/doc/1(404),而且看起來像系統壞了。
 // 看起來像網域就補上 https://;UNC(\\server\share)與磁碟路徑(C:\…)原樣保留。
 const normalizeDocUrl = raw => {
-  const s = (raw || '').trim();
+  const s = canonUrl(raw); // 送出／存檔的值也走同一份正規化:存進 DB 的就是被驗過的那個字串
   if (!s) return '';
   if (/^[a-z][\w+.-]*:/i.test(s) || s.startsWith('\\\\') || s.startsWith('/')) return s;
   return /^[\w-]+(\.[\w-]+)+([/?#]|$)/.test(s) ? `https://${s}` : s;
@@ -584,7 +765,7 @@ const copyToClipboard = async text => {
 // ⚠ 沒有文字 → **aria-label 是唯一的可及名稱**,讀螢幕器只念得出「連結」的話這個功能等於不存在。
 //    title 另外帶完整網址,滑鼠使用者 hover 就知道會去哪,不必先點下去試。
 const toDocHref = raw => {
-  const s = (raw || '').trim();
+  const s = canonUrl(raw); // 與 isUnsafeUrl 驗的是同一個字串:驗過什麼就渲染什麼
   if (!s) return '';
   const enc = p => p.replace(/\\/g, '/').replace(/ /g, '%20'); // 反斜線轉正斜線、空白轉義
   // ⚠ 磁碟機代號要**排在 scheme 判斷之前**:`C:\Docs\a.docx` 的開頭 `C:` 會被當成合法 scheme,
@@ -693,6 +874,54 @@ const DocUrlField = ({
   className: "text-slate-600"
 }, "\uFF08\u7DB2\u8DEF\u78C1\u789F\uFF0F\u672C\u6A5F\u8DEF\u5F91\u8981\u700F\u89BD\u5668\u653F\u7B56\u5141\u8A31\u624D\u958B\u5F97\u8D77\u4F86\uFF0C\u5EFA\u8B70\u512A\u5148\u8CBC http/https \u7DB2\u5740\uFF09")));
 
+// roving tabindex 的共用屬性。同一組元素只留一個 Tab 停留點,組內改用 **Alt+↑↓** 移動(WAI-ARIA 的標準做法)。
+// 用法:①非 <button> 的元素走 clickable 的 opts.roving ②一般 <button> 直接展開這個回傳值
+//       (例:甘特凍結欄那 70 顆 🎯 產出鈕)。兩邊共用同一份實作,下次改只改這裡。
+// roving = { active, group, id, onRove };baseKeyDown = 元素原本的 onKeyDown(會被包在後面繼續呼叫)。
+// ⚠ 一組一個 group 字串,`move()` 靠 `[data-roving-group="…"]` 取得 DOM 順序,所以**渲染順序＝移動順序**。
+const rovingProps = (roving, baseKeyDown) => {
+  const props = {
+    tabIndex: roving.active ? 0 : -1,
+    'data-roving-group': roving.group,
+    'data-roving-id': String(roving.id)
+  };
+  const move = (el, dir) => {
+    const all = [...document.querySelectorAll(`[data-roving-group="${roving.group}"]`)];
+    const i = all.indexOf(el);
+    if (i < 0) return;
+    const next = all[Math.min(all.length - 1, Math.max(0, i + dir))];
+    if (!next || next === el) return;
+    // ⚠ 捲動方式**明確寫死 nearest**,不靠 focus() 的預設值:甘特條是絕對定位在自己那幾週上,
+    //   一旦被捲成 'center' 之類,使用者剛用 ←→ 平移到 W39、按個 Alt+↑↓ 換條就會被扯到別的月份。
+    //   'nearest' ＝已經看得到的目標完全不捲動,只有真的超出可視範圍才做最小幅度的修正(才看得到焦點在哪)。
+    next.focus({
+      preventScroll: true
+    });
+    next.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest'
+    });
+    // ⚠ 一定要在這裡把 tab stop 也移過去,不能只靠元素的 onFocus:
+    //   焦點事件在「文件本身沒有焦點」時不會派送(背景分頁、嵌入式檢視),
+    //   那時 tab stop 會留在原地 → 使用者 Tab 出去再回來會被丟回第一個。
+    if (roving.onRove) roving.onRove(next.getAttribute('data-roving-id'));
+  };
+  props.onKeyDown = e => {
+    // ⚠ 組內移動是 **Alt+↑↓**,不是純 ↑↓(2026-09-26 使用者指正後改):純 ↑↓ 已經是全域「上下捲動甘特版面」,
+    //   同一顆鍵不能有兩種行為——點條開彈窗、ESC 關閉後焦點會被還原到那條,此時按 ↑↓ 若變成跳條,
+    //   使用者只會覺得快捷鍵時好時壞。←→ 同理不收(那是全域平移),故組內移動只認帶 Alt 的組合。
+    //   這是純鍵盤使用者穿越 100+ 個目標的唯一路徑(整組只有一個 Tab 停留點),不可以拿掉。
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && e.altKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      move(e.currentTarget, e.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+    if (baseKeyDown) baseKeyDown(e);
+  };
+  return props;
+};
+
 // 讓非 <button> 的互動元素(表格的 th/tr、絕對定位的甘特條、看板卡片)也能用鍵盤操作。
 // 用法:<div {...clickable(() => open(), '開啟 XXX')}>。
 // 為什麼不直接改寫成 <button>:th/tr 換掉會破壞 table 結構(sticky 表頭、欄寬、斑馬紋全靠它),
@@ -716,38 +945,10 @@ const clickable = (onActivate, label, opts = {}) => {
     props['aria-label'] = label;
   }
   if (opts.expanded !== undefined) props['aria-expanded'] = opts.expanded;
-  // roving tabindex:同一組元素只留一個 Tab 停留點,組內改用方向鍵移動(WAI-ARIA 的標準做法)。
-  // 甘特條有 107 個,全部 tabIndex=0 的話鍵盤使用者要按 107 次 Tab 才穿得過甘特區。
-  // opts.roving = { active, group }:active=false 就退出 Tab 順序(仍可被程式 focus)。
-  if (opts.roving) {
-    props.tabIndex = opts.roving.active ? 0 : -1;
-    props['data-roving-group'] = opts.roving.group;
-    props['data-roving-id'] = String(opts.roving.id);
-    const move = (el, dir) => {
-      const all = [...document.querySelectorAll(`[data-roving-group="${opts.roving.group}"]`)];
-      const i = all.indexOf(el);
-      if (i < 0) return;
-      const next = all[Math.min(all.length - 1, Math.max(0, i + dir))];
-      if (!next || next === el) return;
-      next.focus();
-      // ⚠ 一定要在這裡把 tab stop 也移過去,不能只靠元素的 onFocus:
-      //   焦點事件在「文件本身沒有焦點」時不會派送(背景分頁、嵌入式檢視),
-      //   那時 tab stop 會留在原地 → 使用者 Tab 出去再回來會被丟回第一條。
-      if (opts.roving.onRove) opts.roving.onRove(next.getAttribute('data-roving-id'));
-    };
-    const baseKeyDown = props.onKeyDown;
-    props.onKeyDown = e => {
-      // ⚠ 只收 ↑↓:←→ 是全域「平移甘特 4 週」的快捷鍵,佔用會拿掉一個沒有替代路徑的操作。
-      //   ↑↓ 在此沒有其他用途,拿來做組內移動不會撞到任何既有行為。
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        e.stopPropagation();
-        move(e.currentTarget, e.key === 'ArrowDown' ? 1 : -1);
-        return;
-      }
-      if (baseKeyDown) baseKeyDown(e);
-    };
-  }
+  // roving tabindex(實作見上方 rovingProps):甘特條有 107 個,全部 tabIndex=0 的話
+  // 鍵盤使用者要按 107 次 Tab 才穿得過甘特區。opts.roving = { active, group, id, onRove };
+  // active=false 就退出 Tab 順序(仍可被程式 focus)。
+  if (opts.roving) Object.assign(props, rovingProps(opts.roving, props.onKeyDown));
   return props;
 };
 
@@ -815,8 +1016,10 @@ const WeekNumberInput = ({
         setDraft(String(week));
         e.currentTarget.blur();
       }
-    },
-    className: "week-input w-9 bg-transparent border-0 border-b border-dashed border-white/40 hover:border-white/80 focus:border-solid text-center font-bold text-sm tracking-wider p-0 outline-none",
+    }
+    /* h-6:點擊區下限 24px(WCAG 2.5.8 AA;w-9＝36 本來就夠)。header 的內容高度上限是 26px 的按鈕,
+       補到 24 不會撐高 header;虛線底線跟著往下 3px,數字仍是垂直置中。 */,
+    className: "week-input w-9 h-6 bg-transparent border-0 border-b border-dashed border-white/40 hover:border-white/80 focus:border-solid text-center font-bold text-sm tracking-wider p-0 outline-none",
     style: {
       color: GOLD
     }
@@ -828,12 +1031,22 @@ const WeekNumberInput = ({
 //   ①開啟時把焦點移進彈窗——已有 autoFocus 的輸入欄優先,不搶走;沒有就聚焦容器本身(tabIndex=-1),
 //     刻意不自動聚焦第一顆按鈕,免得使用者一按 Enter 就誤觸「關閉」或「刪除」
 //   ②Tab / Shift+Tab 在彈窗內循環,不會跑到背景
-//   ③關閉時把焦點還原到原本的觸發元素(該元素可能已隨刪除消失,故 try/catch)
+//   ③關閉時把焦點還原到原本的觸發元素(該元素可能已隨刪除消失,故 try/catch);
+//     ⚠ 觸發元素是在 render 當下記的,不是 effect 裡——原因見下方 prevRef 的註解(autoFocus 比 effect 早)
 const FOCUSABLE_SEL = 'button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])';
 const useModalFocus = () => {
   const ref = useRef(null);
+  // 🚨 觸發元素必須在 **render 當下** 就記起來,不可以等到 effect 裡才讀 document.activeElement(2026-09-27 修)。
+  //   React 在 **commit 階段** 就會套用彈窗內欄位的 `autoFocus`,而 effect 比它晚跑 → effect 讀到的
+  //   activeElement 已經是彈窗自己的 input/textarea;關窗時那個元素早已從 DOM 移除,
+  //   `document.contains(prev)` 為 false → 整個還原被略過,焦點掉回 <body>。
+  //   ⚠ 實測:從永遠看得見的 🎯 產出鈕開啟「具體產出」彈窗再關閉,焦點還原到的是 BODY 不是 🎯——
+  //   也就是說這個 hook 對**所有帶 autoFocus 欄位的彈窗**(全站多數)其實從來沒還原成功過,
+  //   只有不帶 autoFocus 的那幾個看起來正常。鍵盤使用者每關一次視窗就被丟回頁首、要從頭 Tab。
+  const prevRef = useRef(undefined);
+  if (prevRef.current === undefined) prevRef.current = document.activeElement;
   React.useEffect(() => {
-    const prev = document.activeElement;
+    const prev = prevRef.current;
     const el = ref.current;
     // 等 autoFocus 生效後再判斷要不要接手
     const t = setTimeout(() => {
@@ -844,7 +1057,18 @@ const useModalFocus = () => {
     return () => {
       clearTimeout(t);
       try {
-        if (prev && document.contains(prev)) prev.focus({
+        if (!prev || !document.contains(prev)) return;
+        // ⚠ 觸發元素可能在視窗開著的期間「還在 DOM 裡但已經不再顯示」(2026-09-27 修):
+        //   甘特列的 ＋／✎／🗑 是 `hidden group-hover/row:flex group-focus-within/row:flex`——焦點一進彈窗,
+        //   那一列就不再 focus-within → 三顆鈕變回 display:none。對 display:none 的元素呼叫 focus() 是 **no-op**,
+        //   而 `document.contains()` 仍然為 true 擋不住 → 關窗後 activeElement 掉回 <body>,鍵盤使用者被丟回頁首。
+        //   (用 getClientRects().length 判斷「有沒有被繪製」,不用 offsetParent:後者對 position:fixed 的元素
+        //    即使看得見也是 null,會誤判。)
+        //   退路＝聚焦**同一列裡還看得見的第一個可聚焦元素**(甘特列就是 ▾ n 晶片或 🎯 產出鈕);
+        //   焦點回到該列後 focus-within 成立,三顆鈕又會現形,Shift+Tab 就能回去接著操作。
+        const shown = n => n && n.getClientRects().length > 0;
+        const target = shown(prev) ? prev : [...(prev.closest('tr') || document.createDocumentFragment()).querySelectorAll(FOCUSABLE_SEL)].find(shown);
+        if (target) target.focus({
           preventScroll: true
         });
       } catch (e) {}
@@ -879,6 +1103,39 @@ const useModalFocus = () => {
     ref,
     onKeyDown,
     tabIndex: -1
+  };
+};
+
+// 清單面板「選一項 → 開彈窗 → 關閉後回到清單」時,把捲動位置與焦點還原回去(2026-09-27 P1)。
+// 面板在開窗時是被**卸載**的(不是隱藏),捲動位置與 DOM 節點都不存在了,所以 `useModalFocus` 的
+// 焦點還原也救不到這條路徑(觸發元素已不在 document 裡)——必須由重新掛載的面板自己還原。
+// 用法:`const list = useListRestore(restore);` → 捲動容器掛 `ref={list.scrollerRef}`、
+//       每個項目按鈕掛 `data-row-key={key}`、選取時把 `list.capture(key)` 交給 App 記住。
+const useListRestore = restore => {
+  const scrollerRef = useRef(null);
+  const capture = key => ({
+    scroll: scrollerRef.current?.scrollTop || 0,
+    key: key == null ? null : String(key)
+  });
+  React.useEffect(() => {
+    if (!restore) return;
+    const el = scrollerRef.current;
+    if (!el) return;
+    // ⚠ 先還原捲動再聚焦:focus() 會自己把元素捲進可視範圍,順序反了會把剛設好的 scrollTop 覆蓋掉
+    if (restore.scroll) el.scrollTop = restore.scroll;
+    if (restore.key != null) {
+      // ⚠ key 可能含 `[`、`.`、空白(專案名/區間代號),一定要 CSS.escape 才選得到
+      const row = el.querySelector(`[data-row-key="${CSS.escape(restore.key)}"]`);
+      // ⚠ 這裡的 focus 不會被 useModalFocus 搶走:它的 setTimeout(0) 只在「焦點還不在容器內」時才接手,
+      //    而這一列就在容器裡面
+      if (row) row.focus({
+        preventScroll: true
+      });
+    }
+  }, []);
+  return {
+    scrollerRef,
+    capture
   };
 };
 
@@ -1313,38 +1570,71 @@ function App() {
     site: siteName
   };
   const [isCompact, setIsCompact] = useState(() => readPrefs().compact === true); // 緊湊模式偏好:重整後沿用
+  // 名稱欄的使用者寬度(表頭右緣拖曳把手;null＝沿用 nameColWidth 的自動值)。詳見 NAME_COL_MIN 上方的說明。
+  const [nameColUserW, setNameColUserW] = useState(() => {
+    const w = readPrefs().nameColW;
+    return typeof w === 'number' && isFinite(w) ? w : null;
+  });
   const [isOverview, setIsOverview] = useState(false); // 年度總覽:52 週自動縮放進一個畫面寬,無水平捲軸(唯讀瀏覽視角)
   const [isResults, setIsResults] = useState(false); // 成果清單:集中檢閱所有專案具體成果項目與 MP 節省統計
   const [collapsedOwners, setCollapsedOwners] = useState(new Set());
   // 子區間列的展開/收合(遷移 18)。預設值依檢視而異:
   //   週檢視=有子區間就展開(主管要看的就是這個);年度總覽=收合(「整年一畫面」是核心前提,69 案再各加幾列會撐長)。
-  // 兩邊各記「偏離預設」的專案 id 並持久化到 gantt_prefs:主管收過的下次開還是收的。
+  // 兩邊各記「偏離預設」的鍵並持久化到 gantt_prefs:主管收過的下次開還是收的。
+  // ⚠ 鍵在 2026-09-22(計畫區間分層)由「專案 id」改成「層鍵＝該層第一條計畫區間的 id」:
+  //   分層後一列＝一條(或一組不重疊的)計畫區間,展開收合當然也要以列為單位,否則點一次會把三條的子區間全部倒出來。
+  //   舊值是專案 id、換算不了 → 由下方的 prefs 版本轉換一次性換成計畫區間 id(使用者無感,維持他原本收合的那幾案)。
   const [subCollapsedWeek, setSubCollapsedWeek] = useState(() => new Set(readPrefs().subCollapsed || []));
   const [subExpandedOverview, setSubExpandedOverview] = useState(() => new Set(readPrefs().subExpandedOv || []));
-  // 搜尋命中子區間名稱的專案一律視為展開(subSearchHits 在下方篩選區宣告;只在 render 時呼叫,不會踩到 TDZ)
-  const isSubExpanded = projId => subSearchHits.has(projId) || (isOverview ? subExpandedOverview.has(projId) : !subCollapsedWeek.has(projId));
-  const toggleSubExpanded = projId => {
+  // 專案層的展開收合(2026-09-26 使用者決定):**只有「週次重疊」的專案用得到**。
+  //   收合 → 專案列畫一條整體條(unionSpans),整個專案就一列;展開 → 原本的計畫區間降一層、每條一列(＋各自的子區間)。
+  //   沒有重疊的專案沒有這一層,畫法與今天逐像素相同(加一條子區間仍只多一列)。
+  // ⚠ 與 2026-09-25 拆掉的 WBS 模式的差別:那一版**不分重疊與否都多一層**,而且專案列是把每條再畫一次(名字重複兩遍);
+  //   這一版專案列畫的是**涵蓋範圍**(一條),資訊上不重複,且只有重疊的專案才有中間層。
+  // ⚠ 兩種檢視共用同一份(鍵＝專案 id):展開狀態與「在哪個檢視」無關,分兩份只會讓使用者切檢視時發現又收起來了。
+  const [projExpanded, setProjExpanded] = useState(() => new Set(readPrefs().projExpanded || []));
+  // 搜尋命中底下的區間／子區間時暫時視為展開(projSearchHits 在下方篩選區宣告,只在 render 時呼叫)
+  const isProjOpen = projId => projSearchHits.has(projId) || projExpanded.has(projId);
+  const toggleProjOpen = projId => {
+    setProjExpanded(prev => {
+      const n = new Set(prev);
+      n.has(projId) ? n.delete(projId) : n.add(projId);
+      savePref('projExpanded', [...n]);
+      return n;
+    });
+  };
+  // 搜尋命中子區間名稱的層一律視為展開(subSearchHits 在下方篩選區宣告;只在 render 時呼叫,不會踩到 TDZ)
+  const isLaneExpanded = laneKey => subSearchHits.has(laneKey) || (isOverview ? subExpandedOverview.has(laneKey) : !subCollapsedWeek.has(laneKey));
+  const toggleLaneExpanded = laneKey => {
     if (isOverview) {
       setSubExpandedOverview(prev => {
         const n = new Set(prev);
-        n.has(projId) ? n.delete(projId) : n.add(projId);
+        n.has(laneKey) ? n.delete(laneKey) : n.add(laneKey);
         savePref('subExpandedOv', [...n]);
         return n;
       });
     } else {
       setSubCollapsedWeek(prev => {
         const n = new Set(prev);
-        n.has(projId) ? n.delete(projId) : n.add(projId);
+        n.has(laneKey) ? n.delete(laneKey) : n.add(laneKey);
         savePref('subCollapsed', [...n]);
         return n;
       });
     }
   };
-  // 全域「子區間 ▾｜▸」(工具列「展開｜收合」旁):一案一案按 ▾ n 太慢(每案 3 條子區間＝表格高度翻三倍)。
-  // 兩份 prefs 記的是「偏離預設」:週檢視預設展開 → 全收＝把所有帶子區間的案子塞進 subCollapsed;
+  // 全域「子區間 ▾｜▸」(工具列「顯示 ▾」選單內):一層一層按 ▾ n 太慢(每案 3 條子區間＝表格高度翻三倍)。
+  // 兩份 prefs 記的是「偏離預設」:週檢視預設展開 → 全收＝把所有帶子區間的層塞進 subCollapsed;
   // 年度總覽預設收合 → 全展＝把它們塞進 subExpandedOv。另一個方向都是清空。
+  // 🚨 鍵＝**層鍵**(`laneKeyOf`＝該層**第一條**計畫區間的 id),不是「帶子區間的那一條」的 id(2026-09-29 修)。
+  //    一層裡可以有好幾條互不重疊的區間(貪婪分層本來就會把它們塞進同一層),第一條卻不一定有子區間——
+  //    直接推 `t.id` 的話那一層的鍵根本不在集合裡,「收合全部」對它完全沒作用(實測 13 層中 1 層:
+  //    lane 0 =「SPEC 提供1」+「[測試] 測試C機台」,層鍵是前者、子區間掛在後者 → 按了收合全部仍展開著)。
+  //    ⚠ 同一個錯誤原本還在 handleHighlightTask 與 subSearchHits,三處要一起看(都改用 laneSplit/laneKeyOf)。
   const setAllSubExpanded = expanded => {
-    const withSubs = projects.filter(p => p.tasks.some(t => (t.subs || []).length > 0)).map(p => p.id);
+    const withSubs = [];
+    projects.forEach(p => laneSplit(p.tasks).forEach(lane => {
+      if (lane.some(t => (t.subs || []).length > 0)) withSubs.push(laneKeyOf(lane));
+    }));
     if (isOverview) {
       const n = new Set(expanded ? withSubs : []);
       setSubExpandedOverview(n);
@@ -1354,7 +1644,37 @@ function App() {
       setSubCollapsedWeek(n);
       savePref('subCollapsed', [...n]);
     }
+    // 子區間要看得到,它上面那條計畫區間也得先出現——重疊的專案收合時只有一條整體條,底下什麼都沒有。
+    // 反過來「收合全部」時也把專案層一起收,才真的是一案一列。
+    const overlapIds = projects.filter(p => laneSplit(p.tasks).length > 1).map(p => p.id);
+    const n = new Set(expanded ? overlapIds : []);
+    setProjExpanded(n);
+    savePref('projExpanded', [...n]);
   };
+  // gantt_prefs 版本轉換(2026-09-22,計畫區間分層):v2 起兩份集合存的是「層鍵(計畫區間 id)」而不是專案 id。
+  // ⚠ 一定要等 projects 載入後才做(要靠專案→區間的對照);只跑一次,轉完寫 v:2 註記,之後重整不再進來。
+  // 不轉的話舊使用者的收合偏好會全部失效(集合裡全是對不上的專案 id)——不會壞掉,但他上次收起來的案子會全部跳回展開。
+  const prefsMigratedRef = useRef(false);
+  React.useEffect(() => {
+    if (prefsMigratedRef.current || projects.length === 0) return;
+    prefsMigratedRef.current = true;
+    if (readPrefs().v === 2) return;
+    const toTaskIds = keys => {
+      const s = new Set(keys),
+        out = [];
+      projects.forEach(p => {
+        if (s.has(p.id)) p.tasks.forEach(t => out.push(t.id));
+      });
+      return out;
+    };
+    const nc = toTaskIds(subCollapsedWeek),
+      no = toTaskIds(subExpandedOverview);
+    setSubCollapsedWeek(new Set(nc));
+    savePref('subCollapsed', nc);
+    setSubExpandedOverview(new Set(no));
+    savePref('subExpandedOv', no);
+    savePref('v', 2);
+  }, [projects]); // eslint-disable-line react-hooks/exhaustive-deps
   const [searchText, setSearchText] = useState('');
   const [typeFilter, setTypeFilter] = useState(new Set()); // 空 = 全部
   // 成員篩選:三個檢視統一用「成員下拉」('all' 或成員名),不再有週檢視專用的「只看我的專案」勾選框
@@ -1540,6 +1860,51 @@ function App() {
     right: 0
   }); // fixed 定位座標(工具列是 overflow 容器,absolute 會被裁掉)
   const [showDeadlinePanel, setShowDeadlinePanel] = useState(false); // 即將到期清單面板(頂部 ⏰ 晶片點開)
+  const [weekEditMember, setWeekEditMember] = useState(null); // 🛠 面板正在編輯哪位成員(提到 App 才不會每次回來都跳回 users[0])
+
+  // ── P1:清單面板 → 彈窗 → 回到清單(2026-09-27)────────────────────────────────
+  // 原本四個面板的 onSelect 一律先把自己關掉再開彈窗,存檔後彈窗也自己關掉 → 人被丟回甘特圖,
+  // 要處理下一項得重開面板、重捲(實測 🛠 清單 1520px / 可視 550px ＝ 2.8 個畫面)、主管還得重選成員,
+  // 焦點則掉回 BODY(面板那顆列按鈕已被卸載,useModalFocus 的還原對它無效)。
+  // 現行＝開窗時把「哪個面板、捲到哪、哪一列」記進 panelReturn,彈窗關閉(存檔/取消/ESC 都算)就把面板開回來。
+  // ⚠ **不走「把彈窗疊到面板上面」那條路**:面板是 fixed inset-0 ＋整片遮罩,兩者同時存在＝兩層遮罩疊加,
+  //   還得為面板做「有彈窗時不畫遮罩」的例外,並動到 2026-08-25 才定案的層級表。記憶＋重開完全不碰層級。
+  // ⚠ **每個開窗入口都要明確決定要不要記**:非面板來源(甘特條、看板)一律 setPanelReturn(null),
+  //   否則殘留的記憶會讓「從甘特條開的彈窗」關閉時莫名彈出一個面板。
+  const [panelReturn, setPanelReturn] = useState(null); // { panel:'pending'|'retro'|'weekEdit'|'deadline', scroll, key } | null
+  const panelReturnRef = useRef(null);
+  panelReturnRef.current = panelReturn;
+  // 從清單面板開啟彈窗:記住來源 → 關掉面板 → 開窗(open 由呼叫處決定要開哪個彈窗)
+  const openFromPanel = (panel, pos, open) => {
+    setPanelReturn({
+      panel,
+      ...pos
+    });
+    setShowPendingPanel(false);
+    setShowRetroPanel(false);
+    setShowWeekEditPanel(false);
+    setShowDeadlinePanel(false);
+    open();
+  };
+  // 彈窗關閉後把來源面板開回來(沒有來源就什麼都不做)。用 ref 讀:handleSaveLog 是 async 閉包。
+  const backToPanel = () => {
+    const r = panelReturnRef.current;
+    if (!r) return;
+    if (r.panel === 'pending') setShowPendingPanel(true);else if (r.panel === 'retro') setShowRetroPanel(true);else if (r.panel === 'weekEdit') setShowWeekEditPanel(true);else if (r.panel === 'deadline') setShowDeadlinePanel(true);
+  };
+  // 使用者自己關掉面板(✕／ESC)＝這一輪處理結束,記憶作廢;下次從工具列開啟就是乾淨的捲動位置。
+  // (openFromPanel 是直接 setShowXxx(false),不經過這裡,所以記憶會留著。)
+  const closeListPanel = setter => {
+    setter(false);
+    setPanelReturn(null);
+  };
+  // 面板重新掛載時要還原的內容(只給「同一個面板」用,免得補登面板吃到回報中心的捲動位置)
+  const restoreFor = panel => panelReturn && panelReturn.panel === panel ? panelReturn : null;
+  // 關閉打卡彈窗的唯一出口:存檔、取消、ESC 全走這支,行為才不會因為關法不同而不一致
+  const closeTaskModal = () => {
+    setSelectedTaskInfo(null);
+    backToPanel();
+  };
 
   // 版面自適應:凍結欄與右側團隊看板寬度隨視窗縮放,投影機/筆電才留得下中間甘特區(1920 時＝原本的 420/490/672)
   const viewportW = useViewportWidth();
@@ -1555,6 +1920,13 @@ function App() {
   //   視窗窄跟那個理由無關,而它是行動項,所以維持只看 showWeeklyReport。
   const tightStatsBar = showWeeklyReport || availW < STATS_BAR_FULL_W;
   const tightToolbar = showWeeklyReport || availW < TOOLBAR_FULL_W;
+  // 搜尋框**只看寬度、不看看板**(2026-09-26):看板開啟時收掉晶片有情境上的理由(講評當下不會臨時改篩選條件),
+  // 但「找出某個專案」在講評當下反而更常發生,而搜尋框只佔 176px——1920 開看板還有 1248px,沒有理由收它。
+  // ⚠ 兩段式收合的順序不可對調:晶片(386px)先收、搜尋框(176px)最後收。
+  const hideSearchBox = availW < TOOLBAR_SEARCH_W;
+  // 有殘留條件時一律保留(否則使用者看不到畫面為何只剩部分專案,也沒有地方可以清掉)
+  const showSearchBox = !hideSearchBox || !!searchText;
+  const showTypeChips = !tightToolbar || typeFilter.size > 0;
   // 概況列已收無可收(剩下的三塊都不能刪)、但寬度仍不夠時的最後一手:縮間距與進度條(見 STATS_BAR_MIN_W)。
   // 只看 availW,不看 showWeeklyReport —— 1366 以上就算開著看板也放得下,不需要縮。
   const ultraTightStatsBar = availW < STATS_BAR_MIN_W;
@@ -1566,16 +1938,37 @@ function App() {
   // 年度總覽的名稱欄:原本寫死 240,1920 下明明還有空間卻不用 → 22% 的名稱被截(週檢視只有 1%)。
   // 改成「把剩餘空間讓給名稱欄,但先保證每個週欄至少 MIN_OVERVIEW_WEEK_W」,
   // 整年仍在同一畫面(表格 width:100%,週欄只是變窄,不會產生水平捲軸);
-  // 上限沿用週檢視的 nameColWidth(切換兩個檢視時名稱欄不跳動),下限維持原本的 240 → 任何情況都不比現況差。
-  const overviewNameW = Math.round(Math.max(240, Math.min(nameColWidth(viewportW), availW - weeksTotal * MIN_OVERVIEW_WEEK_W)));
-  const nameW = isOverview ? overviewNameW : nameColWidth(viewportW);
+  // 上限沿用週檢視的名稱欄寬(切換兩個檢視時名稱欄不跳動),下限維持原本的 240 → 任何情況都不比現況差。
+  // 週檢視的名稱欄寬:使用者拖過就用他的值(夾在 [200, min(640, vw*0.4)]),沒拖過才用自動值。
+  // ⚠ 夾在**取用時**而不是存檔時:偏好是存在這台電腦上的,換螢幕／接投影機後上限會變,存檔時夾住的話
+  //   從 1920 回到 1024 會把 640 永久壓成 410,再接回 1920 就回不去了。
+  const weekViewNameW = nameColUserW == null ? nameColWidth(viewportW) : clampNameCol(nameColUserW, viewportW);
+  const overviewNameW = Math.round(Math.max(240, Math.min(weekViewNameW, availW - weeksTotal * MIN_OVERVIEW_WEEK_W)));
+  const nameW = isOverview ? overviewNameW : weekViewNameW;
   const frozenW = isOverview ? nameW : STICKY_LEAD_W + nameW; // 甘特左側凍結區總寬(捲動置中的基準)
+  // ── 名稱欄的左緣階梯(2026-09-26,使用者回報「畫面太雜亂」後實機量測修正) ──────────────
+  // L1(專案列)的專案名被 ⠿ 拖曳把手＋類型晶片推到 ~50px,而 L2(計畫區間列)原本只有 paddingLeft:14＝名稱落在 26.6、
+  // L3(子區間列)是 subIndent:40 → 三層左緣實測 **49.6 → 26.6 → 40**＝亂序:第二層比第一層還靠左、第三層夾在中間。
+  // 眼睛沿左緣往下掃時拿不到穩定錨點,三層讀起來就是糊成一團(這是「雜亂」的結構性主因,比顏色重複更嚴重)。
+  // 改成單調遞增,階層由左緣本身表達。
+  // ⚠ 級距要跟著名稱欄縮:nameColWidth 的下限是 **200**(vw*0.22,投影機/筆電或開著看板時會到),
+  //   固定 17px 級距在那裡會讓 L3 吃掉 84px,子區間名稱只剩 108px、再加上父區間名晶片(88)就只剩 20px＝整個被擠掉。
+  // ⚠ 這條與 2026-09-14「總覽 subIndent 從 16 提到 40」同一個道理(子區間名稱不可跑到專案名左邊),只是推到完整的三層。
+  // ⚠ 基準(L1 專案名的左緣)不是固定值:⠿ 拖曳把手只在「主管＋週檢視」渲染(見 projNameInner),
+  //   有把手實測 49.6、沒有的話只有 35.8。寫死 50 的話,年度總覽與**成員視角**的第一階會跳 31px、
+  //   第二階只跳 17px＝階梯不等距,窄欄時還白白吃掉 14px。
+  const ladderBase = role === 'manager' && !isOverview ? 50 : 36;
+  const ladderStep = nameW >= 300 ? 17 : 11;
+  const laneNameX = ladderBase + ladderStep; // L2 計畫區間名稱的左緣
+  const subIndent = ladderBase + ladderStep * 2; // L3 子區間名稱的左緣(＝子列容器的 paddingLeft)
+  const lanePadL = laneNameX - 13; // 扣掉 ↳ 字寬＋mr-1.5(實測共 12.6px)
+  const subParentChipW = nameW >= 300 ? 88 : 56; // 同層有 2 條以上區間帶子區間時,子列名稱前的父區間名晶片
   // 週檢視的週欄寬:寬鬆固定 32(本來就要橫向捲);緊湊原本固定 22 → 1926 寬時 53 週只佔 1166、加凍結欄 490 才 1656,
   // 右側 ~230px 什麼都沒放。改成「整年塞得下就把剩餘寬度分給週欄」(與年度總覽名稱欄同一種思路):
   // 1926 → 26px(條內名稱截斷變少、格子點擊區變大)、1366 算出 18 → 夾回 22 照舊橫向捲、開看板 availW 變小自動退回。
   // 上限 32＝寬鬆值(緊湊不可比寬鬆寬);扣 SCROLLBAR_W 是垂直捲軸,少扣會多出 1~2px 吐一條橫向捲軸。
   // 凍結欄一律用週檢視的寬(不吃 isOverview)——總覽不用 weekW,但 ←→ 平移量吃它,切檢視時不要跳值。
-  const fitWeekW = Math.floor((availW - (STICKY_LEAD_W + nameColWidth(viewportW)) - SCROLLBAR_W) / weeksTotal);
+  const fitWeekW = Math.floor((availW - (STICKY_LEAD_W + weekViewNameW) - SCROLLBAR_W) / weeksTotal);
   const weekW = isCompact ? Math.min(WEEK_W_RELAXED, Math.max(WEEK_W_COMPACT_MIN, fitWeekW)) : WEEK_W_RELAXED;
   // 年度總覽的週欄寬度是「剩餘空間 ÷ 週數」(非固定 weekW);太窄時 53 個數字會擠成一片,
   // 故 <16px 只標 5 的倍數與當週(格子本身仍可點,hover/title 不變)
@@ -1601,17 +1994,31 @@ function App() {
     setHighlightedTaskId(willClear ? null : task.id);
     setHighlightedSubId(willClear ? null : subId);
     if (willClear) return;
-    // 子區間的卡 → 該專案的子列要展開(走與 ▾ n 晶片同一份 prefs),否則亮的那條在收合狀態下根本看不到
+    // 子區間的卡 → 子列要展開(走與 ▾ n 晶片同一份 prefs),否則亮的那條在收合狀態下根本看不到。
+    // ⚠ 展開的是「這條計畫區間所在的那一層」不是整個專案(2026-09-22 分層後):否則點一張卡會把同專案其他重疊區間的
+    //    子區間全部倒出來,要找的那條反而被埋在裡面。
+    // 🚨 鍵是 **層鍵**(`laneKeyOfTask`)不是 `task.id`(2026-09-29 修):同層第一條區間才是鍵,
+    //    寫 task.id 的話「那一層被收合著」時點卡片不會展開,亮起來的子條使用者看不到(見 setAllSubExpanded 的說明)。
     if (subId != null) {
+      const laneKey = laneKeyOfTask(proj.tasks, task.id);
       if (isOverview) setSubExpandedOverview(prev => {
         const n = new Set(prev);
-        n.add(proj.id);
+        n.add(laneKey);
         savePref('subExpandedOv', [...n]);
         return n;
       });else setSubCollapsedWeek(prev => {
         const n = new Set(prev);
-        n.delete(proj.id);
+        n.delete(laneKey);
         savePref('subCollapsed', [...n]);
+        return n;
+      });
+    }
+    // 重疊的專案收合時只有一條整體條,要亮的那條在裡面 → 專案層也要一起展開(2026-09-26)
+    if (laneSplit(proj.tasks).length > 1) {
+      setProjExpanded(prev => {
+        const n = new Set(prev);
+        n.add(proj.id);
+        savePref('projExpanded', [...n]);
         return n;
       });
     }
@@ -1659,6 +2066,7 @@ function App() {
     setSearchText('');
     setTypeFilter(new Set());
     setShowPendingPanel(false);
+    setPanelReturn(null); // 登入/登出重置:清掉「回到清單」的記憶
     setShowRetroPanel(false);
     setShowWeekEditPanel(false);
     setNoteTargetUser(null);
@@ -1683,6 +2091,7 @@ function App() {
     setSearchText('');
     setTypeFilter(new Set());
     setShowPendingPanel(false);
+    setPanelReturn(null); // 登入/登出重置:清掉「回到清單」的記憶
     setShowRetroPanel(false);
     setShowWeekEditPanel(false);
     setNoteTargetUser(null);
@@ -1718,6 +2127,121 @@ function App() {
     const viewW = Math.max(weekW, el.clientWidth - frozenW); // 可視甘特區寬度
     smoothScrollLeftTo(el, (wk - 1) * weekW + weekW / 2 - viewW / 2);
   }, [weekW, frozenW]);
+
+  // 凍結欄右緣的陰影「只在真的橫向捲動時」才畫(2026-09-26 使用者回報「甘特條的左端被凍結欄切掉」)。
+  // 那圈陰影是 2px 純白封縫(--frozen-bg)＋右偏 4px／模糊 8px 的灰影,凍結格 z-30 而甘特條 z-10 → 一律畫在條上面。
+  // scrollLeft=0 時底下根本沒有東西要遮,卻把**從 W01 開始**的條的左緣邊框整條抹掉、後面約 10px 再壓暗一層,
+  // 讀起來就是「這條被切掉一截／延伸到凍結欄底下」——而真正從 W01 開始的排程反而看不出起點在哪。
+  // 捲動之後陰影才有意義(底下真的有條滑過去),那時再畫回來,順便就是「左邊還有內容」的訊號。
+  // ⚠ 走 class 直接改 DOM、不進 state:捲動每一格都重算 77 列 × 53 格的話投影筆電會掉幀(與 tooltip 座標同一條規則)。
+  const syncFrozenShadow = useCallback(() => {
+    const el = ganttRef.current;
+    if (el) el.classList.toggle('gantt-xscroll', el.scrollLeft > 0);
+  }, []);
+  // ⚠ 用 callback ref 而不是 useEffect([]):甘特容器要等 bootstrap 載完才掛上(前面有 Loading／Error／AccessDenied 的提前 return),
+  //   空依賴的 effect 在 App 掛載當下拿到的是 null,監聽器永遠掛不上去(切到成果清單再切回來同理)。
+  const attachGantt = useCallback(el => {
+    if (ganttRef.current) ganttRef.current.removeEventListener('scroll', syncFrozenShadow);
+    ganttRef.current = el;
+    if (el) {
+      el.addEventListener('scroll', syncFrozenShadow, {
+        passive: true
+      });
+      syncFrozenShadow();
+    }
+  }, [syncFrozenShadow]);
+  // 切檢視／改寬度會讓捲動範圍整個變掉(年度總覽的表格是 width:100%,根本沒有橫向捲動),瀏覽器把 scrollLeft 夾回 0
+  // 不保證一定派送 scroll 事件 → 這幾個時機主動再同步一次,免得陰影停在上一個檢視的狀態。
+  React.useEffect(() => {
+    syncFrozenShadow();
+  }, [isOverview, isResults, viewportW, showWeeklyReport, nameW, syncFrozenShadow]);
+
+  // ── 名稱欄調寬:表頭右緣的拖曳把手(2026-09-28) ────────────────────────────────
+  // 🚨 **拖曳期間一格 state 都不動**(與甘特 tooltip 座標、凍結欄陰影同一條規則):這張表是 77 列 × 53 格,
+  //   整頁重繪實測 7~18ms,跟著 pointermove 改欄寬在投影筆電上必定掉幀。改成拖曳時只畫一條**藍色參考線**
+  //   跟著游標走(直接改節點 style.left,零重繪),**放開才套用新寬度**——這也正好是 Excel／MS Project 調欄寬
+  //   的既有手勢,不必寫進手冊也沒人不會用。
+  // ⚠ 參考線是 `fixed` 的兄弟節點、不放在 th 裡:th 是 sticky 凍結格(z-30/50)且會被表格裁切,
+  //   線要從表頭一路畫到畫面底部才看得出「新的欄寬會落在哪」。
+  const resizeGuideRef = useRef(null);
+  const resizeRef = useRef(null); // 拖曳中的暫存 { startX, startW, thLeft, lastW };非拖曳時為 null
+  const applyNameColW = useCallback(w => {
+    // ⚠ 夾在**取用時**也夾在這裡,但存進 prefs 的是夾過的值:鍵盤微調是逐次累加的,不夾住會愈按愈偏離邊界。
+    const v = clampNameCol(w, viewportW);
+    setNameColUserW(v);
+    savePref('nameColW', v);
+    return v;
+  }, [viewportW]);
+  const resetNameColW = useCallback(() => {
+    setNameColUserW(null);
+    savePref('nameColW', null);
+    showToast('已還原名稱欄的預設寬度');
+  }, []);
+  const onResizeDown = e => {
+    if (e.button !== 0) return;
+    const th = e.currentTarget.parentElement;
+    if (!th) return;
+    const r = th.getBoundingClientRect();
+    resizeRef.current = {
+      startX: e.clientX,
+      startW: nameW,
+      thLeft: r.left,
+      lastW: null
+    };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (err) {}
+    const g = resizeGuideRef.current;
+    if (g) {
+      g.hidden = false;
+      g.style.left = `${r.right}px`;
+    }
+    document.body.classList.add('col-resizing'); // 拖曳期間整頁維持 col-resize 游標、禁選取
+    // 保險絲:setPointerCapture 萬一失敗(或瀏覽器把捕捉收走),onPointerUp 就不會回到這顆把手
+    // → `col-resizing` 會卡住,整頁永遠是 col-resize 游標且選不到字。這顆一次性監聽器只做收尾,
+    //   不套用寬度(寬度仍由 endResize 決定;它把 resizeRef 清成 null,兩邊重複呼叫也安全)。
+    window.addEventListener('pointerup', () => {
+      document.body.classList.remove('col-resizing');
+      if (resizeGuideRef.current) resizeGuideRef.current.hidden = true;
+    }, {
+      once: true
+    });
+    e.preventDefault();
+  };
+  const onResizeMove = e => {
+    const st = resizeRef.current;
+    if (!st) return;
+    st.lastW = clampNameCol(st.startW + (e.clientX - st.startX), viewportW);
+    const g = resizeGuideRef.current;
+    if (g) g.style.left = `${st.thLeft + st.lastW}px`;
+  };
+  const endResize = e => {
+    const st = resizeRef.current;
+    resizeRef.current = null;
+    document.body.classList.remove('col-resizing');
+    const g = resizeGuideRef.current;
+    if (g) g.hidden = true;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch (err) {}
+    if (st && st.lastW != null && st.lastW !== st.startW) applyNameColW(st.lastW);
+  };
+  // 鍵盤路徑(ARIA window splitter):←→ 各 ±20px(Shift 為 ±5 微調)、Home 還原預設。
+  // ⚠ 全域 handler 掛在 **capture** 階段又把 ←→ 當成「平移 4 週」,不在那裡放行的話這裡永遠收不到
+  //   (見該處的 role="separator" 例外)。
+  const onResizeKey = e => {
+    const step = e.shiftKey ? 5 : NAME_COL_KEY_STEP;
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      applyNameColW(nameW - step);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      applyNameColW(nameW + step);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      resetNameColW();
+    }
+  };
   const goToCurrentWeek = () => {
     // 正在看別的年度 → 先切回今年;系統週會在該年度載入完成後由 refreshData 切到本週並置中
     if (!isCurrentYear) {
@@ -1769,9 +2293,11 @@ function App() {
 
   // 可視甘特寬改變(開/關看板、視窗大小或接上投影機導致解析度變更)→ 重新把當前週置中;
   // 否則捲動位置會停在舊寬度算出來的地方(接投影機後年底的週次會整個躲進看板底下)
+  // ⚠ 名稱欄寬(nameW)也算在內:調寬會同時改 frozenW 與緊湊模式的 weekW,置中公式兩個變數都吃,
+  //   不重算的話拖完欄寬當前週就跑掉了(拖得愈多偏得愈遠)。
   const ganttViewKeyRef = useRef(null);
   React.useEffect(() => {
-    const key = `${showWeeklyReport}|${viewportW}`;
+    const key = `${showWeeklyReport}|${viewportW}|${nameW}`;
     if (ganttViewKeyRef.current === null) {
       ganttViewKeyRef.current = key;
       return;
@@ -1779,7 +2305,7 @@ function App() {
     if (ganttViewKeyRef.current === key) return;
     ganttViewKeyRef.current = key;
     if (!isOverview && !isResults) setScrollTargetWeek(currentWeek); // 交給 scrollTargetWeek effect,確保新寬度已套用
-  }, [showWeeklyReport, viewportW, isOverview, isResults, currentWeek]);
+  }, [showWeeklyReport, viewportW, nameW, isOverview, isResults, currentWeek]);
 
   // 本地時間戳(yyyy-MM-dd HH:mm),與 bootstrap 回傳的 updatedAt 格式一致(樂觀更新用)
   const nowStamp = () => {
@@ -1834,8 +2360,11 @@ function App() {
       })).length;
       if (role === 'member' && isReportingWeek && remainingPending === 0 && !weeklyPlans[currentUser]?.[todayWeek]) {
         showToast(`✅ 本週任務已全數回報，請接著填寫「下週預計工作」`);
+        // ⚠ 這個分支**不回清單面板**:全部任務都交完了,清單上只剩「下週預計」這一項,
+        //   直接把填寫視窗推到眼前是刻意的推力(2026 既有設計)。填完之後那支 onClose/onSave 才會回面板。
         setShowWeeklyPlanModal(true);
       } else {
+        backToPanel(); // 從清單面板進來的:存檔後回到清單(該列會即時變成已回報),沒有來源就留在甘特圖
         showToast(`✅ W${String(currentWeek).padStart(2, '0')} 任務回報已送出`);
       }
     } catch (e) {
@@ -1876,6 +2405,7 @@ function App() {
       }));
       setShowExtraNoteModal(false);
       setNoteTargetUser(null);
+      backToPanel(); // 從清單面板進來的就回清單(P1)
       const who = target !== currentUser ? `已為 ${target} ` : '';
       showToast(note ? `✅ ${who}W${String(currentWeek).padStart(2, '0')} 非專案事項已送出` : `✅ ${who}W${String(currentWeek).padStart(2, '0')} 非專案事項已清空`);
     } catch (e) {
@@ -1920,6 +2450,7 @@ function App() {
         };
       });
       setCommentTarget(null);
+      backToPanel(); // 從 🛠 面板進來的就回面板(P1);從看板進來的 panelReturn 是 null,不受影響
       showToast(comment ? `✅ 已回覆 ${userName} 的 W${String(currentWeek).padStart(2, '0')} 週報` : `✅ 已清除 ${userName} 的 W${String(currentWeek).padStart(2, '0')} 週報回覆`);
     } catch (e) {
       showToast('❌ 儲存失敗：' + (e.message || '無法連線資料庫'));
@@ -1958,6 +2489,7 @@ function App() {
       }));
       setShowWeeklyPlanModal(false);
       setNoteTargetUser(null);
+      backToPanel(); // 從清單面板進來的就回清單(P1)
       const who = target !== currentUser ? `已為 ${target} ` : '';
       showToast(note ? `✅ ${who}W${String(currentWeek).padStart(2, '0')} 下週預計工作已送出` : `🗑️ ${who}W${String(currentWeek).padStart(2, '0')} 下週預計工作已清空`);
     } catch (e) {
@@ -2044,7 +2576,10 @@ function App() {
           } : t)
         };
       }));
-      setSelectedTaskInfo(null);
+      // ⚠ 走 closeTaskModal 不要自己 setSelectedTaskInfo(null)(2026-09-28 修):P1 的規則是
+      //   「彈窗關閉的**每一條**路(存檔／取消／ESC)都要呼叫 backToPanel()」,這裡與下方的刪除區間當初漏了 →
+      //   主管從 🛠 面板點進去改完排程會被丟回甘特圖(正是 P1 要解決的事),而且 panelReturn 還留著沒清。
+      closeTaskModal();
       showToast('✅ 排程已更新');
     } catch (e) {
       showToast('❌ 更新失敗：' + (e.message || '無法連線資料庫'));
@@ -2208,8 +2743,12 @@ function App() {
       // 焦點在表單元素時略過（搜尋框、輸入框等）
       // ⚠ ESC 是例外:它在輸入框裡的語意就是「取消」。彈窗加了焦點鎖之後 Tab 會走進輸入框,
       //   若比照其他快捷鍵一起略過,使用者在輸入框按 ESC 會關不掉視窗(實測踩到)。
+      // ⚠ 名稱欄的調寬把手(role="separator")同理要略過:它自己要吃 ←→(±20px)與 Home(還原預設),
+      //   而本 handler 掛在 **capture** 階段、會把 ←→ 攔成「平移 4 週」、Home 攔成「回到本週」
+      //   → 不在這裡放行的話那顆把手的鍵盤路徑等於不存在(它是純鍵盤使用者調欄寬的**唯一**方法)。
       const tag = document.activeElement?.tagName;
-      if (e.key !== 'Escape' && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT')) return;
+      const ownsArrows = document.activeElement?.getAttribute?.('role') === 'separator';
+      if (e.key !== 'Escape' && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || ownsArrows)) return;
 
       // ESC：關閉最上層 Modal/Panel（優先序由內到外）;
       // 表單型視窗有未儲存內容(MODAL_DIRTY)時,先跳確認避免默默丟失輸入
@@ -2243,13 +2782,17 @@ function App() {
           e.preventDefault();
           return;
         }
+        // ⚠ ESC 關閉也要走與 ✕／存檔同一條回清單的路(P1),否則同一個視窗會因為「怎麼關的」而跑到不同地方
         if (commentTarget) {
-          closeGuard(() => setCommentTarget(null));
+          closeGuard(() => {
+            setCommentTarget(null);
+            backToPanel();
+          });
           e.preventDefault();
           return;
         }
         if (selectedTaskInfo) {
-          closeGuard(() => setSelectedTaskInfo(null));
+          closeGuard(closeTaskModal);
           e.preventDefault();
           return;
         }
@@ -2272,6 +2815,7 @@ function App() {
           closeGuard(() => {
             setShowExtraNoteModal(false);
             setNoteTargetUser(null);
+            backToPanel();
           });
           e.preventDefault();
           return;
@@ -2280,6 +2824,7 @@ function App() {
           closeGuard(() => {
             setShowWeeklyPlanModal(false);
             setNoteTargetUser(null);
+            backToPanel();
           });
           e.preventDefault();
           return;
@@ -2290,17 +2835,17 @@ function App() {
           return;
         }
         if (showPendingPanel) {
-          setShowPendingPanel(false);
+          closeListPanel(setShowPendingPanel);
           e.preventDefault();
           return;
         }
         if (showRetroPanel) {
-          setShowRetroPanel(false);
+          closeListPanel(setShowRetroPanel);
           e.preventDefault();
           return;
         }
         if (showWeekEditPanel) {
-          setShowWeekEditPanel(false);
+          closeListPanel(setShowWeekEditPanel);
           e.preventDefault();
           return;
         }
@@ -2327,7 +2872,7 @@ function App() {
           return;
         }
         if (showDeadlinePanel) {
-          setShowDeadlinePanel(false);
+          closeListPanel(setShowDeadlinePanel);
           e.preventDefault();
           return;
         }
@@ -2341,6 +2886,26 @@ function App() {
       if (e.key === 'Home' || e.key === 'h' || e.key === 'H') {
         e.preventDefault();
         goToCurrentWeek();
+        return;
+      }
+
+      // ↑↓：**上下捲動甘特版面**（與 ←→ 平移同一組操作，一個管橫向一個管縱向）
+      // ⚠ 2026-09-26 一度把 ↑↓ 做成「在甘特條之間換條」，使用者當天指正：**上下鍵要的是捲動版面，不是在計畫區間移動**。
+      //   原因很直觀——甘特是內層 overflow-auto（根容器 h-screen 不捲動），焦點在 body 時原生 ↑↓ 什麼都不會發生，
+      //   使用者要看下面幾十列只能用滑鼠滾輪；而 ←→ 已經是「平移版面」，同一組方向鍵當然是同一種語意。
+      // ⚠ 捲動量＝4 列（Shift＝1 列），與 ←→ 的「4 週／Shift 1 週」對稱；列高取與渲染同一份
+      //   （總覽 24／緊湊 28／寬鬆 40），所以按一次剛好落在列的邊界上，不會停在半列。
+      // ⚠ 焦點剛好在甘特條上時**也一樣捲動**：這個 handler 掛在 capture 階段，這裡 preventDefault 並 return，
+      //   條自己的 onKeyDown 就收不到 → 不會出現「有時捲版面、有時跳條」兩種行為（最常見的情境是：點條開彈窗、
+      //   ESC 關閉後焦點被還原到那條，此時按 ↑↓ 若變成跳條，使用者只會覺得快捷鍵時好時壞）。
+      //   甘特條的組內移動改用 **Alt+↑↓**（見 clickable 的 opts.roving），故這裡要放行帶 Alt 的組合。
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.altKey) {
+        const el = ganttRef.current;
+        if (!el) return; // 成果清單：甘特容器已卸載，維持原生行為
+        e.preventDefault();
+        const rowH = isOverview ? 24 : isCompact ? 28 : 40;
+        const step = (e.shiftKey ? 1 : 4) * rowH;
+        smoothScrollTopTo(el, el.scrollTop + (e.key === 'ArrowDown' ? step : -step));
         return;
       }
 
@@ -2359,7 +2924,7 @@ function App() {
     };
     window.addEventListener('keydown', handler, true); // capture phase
     return () => window.removeEventListener('keydown', handler, true);
-  }, [currentUser, weekW, isOverview, isResults, isAnyModalOpen, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showUsagePanel, showAdminMenu, showDisplayMenu, showDeadlinePanel, goToCurrentWeek, closeWeeklyReport]);
+  }, [currentUser, weekW, isCompact, isOverview, isResults, isAnyModalOpen, confirmInfo, commentTarget, selectedTaskInfo, deliverableProj, editingProject, addingInterval, showExtraNoteModal, showWeeklyPlanModal, showWeeklyReport, showPendingPanel, showRetroPanel, showWeekEditPanel, showAuditPanel, showMemberPanel, showAccessPanel, showUsagePanel, showAdminMenu, showDisplayMenu, showDeadlinePanel, goToCurrentWeek, closeWeeklyReport]);
   const existingCategories = useMemo(() => [...new Set(projects.map(p => p.category).filter(Boolean))].sort(), [projects]);
 
   // 搜尋/類型篩選會隱藏同成員內的部分專案列,此時拖曳落點會與畫面不一致,故暫停拖曳排序
@@ -2617,13 +3182,28 @@ function App() {
       return true;
     });
   }, [projects, searchText, typeFilter, ownerFilter]);
-  // 關鍵字命中「子區間名稱」的專案 id:這些專案要暫時視為展開(見 isSubExpanded),否則收合狀態下
+  // 關鍵字命中「子區間名稱」的**層鍵**:這些層要暫時視為展開(見 isLaneExpanded),否則收合狀態下
   // 搜「驗證」跑出一個名稱裡沒有「驗證」的專案,使用者只會覺得搜尋壞了。
+  // ⚠ 只展開命中的那一層,不是整個專案(2026-09-22 分層後):同專案其他重疊區間的子區間與關鍵字無關,一起展開只是噪音。
   // 只是暫時的顯示狀態,不寫進 gantt_prefs——清掉搜尋就回到原本的偏好。
+  // 🚨 存的是 **層鍵**(`laneKeyOf`)不是命中那條區間的 id(2026-09-29 修):`isLaneExpanded` 拿層鍵來比對,
+  //    存 t.id 的話「第一條沒有子區間」的層永遠對不上 → 年度總覽(預設收合)搜子區間名稱會搜不出東西,
+  //    週檢視裡使用者收合過的那幾層同理(見 setAllSubExpanded 的說明,三處同一個錯)。
   const subSearchHits = useMemo(() => {
     const kw = searchText.trim().toLowerCase();
     if (!kw) return new Set();
-    return new Set(projects.filter(p => p.tasks.some(t => (t.subs || []).some(s => s.name.toLowerCase().includes(kw)))).map(p => p.id));
+    const hits = new Set();
+    projects.forEach(p => laneSplit(p.tasks).forEach(lane => {
+      if (lane.some(t => (t.subs || []).some(s => s.name.toLowerCase().includes(kw)))) hits.add(laneKeyOf(lane));
+    }));
+    return hits;
+  }, [projects, searchText]);
+  // 命中的**專案**要暫時視為展開(只有重疊的專案有收合態):收合時整個專案只剩一條整體條,
+  // 命中的那條區間／子區間根本不在畫面上,使用者會覺得「搜到一個專案、點開卻什麼都沒有」。同樣不寫進 gantt_prefs。
+  const projSearchHits = useMemo(() => {
+    const kw = searchText.trim().toLowerCase();
+    if (!kw) return new Set();
+    return new Set(projects.filter(p => p.tasks.some(t => t.name.toLowerCase().includes(kw) || (t.subs || []).some(s => s.name.toLowerCase().includes(kw)))).map(p => p.id));
   }, [projects, searchText]);
 
   // 主管未啟用搜尋/類型篩選時，沒有專案的成員(如剛加入的新同仁)也要顯示群組列,才能為其新增專案
@@ -2682,23 +3262,54 @@ function App() {
   // 107 個甘特條原本各自 tabIndex=0,鍵盤使用者要按 107 次 Tab 才穿得過甘特區。
   // 改成整區只留一個 Tab 停留點(目前聚焦過的那條,沒有就是第一條),進去之後用 ↑↓ 移動。
   // 順序直接照渲染順序算(收合的成員群組不入列),與畫面上看到的一致。
-  // 子區間自遷移 20 起是打卡入口,子條也要進 roving 群組(id 加 's' 前綴與父條區隔);順序＝畫面順序(專案列的父條 → 該專案的子列)
+  // 子區間自遷移 20 起是打卡入口,子條也要進 roving 群組(id 加 's' 前綴與父條區隔)。
+  // ⚠ 順序必須逐層走(2026-09-22 分層後):畫面是「第一層的條 → 第一層的子列 → 第二層的條 → 第二層的子列」,
+  //    這裡若還照 p.tasks 的順序一次列完再列子條,↑↓ 會在畫面上跳來跳去(鍵盤順序與視覺順序不一致)。
   const ganttBarTaskIds = useMemo(() => {
     const ids = [];
     groupedProjects.forEach(g => {
       if (collapsedOwners.has(g.owner)) return;
       g.projects.forEach(p => {
-        p.tasks.forEach(t => ids.push(t.id));
-        if (isSubExpanded(p.id)) p.tasks.forEach(t => (t.subs || []).forEach(s => ids.push(`s${s.id}`)));
+        const lanes = laneSplit(p.tasks);
+        // 重疊 → 摘要列的整體條**展開與否都會畫**(收合時它是整個專案唯一的目標、展開時它在最上面那列),
+        // 所以一律入列;收合時底下沒有任何列,到此為止。
+        // 🚨 原本寫成「只有收合時才推 `p{id}`」(2026-09-29 修):展開後那條整體條仍在 DOM 裡、也仍帶著
+        //    `data-roving-group="gantt-bar"`,Alt+↓ 走得到它,但它不在這份清單裡 → `activeRovingTaskId`
+        //    比對不到就退回 `ganttBarTaskIds[0]`,tab stop 沒跟過去(實測聚焦 p101 後 tab stop 仍停在 t102-1)。
+        //    使用者從那條 Tab 出去再回來,會被丟回甘特區的第一條。
+        if (lanes.length > 1) {
+          ids.push(`p${p.id}`);
+          if (!isProjOpen(p.id)) return;
+        }
+        lanes.forEach(lane => {
+          lane.forEach(t => ids.push(t.id));
+          if (isLaneExpanded(laneKeyOf(lane))) lane.forEach(t => (t.subs || []).forEach(s => ids.push(`s${s.id}`)));
+        });
       });
     });
     return ids;
-  }, [groupedProjects, collapsedOwners, isOverview, subCollapsedWeek, subExpandedOverview, subSearchHits]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [groupedProjects, collapsedOwners, isOverview, subCollapsedWeek, subExpandedOverview, subSearchHits, projExpanded, projSearchHits]); // eslint-disable-line react-hooks/exhaustive-deps
   // ⚠ 存成字串:onRove 是從 DOM 的 data-roving-id 讀回來的(字串),onFocus 給的是原始 id(數字),
   //    兩條路徑都會寫進這個 state,故一律以字串比較,避免 32 !== '32' 造成 tab stop 找不到目標。
   const [rovingTaskId, setRovingTaskId] = useState(null);
   // 篩選/收合把原本那條藏起來時要退回第一條,否則整區會變成「沒有任何 Tab 停留點」＝鍵盤進不去
   const activeRovingTaskId = rovingTaskId != null && ganttBarTaskIds.some(id => String(id) === String(rovingTaskId)) ? rovingTaskId : ganttBarTaskIds[0];
+
+  // --- 凍結欄 🎯 產出鈕的 roving tabindex(2026-09-26) ---
+  // 一列一顆,80 案就是 80 個 Tab 停留點——全頁可 Tab 元素實測 122 個,其中 **70 個是 🎯**,
+  // 鍵盤使用者光是要走到甘特區就得先按 70 次。甘特條早就用 roving 從 107 收成 1,這一欄當初漏了。
+  // ⚠ 順序＝渲染順序(收合的成員群組不入列),與 ganttBarTaskIds 同一套寫法;
+  //   一個專案只有一顆(projNameInner 只在該專案的第一列/摘要列渲染),所以鍵就是 proj.id。
+  const deliverableProjIds = useMemo(() => {
+    const ids = [];
+    groupedProjects.forEach(g => {
+      if (collapsedOwners.has(g.owner)) return;
+      g.projects.forEach(p => ids.push(p.id));
+    });
+    return ids;
+  }, [groupedProjects, collapsedOwners]);
+  const [rovingDelivId, setRovingDelivId] = useState(null);
+  const activeRovingDelivId = rovingDelivId != null && deliverableProjIds.some(id => String(id) === String(rovingDelivId)) ? rovingDelivId : deliverableProjIds[0];
 
   // --- 本週統計 ---
   // ⚠ 跟著**成員下拉(ownerFilter)**走,不是永遠全隊:標題就寫在被篩選過的表格正上方,
@@ -3265,15 +3876,15 @@ function App() {
       className: "w-2.5 h-2.5 bg-slate-500 mr-1 rounded-sm"
     }), "\u672A\u57F7\u884C")), /*#__PURE__*/React.createElement("span", {
       className: "flex items-center",
-      title: "\u7D05\u6846\uFF0B\u2757\uFF1D\u672C\u9031\u6392\u5B9A\u4F46\u5C1A\u672A\u56DE\u5831\u7684\u4EFB\u52D9"
+      title: "\u7576\u9031\u90A3\u4E00\u683C\u7684\u7D05\u6846\uFF1D\u672C\u9031\u6392\u5B9A\u4F46\u5C1A\u672A\u56DE\u5831\u7684\u4EFB\u52D9"
     }, /*#__PURE__*/React.createElement("span", {
-      className: "w-3 h-2.5 mr-1 rounded-sm border-2 border-red-400 bg-white"
-    }), "\u2757\u5F85\u56DE\u5831"), !tightStatsBar && /*#__PURE__*/React.createElement("span", {
+      className: "w-3 h-2.5 mr-1 rounded-sm border-2 border-red-600 bg-red-600/10"
+    }), "\u5F85\u56DE\u5831"), !tightStatsBar && /*#__PURE__*/React.createElement("span", {
       className: "flex items-center text-slate-600 border-l border-slate-300 pl-2",
-      title: "\u9375\u76E4\u5FEB\u6377\u9375\uFF1AH\uFF1D\u56DE\u5230\u672C\u9031\u4E26\u7F6E\u4E2D\uFF1B\u2190 \u2192\uFF1D\u5DE6\u53F3\u5E73\u79FB 4 \u9031\uFF1BShift\uFF0B\u2190 \u2192\uFF1D\u5FAE\u79FB 1 \u9031\uFF1BTab \u9032\u5165\u7518\u7279\u689D\u5F8C \u2191 \u2193\uFF1D\u4E0A\u4E0B\u5207\u63DB\u7518\u7279\u689D\u3001Enter\uFF1D\u958B\u555F\u8A72\u5340\u9593\uFF1BESC\uFF1D\u95DC\u9589\u6700\u4E0A\u5C64\u8996\u7A97"
-    }, "\u2328 H \u56DE\u672C\u9031\u30FB\u2190\u2192 \u5E73\u79FB\u30FB\u2191\u2193 \u63DB\u689D"))), /*#__PURE__*/React.createElement("div", {
+      title: "\u9375\u76E4\u5FEB\u6377\u9375\uFF1AH\uFF1D\u56DE\u5230\u672C\u9031\u4E26\u7F6E\u4E2D\uFF1B\u2190 \u2192\uFF1D\u5DE6\u53F3\u5E73\u79FB 4 \u9031\u3001\u2191 \u2193\uFF1D\u4E0A\u4E0B\u6372\u52D5 4 \u5217\uFF08\u5169\u8005\u52A0 Shift \u90FD\u6539\u70BA 1 \u9031\uFF0F1 \u5217\uFF09\uFF1BTab \u9032\u5165\u7518\u7279\u689D\u6216 \uD83C\uDFAF \u7522\u51FA\u9215\u5F8C Alt\uFF0B\u2191 \u2193\uFF1D\u5728\u540C\u4E00\u6B04\u7684\u5404\u5217\u4E4B\u9593\u79FB\u52D5\u3001Enter\uFF1D\u958B\u555F\uFF1B\u7126\u9EDE\u505C\u5728\u67D0\u4E00\u5217\u6642\uFF0C\u8A72\u5217\u7684 \uFF0B \u65B0\u589E\u5340\u9593\uFF0F\u270E \u7DE8\u8F2F\uFF0F\uD83D\uDDD1 \u522A\u9664\u6703\u73FE\u5F62\uFF0CShift\uFF0BTab \u53EF\u9000\u56DE\u53BB\u6309\uFF1BESC\uFF1D\u95DC\u9589\u6700\u4E0A\u5C64\u8996\u7A97"
+    }, "\u2328 H \u56DE\u672C\u9031\u30FB\u2190\u2192 \u5E73\u79FB\u30FB\u2191\u2193 \u6372\u52D5"))), /*#__PURE__*/React.createElement("div", {
       className: "bg-white px-4 py-1.5 border-b border-slate-300 flex flex-nowrap items-center gap-1.5 text-[11px] z-30 overflow-x-auto [&>*]:flex-shrink-0"
-    }, (!tightToolbar || searchText) && /*#__PURE__*/React.createElement("div", {
+    }, showSearchBox && /*#__PURE__*/React.createElement("div", {
       className: "relative"
     }, /*#__PURE__*/React.createElement("svg", {
       className: "w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-slate-500",
@@ -3289,26 +3900,29 @@ function App() {
       value: searchText,
       onChange: e => setSearchText(e.target.value),
       placeholder: "\u641C\u5C0B\u5C08\u6848 / \u4EFB\u52D9\u2026",
-      className: `pl-7 pr-6 py-1 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition ${tightToolbar ? 'w-32' : 'w-44'}`
+      "aria-label": "\u641C\u5C0B\u5C08\u6848\u6216\u4EFB\u52D9\u540D\u7A31",
+      className: `pl-7 pr-6 py-1 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition ${hideSearchBox ? 'w-32' : 'w-44'}`
     }), searchText && /*#__PURE__*/React.createElement("button", {
       onClick: () => setSearchText(''),
       className: "absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-600 font-bold px-1"
-    }, "\xD7")), (!tightToolbar || typeFilter.size > 0) && /*#__PURE__*/React.createElement("div", {
+    }, "\xD7")), showTypeChips && /*#__PURE__*/React.createElement("div", {
       className: "flex items-center space-x-1"
     }, Object.entries(PROJECT_TYPES).map(([key, meta]) => {
       const on = typeFilter.has(key);
       if (tightToolbar && !on) return null; // 空間不足時只留「已選中」的晶片(方便一鍵取消)
       return /*#__PURE__*/React.createElement("button", {
         key: key,
-        onClick: () => toggleTypeFilter(key),
-        className: `px-1.5 py-0.5 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white ctl-raised text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`,
+        onClick: () => toggleTypeFilter(key)
+        /* min-h-[24px]:點擊區下限(WCAG 2.5.8 AA)。用 min-h 而不是加 py——工具列的內容高度
+           上限是 26.5px(搜尋框/下拉),加 padding 會把整條工具列推高,min-h 則只補到 24 就停。 */,
+        className: `inline-flex items-center min-h-[24px] px-1.5 py-0.5 rounded-full border font-bold transition ${on ? meta.chip + ' ring-1 ring-offset-1 ring-slate-500' : 'bg-white ctl-raised text-slate-700 border-slate-400 hover:border-slate-600 hover:bg-slate-50'}`,
         title: `${key}・${meta.label}`,
         "aria-label": `${on ? '取消篩選' : '篩選'} ${key} ${meta.label}`
       }, key, " ", meta.short);
     }), typeFilter.size > 0 && /*#__PURE__*/React.createElement("button", {
       onClick: () => setTypeFilter(new Set()),
       className: "text-blue-600 hover:underline px-1"
-    }, "\u6E05\u9664")), (!tightToolbar || searchText || typeFilter.size > 0) && /*#__PURE__*/React.createElement("div", {
+    }, "\u6E05\u9664")), (showSearchBox || showTypeChips) && /*#__PURE__*/React.createElement("div", {
       className: "h-5 border-l border-slate-300"
     }), /*#__PURE__*/React.createElement("select", {
       value: ownerFilter,
@@ -3442,7 +4056,7 @@ function App() {
       onClick: toggleRetroCheckin,
       className: "px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold shadow-sm transition"
     }, "\u95DC\u9589\u6B77\u53F2\u88DC\u767B")), /*#__PURE__*/React.createElement("div", {
-      ref: ganttRef,
+      ref: attachGantt,
       className: "flex-1 min-h-0 overflow-auto bg-slate-100 app-bg relative"
     }, isResults ? /*#__PURE__*/React.createElement(ResultsView, {
       projects: filteredProjects,
@@ -3537,7 +4151,7 @@ function App() {
         backgroundColor: 'var(--gantt-sticky)'
       }
     }, "\u5206\u985E"), /*#__PURE__*/React.createElement("th", {
-      className: "border-r border-b border-slate-300 p-1 sticky z-50 shadow-[3px_0_6px_rgba(0,0,0,0.08)] text-left pl-3 font-medium",
+      className: "border-r border-b border-slate-300 p-1 sticky z-50 frz-head text-left pl-3 font-medium",
       style: {
         width: nameW,
         minWidth: nameW,
@@ -3545,7 +4159,23 @@ function App() {
         left: isOverview ? 0 : STICKY_LEAD_W,
         backgroundColor: 'var(--gantt-sticky)'
       }
-    }, "\u5C08\u6848\u540D\u7A31"), Array.from({
+    }, "\u5C08\u6848\u540D\u7A31", /*#__PURE__*/React.createElement("div", {
+      role: "separator",
+      "aria-orientation": "vertical",
+      tabIndex: 0,
+      "aria-label": `調整專案名稱欄寬度，目前 ${nameW} 像素；左右方向鍵調整，Home 還原預設`,
+      "aria-valuenow": nameW,
+      "aria-valuemin": NAME_COL_MIN,
+      "aria-valuemax": nameColLimit(viewportW),
+      title: "\u62D6\u66F3\u8ABF\u6574\u300C\u5C08\u6848\u540D\u7A31\u300D\u6B04\u5BEC\u5EA6\uFF08\u96D9\u64CA\u9084\u539F\u9810\u8A2D\uFF09",
+      onPointerDown: onResizeDown,
+      onPointerMove: onResizeMove,
+      onPointerUp: endResize,
+      onPointerCancel: endResize,
+      onDoubleClick: resetNameColW,
+      onKeyDown: onResizeKey,
+      className: "col-resizer absolute top-0 bottom-0 -right-1 w-2 cursor-col-resize z-10 select-none touch-none"
+    })), Array.from({
       length: weeksTotal
     }).map((_, i) => {
       const weekNum = i + 1;
@@ -3585,6 +4215,10 @@ function App() {
       emptyNote: role === 'member' ? `${scheduleYear} 年度尚未為你建立任何專案。專案與計畫區間由主管建立，請洽管理部主管；建好之後這裡就會出現你的甘特圖，本週有排到的區間會以紅框提醒打卡。` : undefined
     }))) : groupedProjects.map(group => {
       const isCollapsed = collapsedOwners.has(group.owner);
+      // 產出彙總(2026-09-27):週檢視原本**沒有任何彙總**——「已填寫產出項目 n/n 案」只在成果清單的標題列,
+      // 主管在甘特上要靠掃 70 顆圖示自己數,而且逐列圖示也答不出「是誰的沒填」。
+      // 放在群組列＝與旁邊的「n 項・本週回報 x/y」同一種語彙、零新元件,每個專案列不多任何 ink。
+      const gDeliv = group.projects.filter(p => p.deliverable).length;
       let gActive = 0,
         gReported = 0;
       group.projects.forEach(p => p.tasks.forEach(t => {
@@ -3604,7 +4238,7 @@ function App() {
         className: "group/header bg-[var(--gantt-group)] hover:bg-[var(--gantt-group-hover)] cursor-pointer transition-colors"
       }), /*#__PURE__*/React.createElement("td", {
         colSpan: isOverview ? 1 : 3,
-        className: "sticky left-0 z-30 border-r border-b border-blue-200 border-b-blue-100 p-0 shadow-[3px_0_6px_rgba(0,0,0,0.06)]",
+        className: "sticky left-0 z-30 border-r border-b border-blue-200 border-b-blue-100 p-0 frz-group",
         style: {
           width: frozenW,
           minWidth: frozenW,
@@ -3646,15 +4280,21 @@ function App() {
         }
       })), /*#__PURE__*/React.createElement("span", {
         className: `px-1.5 py-0.5 rounded text-[10px] font-bold border ${gReported === gActive ? 'bg-green-100 text-green-800 border-green-200' : 'bg-yellow-100 text-yellow-800 border-yellow-300'}`
-      }, "\u672C\u9031\u56DE\u5831 ", gReported, "/", gActive)), role === 'manager' && !isOverview && /*#__PURE__*/React.createElement("button", {
+      }, "\u672C\u9031\u56DE\u5831 ", gReported, "/", gActive)), group.projects.length > 0 && frozenW >= GROUP_DELIV_MIN_FROZEN_W && /*#__PURE__*/React.createElement("span", {
+        className: `ml-2 flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap ${gDeliv === group.projects.length ? 'bg-green-100 text-green-800 border-green-200' : 'bg-white ctl-raised text-slate-700 border-slate-300'}`,
+        title: `${group.owner}：${group.projects.length} 案中 ${gDeliv} 案已填寫具體產出項目，${group.projects.length - gDeliv} 案未填\n（專案名稱右側的空心靶＝未填，點擊即可填寫）`
+      }, /*#__PURE__*/React.createElement("span", {
+        "aria-hidden": "true"
+      }, "\uD83C\uDFAF"), "\u7522\u51FA ", gDeliv, "/", group.projects.length), role === 'manager' && !isOverview && /*#__PURE__*/React.createElement("button", {
         onClick: e => {
           e.stopPropagation();
           setEditingProject({
             mode: 'add',
             owner: group.owner
           });
-        },
-        className: "ml-auto flex-shrink-0 flex items-center gap-1 bg-white ctl-raised text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-300 rounded px-2 py-0.5 text-[10px] font-bold transition shadow-sm",
+        }
+        /* min-h-[24px]:點擊區下限(WCAG 2.5.8 AA)。群組列比專案列高,補到 24 不會撐高列 */,
+        className: "ml-auto flex-shrink-0 flex items-center justify-center gap-1 min-h-[24px] bg-white ctl-raised text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-300 rounded px-2 py-0.5 text-[10px] font-bold transition shadow-sm",
         title: `為 ${group.owner} 新增專案`
       }, "\uFF0B \u65B0\u589E\u5C08\u6848"))), /*#__PURE__*/React.createElement("td", {
         colSpan: weeksTotal,
@@ -3667,16 +4307,70 @@ function App() {
         key: i,
         className: `flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-100' : ''}`
       }))))), !isCollapsed && group.projects.map((proj, idx) => {
-        // 子區間(遷移 18):掛在各計畫區間底下、可重疊,展開時以「縮排子列」逐條畫在專案列下方。
-        // 一個子區間一列(不擠進父條、也不自動堆疊泳道):重疊區間自然成階梯、名稱在凍結欄一定讀得到。
-        const subEntries = proj.tasks.flatMap(task => (task.subs || []).map(sub => ({
-          task,
-          sub
-        })));
-        const subCount = subEntries.length;
-        const subExpanded = subCount > 0 && isSubExpanded(proj.id);
-        // 同一專案有兩條以上計畫區間都帶子區間時,子列名稱前再標父區間名,否則只靠底帶就分得出
-        const tasksWithSubs = proj.tasks.filter(t => (t.subs || []).length > 0).length;
+        // 版面**只有兩層**:一列＝一個專案(所有計畫區間畫在那一列,週次重疊時才用 laneSplit 分層),
+        // 子區間以縮排子列掛在該層底下——**加一條子區間就多一列**。
+        // ⚠ 2026-09-25 曾加過「WBS 模式」(有子區間的專案多出「一條計畫區間一列」的中間層),同日依使用者
+        //   要求整個拆掉:加一個子區間會多 2 列、展開時專案列的概觀又與區間列重複同一批名字
+        //   (「太奇怪了、不直觀」「我直接加子區間,應該只會多一列」)。**不要再加回中間層。**
+        const lanes = laneSplit(proj.tasks);
+        // 週次有重疊 → 專案列改畫「整體條」,原本的計畫區間降一層、可收合(2026-09-26 使用者決定);
+        // 沒重疊 → 完全是今天的行為(專案列畫它的條＋子區間子列),68 案逐像素不變。
+        const overlap = lanes.length > 1;
+        const projOpen = overlap && isProjOpen(proj.id);
+        // 實際要畫的列:重疊時第一列是摘要列(null),展開後才接上各層
+        const rowLanes = overlap ? [null, ...(projOpen ? lanes : [])] : lanes;
+        // 群組軌:一個專案佔好幾列時才畫
+        const multiLane = rowLanes.length > 1;
+        const laneMeta = lanes.map((lane, li) => {
+          // 子區間(遷移 18):掛在各計畫區間底下、可重疊,展開時以「縮排子列」逐條畫在該層底下。
+          // 一個子區間一列(不擠進父條、也不自動堆疊泳道):重疊區間自然成階梯、名稱在凍結欄一定讀得到。
+          const subs = lane.flatMap(task => (task.subs || []).map(sub => ({
+            task,
+            sub
+          })));
+          const key = laneKeyOf(lane);
+          return {
+            lane,
+            subs,
+            key,
+            expanded: subs.length > 0 && isLaneExpanded(key),
+            // 同一層有兩條以上計畫區間都帶子區間時,子列名稱前才標父區間名(分層後這種情況只剩「同層的接續階段」)
+            tasksWithSubs: lane.filter(t => (t.subs || []).length > 0).length
+          };
+        });
+        const lastLaneIdx = rowLanes.length - 1;
+        // 摘要列(整體條)的資料:聯集段、每週彙總色點、待回報與到期旗標。
+        // ⚠ 色點口徑與父條同一支 `weekUnits`/`unitsDotStatus`/`pickDotStatus`:該週各計畫區間的狀態取**最積極**的那個
+        //   (有執行 > Monitor > 未執行),沒交的區間直接略過——只要有一條回「有執行」,整體條那週就是綠色。
+        const summary = overlap ? (() => {
+          const spans = unionSpans(proj.tasks);
+          const dotsOf = span => {
+            const out = [];
+            for (let wn = span.start; wn <= span.end; wn++) {
+              const act = proj.tasks.filter(t => t.start <= wn && t.end >= wn);
+              if (act.length === 0) continue;
+              const known = act.map(t => unitsDotStatus(weekUnits(t, wn, taskLogs, subLogs))).filter(Boolean);
+              if (known.length === 0) continue;
+              out.push({
+                wn,
+                st: pickDotStatus(known)
+              });
+            }
+            return out;
+          };
+          // 收合時待回報訊號由整體條承接(與「子列收合時父條代為承接」同一條規則)
+          const pending = role === 'member' && proj.owner === currentUser && proj.tasks.some(t => {
+            if (t.start > currentWeek || t.end < currentWeek) return false;
+            const wu = weekUnits(t, currentWeek, taskLogs, subLogs);
+            return wu.reported < wu.total;
+          });
+          return {
+            spans,
+            dotsOf,
+            pending,
+            deadlineSoon: proj.tasks.some(isTaskDeadlineSoon)
+          };
+        })() : null;
         // 拖曳排序的放下目標:專案列與它底下的子列共用同一組 handler(目標一律是 proj.id)。
         // ⚠ 子列在拖曳中**不能藏起來**:上方若有十幾列子區間,一開始拖整張表突然縮短,
         //   游標下的目標會跳成另一個專案(實際踩到)。保留子列、落在子列上=落在父專案上,版面才不動。
@@ -3696,43 +4390,13 @@ function App() {
         // 不改演算法(那樣最後一個位置就永遠放不到),改讓線說實話:往下＝目標區塊底緣(子列展開時是最後一條子列的底緣),往上＝目標頂緣。
         const isDropTarget = dragOverId === proj.id && !!dragState && !isDragSource;
         const dropBelow = isDropTarget && group.projects.findIndex(p => p.id === dragState.id) < idx;
-        // 列底線與拖曳目標的藍線下在每個 td(border-separate 下 tr 的 border 不會畫,見 table 處說明)
-        const rowBorder = `border-b border-slate-300 ${isDropTarget ? dropBelow ? subExpanded ? '' : 'border-b-2 border-b-blue-500' : 'border-t-2 border-t-blue-500' : ''}`;
-        return /*#__PURE__*/React.createElement(React.Fragment, {
-          key: proj.id
-        }, /*#__PURE__*/React.createElement("tr", {
-          "data-proj-row": proj.id,
-          onDragOver: rowDragOver,
-          onDrop: rowDrop,
-          className: `group/row transition-colors ${isDragSource ? 'opacity-40' : ''}`
-        }, !isOverview && /*#__PURE__*/React.createElement("td", {
-          className: `text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r ${rowBorder} text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
-          style: {
-            width: 28,
-            minWidth: 28,
-            maxWidth: 28,
-            boxShadow: '2px 0 0 0 var(--frozen-bg)'
-          }
-        }, idx + 1), !isOverview && /*#__PURE__*/React.createElement("td", {
-          className: `text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r ${rowBorder} text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
-          style: {
-            width: 42,
-            minWidth: 42,
-            maxWidth: 42,
-            left: 28,
-            boxShadow: '2px 0 0 0 var(--frozen-bg)'
-          }
-        }, proj.category), /*#__PURE__*/React.createElement("td", {
-          className: `sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r ${rowBorder} p-0`,
-          style: {
-            width: nameW,
-            minWidth: nameW,
-            maxWidth: nameW,
-            left: isOverview ? 0 : STICKY_LEAD_W,
-            boxShadow: '2px 0 0 0 var(--frozen-bg), 4px 0 8px rgba(0,0,0,0.08)'
-          }
-        }, /*#__PURE__*/React.createElement("div", {
-          className: "w-full h-full flex items-center px-2 overflow-hidden"
+        // WBS 模式的摘要列樣式:細條＋兩端向下的尖角(MS Project 的 Summary Task 語彙),
+        // 刻意與琥珀色的計畫區間條、青綠色的子區間條都不同——它不是一段工作,是「底下那些的涵蓋範圍」。
+        // 專案名稱欄的內容(⠿ 拖曳／類型晶片／專案名／▾ n／⏰／hover ＋✎🗑／🎯)。
+        // swimlane 模式的第一層與 WBS 模式的摘要列共用同一份——兩邊只差「▾ n 是誰的」與「⏰ 算哪些區間」,
+        // 各自用參數傳進來;抽成一份才不會下次只改到其中一邊。
+        const projNameInner = (chipNode, deadlineTasks) => /*#__PURE__*/React.createElement("div", {
+          className: "relative w-full h-full flex items-center px-2 overflow-hidden"
         }, role === 'manager' && !isOverview && (isFilteringRows ? /*#__PURE__*/React.createElement("span", {
           className: "flex-shrink-0 mr-1 text-slate-200 select-none text-[13px] leading-none cursor-not-allowed",
           title: "\u641C\u5C0B/\u985E\u578B\u7BE9\u9078\u4E2D\u7121\u6CD5\u62D6\u66F3\u6392\u5E8F\uFF0C\u8ACB\u5148\u6E05\u9664\u7BE9\u9078"
@@ -3753,20 +4417,8 @@ function App() {
         }, proj.type.toUpperCase()), /*#__PURE__*/React.createElement("span", {
           className: `flex-1 min-w-0 truncate font-semibold text-slate-900 ${isOverview ? 'text-[12.5px]' : isCompact ? 'text-[13px]' : 'text-[15px]'}`,
           title: proj.nid ? `${proj.name}\nNID：${proj.nid}` : proj.name
-        }, proj.name), subCount > 0 && /*#__PURE__*/React.createElement("button", {
-          onClick: e => {
-            e.stopPropagation();
-            toggleSubExpanded(proj.id);
-          },
-          "aria-expanded": subExpanded,
-          "aria-label": `${subExpanded ? '收合' : '展開'}子區間（${subCount} 個）`,
-          disabled: subSearchHits.has(proj.id),
-          title: subSearchHits.has(proj.id) ? `搜尋命中此專案的子區間，已自動展開（清除搜尋後可收合）` : `${subCount} 個子區間，點擊${subExpanded ? '收合' : '展開'}`,
-          className: "flex-shrink-0 ml-1 -my-1 px-1.5 py-1 rounded-full text-[10px] font-bold leading-none whitespace-nowrap bg-sky-100 text-sky-800 border border-sky-300 hover:bg-sky-200 transition disabled:cursor-default"
-        }, /*#__PURE__*/React.createElement("span", {
-          "aria-hidden": "true"
-        }, subExpanded ? '▾' : '▸'), " ", subCount), (() => {
-          const soon = proj.tasks.filter(isTaskDeadlineSoon);
+        }, proj.name), chipNode, (() => {
+          const soon = deadlineTasks.filter(isTaskDeadlineSoon);
           if (soon.length === 0) return null;
           const remain = Math.min(...soon.map(t => t.end - todayWeek + 1));
           // orange-800(不是 700):9px 的字在投影 50:1 下 700 只有 4.18,800 為 5.64
@@ -3777,222 +4429,93 @@ function App() {
             title: `${soon.length} 個計畫區間即將到期(最近的剩 ${remain} 週)`
           }, "\u23F0 \u5269", remain, "\u9031");
         })(), role === 'manager' && !isOverview && /*#__PURE__*/React.createElement("div", {
-          className: "flex-shrink-0 hidden group-hover/row:flex items-center gap-0.5 ml-1"
+          className: "flex-shrink-0 hidden group-hover/row:flex group-focus-within/row:flex items-center gap-0.5 ml-1"
         }, /*#__PURE__*/React.createElement("button", {
           onClick: () => setAddingInterval(proj),
-          className: "w-5 h-5 flex items-center justify-center rounded text-green-600 hover:bg-green-100 font-bold",
+          "aria-label": `新增計畫區間：${proj.name}`,
+          className: "w-6 h-6 flex items-center justify-center rounded text-green-600 hover:bg-green-100 font-bold",
           title: "\u65B0\u589E\u8A08\u756B\u5340\u9593"
-        }, "\uFF0B"), /*#__PURE__*/React.createElement("button", {
+        }, /*#__PURE__*/React.createElement("span", {
+          "aria-hidden": "true"
+        }, "\uFF0B")), /*#__PURE__*/React.createElement("button", {
           onClick: () => setEditingProject({
             mode: 'edit',
             owner: group.owner,
             project: proj
           }),
-          className: "w-5 h-5 flex items-center justify-center rounded text-blue-600 hover:bg-blue-100",
+          "aria-label": `編輯專案：${proj.name}`,
+          className: "w-6 h-6 flex items-center justify-center rounded text-blue-600 hover:bg-blue-100",
           title: "\u7DE8\u8F2F\u5C08\u6848"
-        }, "\u270E"), /*#__PURE__*/React.createElement("button", {
+        }, /*#__PURE__*/React.createElement("span", {
+          "aria-hidden": "true"
+        }, "\u270E")), /*#__PURE__*/React.createElement("button", {
           onClick: () => handleDeleteProject(proj),
-          className: "w-5 h-5 flex items-center justify-center rounded text-red-500 hover:bg-red-100",
+          "aria-label": `刪除專案：${proj.name}`,
+          className: "w-6 h-6 flex items-center justify-center rounded text-red-500 hover:bg-red-100",
           title: "\u522A\u9664\u5C08\u6848"
-        }, "\uD83D\uDDD1")), /*#__PURE__*/React.createElement("button", {
+        }, /*#__PURE__*/React.createElement("span", {
+          "aria-hidden": "true"
+        }, "\uD83D\uDDD1"))), /*#__PURE__*/React.createElement("button", _extends({}, rovingProps({
+          active: String(proj.id) === String(activeRovingDelivId),
+          group: 'deliverable',
+          id: proj.id,
+          onRove: setRovingDelivId
+        }), {
+          onFocus: () => setRovingDelivId(proj.id),
           onClick: e => {
             e.stopPropagation();
             setDeliverableProj(proj);
           },
           className: `flex-shrink-0 px-1 py-1.5 -my-1.5 text-[12px] leading-none transition hover:scale-125 ${proj.deliverable ? 'opacity-90' : 'opacity-25 hover:opacity-70'}`,
-          title: proj.deliverable || proj.mpSaving ? `具體產出項目：${proj.deliverable || '（未填寫）'}${proj.mpSaving ? `\n💡 MP Saving：${proj.mpSaving}` : ''}` : '具體產出項目（尚未填寫，點擊檢視/填寫）'
-        }, "\uD83C\uDFAF"))), /*#__PURE__*/React.createElement("td", {
-          colSpan: weeksTotal,
-          className: `p-0 relative ${rowBorder}`,
-          style: {
-            height: isOverview ? 24 : isCompact ? 28 : 40
-          }
-        }, /*#__PURE__*/React.createElement("div", {
-          className: "absolute inset-0 flex pointer-events-none z-0"
-        }, Array.from({
-          length: weeksTotal
-        }).map((_, i) => /*#__PURE__*/React.createElement("div", {
-          key: i,
-          className: `flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-50/70' : ''}`
-        }))), /*#__PURE__*/React.createElement("div", {
-          className: "absolute top-0 bottom-0 z-10 pointer-events-none",
-          style: {
-            left: `${(currentWeek - 0.5) * (100 / weeksTotal)}%`,
-            borderLeft: '2px solid rgba(220,38,38,0.55)'
-          }
-        }), proj.tasks.map(task => {
-          const isActiveThisWeek = task.start <= currentWeek && task.end >= currentWeek;
-          const weekLog = taskLogs[task.id]?.[currentWeek];
-          // 回報單位(遷移 20):該週有進行中的子區間就以子區間為單位,父條只做彙總顯示
-          const wu = weekUnits(task, currentWeek, taskLogs, subLogs);
-          // 紅框＋❗畫在「回報單位」上(2026-09-13 使用者決定):子區間模式且子列展開時,待回報的是子區間、
-          // 紅框只框子條(各自 subPending),父條不框——否則父條與子條同時亮紅,分不出到底哪條要打卡。
-          // 子列收合時子條看不到,父條就得代為承接(維持彙總判斷),否則收合狀態下待回報訊號整個消失。
-          const isPending = role === 'member' && proj.owner === currentUser && isActiveThisWeek && wu.reported < wu.total && !(wu.mode === 'sub' && subExpanded);
-          const deadlineSoon = isTaskDeadlineSoon(task); // 剩 ≤2 週或已過 70% 時程 → 橘框 + ⏰(未回報紅框優先)
-
-          const isHighlighted = task.id === highlightedTaskId && highlightedSubId == null; // 團隊看板點回報格時的暫時提示(點的是子區間的卡就只亮子條)
-          const barClass = 'text-[#0f172a]'; // 計畫條底永遠是淺奶油色,文字固定深色(不受深色模式覆寫),投影高對比
-          const barStyle = isHighlighted ? {
-            backgroundImage: 'repeating-linear-gradient(45deg, #DBEAFE, #DBEAFE 6px, #BFDBFE 6px, #BFDBFE 12px)',
-            // 淺藍高亮(僅提示用)
-            borderColor: '#2563EB'
-          } : {
-            backgroundImage: 'repeating-linear-gradient(45deg, #FFF6D6, #FFF6D6 6px, #FDEDB8 6px, #FDEDB8 12px)',
-            borderColor: 'rgba(180,83,9,0.75)' // 加深(範本 B):淡黃條在白底上需要更明確的輪廓
-          };
-          const textClass = weekLog ? 'font-bold' : 'font-medium opacity-90';
-          const spanWeeks = task.end - task.start + 1;
-          const leftPercent = (task.start - 1) * (100 / weeksTotal);
-          const widthPercent = (task.end - task.start + 1) * (100 / weeksTotal);
-          // 父條上每週的色點:父層自己的紀錄照舊;子區間模式的週改畫彙總(全交＝最積極的狀態、部分＝琥珀 partial)
-          const dots = [];
-          for (let wn = task.start; wn <= task.end; wn++) {
-            const st = unitsDotStatus(weekUnits(task, wn, taskLogs, subLogs));
-            if (st) dots.push({
-              wn,
-              st
-            });
-          }
-          const weekLabel = !isActiveThisWeek ? '非本週區間' : wu.mode === 'sub' ? `子區間 ${wu.reported}/${wu.total} 已回報` : weekLog ? STATUS_META[weekLog.status]?.label || '已回報' : '尚未回報';
+          "aria-label": `${proj.deliverable ? '已填寫' : '尚未填寫'}具體產出項目：${proj.name}`,
+          title: proj.deliverable || proj.mpSaving ? `具體產出項目：${proj.deliverable || '（未填寫）'}${proj.mpSaving ? `\n💡 MP Saving：${proj.mpSaving}` : ''}\n（Alt+↑↓ 可在各專案的產出鈕之間移動）` : '具體產出項目（尚未填寫，點擊檢視/填寫）\n（Alt+↑↓ 可在各專案的產出鈕之間移動）'
+        }), /*#__PURE__*/React.createElement("span", {
+          "aria-hidden": "true"
+        }, "\uD83C\uDFAF")));
+        return /*#__PURE__*/React.createElement(React.Fragment, {
+          key: proj.id
+        }, rowLanes.map((lane, ri) => {
+          // 重疊時第一列＝摘要列(整體條),其餘列往後位移一格
+          const isSummary = overlap && ri === 0;
+          const li = overlap ? ri - 1 : ri;
+          const meta = isSummary ? null : laneMeta[li];
+          // 帶 No／分類／專案名的那一列:重疊時是摘要列,否則是第一層
+          const isFirstLane = ri === 0;
+          // 這一列是不是整個專案區塊的最後一列(展開時最後一列是該層最後一條子列)
+          const laneIsLastRow = ri === lastLaneIdx && !(meta && meta.expanded);
+          // 列底線與拖曳目標的藍線下在每個 td(border-separate 下 tr 的 border 不會畫,見 table 處說明)。
+          // 藍線畫在「實際會落下的位置」:往下拖＝整個專案區塊的底緣(含所有層與子列)、往上拖＝第一層的頂緣。
+          const rowBorder = `border-b border-slate-300 ${isDropTarget ? dropBelow ? laneIsLastRow ? 'border-b-2 border-b-blue-500' : '' : isFirstLane ? 'border-t-2 border-t-blue-500' : '' : ''}`;
+          // 群組軌:分層後一個專案佔好幾列,而 No／分類只寫在第一列,中間隔著子列時「這些列是同一個專案」就沒東西在講。
+          // ⚠ 只有真的分層(≥2 層)才畫——單層專案(導入時全部 69 案)多一條軌只是噪音,渲染要與分層前完全相同。
+          // ⚠ 軌要掛在**名稱欄的 <td> 本身**(sticky＝已是定位元素,absolute 子元素以它為容器),不能放進裡面的
+          //   flex 容器:那個 div 的 h-full 在 td 裡解析不到列高(實測 28px 的列只量到 22px),軌會變成一段一段的虛線。
+          const laneRail = multiLane ? /*#__PURE__*/React.createElement("div", {
+            "aria-hidden": "true",
+            className: "absolute left-0 top-0 bottom-0 pointer-events-none z-10",
+            style: {
+              width: 3,
+              backgroundColor: 'var(--gantt-lane-rail)'
+            }
+          }) : null;
           return /*#__PURE__*/React.createElement(React.Fragment, {
-            key: task.id
-          }, /*#__PURE__*/React.createElement("div", _extends({}, clickable(() => {
-            clearHighlight();
-            setSelectedTaskInfo({
-              proj,
-              task,
-              sub: null,
-              origin: 'gantt'
-            });
-          }, `${proj.owner} ${proj.name}｜${task.name}｜W${String(task.start).padStart(2, '0')}–W${String(task.end).padStart(2, '0')}｜W${String(currentWeek).padStart(2, '0')} ${weekLabel}`, {
-            roving: {
-              active: String(task.id) === String(activeRovingTaskId),
-              group: 'gantt-bar',
-              id: task.id,
-              onRove: setRovingTaskId
-            }
-          }), {
-            onFocus: () => setRovingTaskId(task.id),
-            onMouseEnter: e => showTooltip(e, proj, task),
-            onMouseMove: moveTooltip,
-            onMouseLeave: hideTooltip,
-            className: `absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 border rounded-sm shadow-sm ${barClass} ${isHighlighted ? 'ring-2 ring-blue-500 ring-offset-1 z-20' : isPending ? 'ring-2 ring-red-400 ring-offset-1 z-10' : deadlineSoon ? 'ring-2 ring-orange-400 ring-offset-1 z-10' : 'z-10'}`,
-            style: {
-              left: `${leftPercent}%`,
-              width: `${widthPercent}%`,
-              top: isOverview ? 4 : 4,
-              bottom: isOverview ? 4 : isCompact ? 6 : 10,
-              ...barStyle
-            }
-          }), dots.map(({
-            wn,
-            st
-          }) => {
-            const isCur = wn === currentWeek;
-            return /*#__PURE__*/React.createElement("div", {
-              key: wn,
-              className: `absolute bottom-0 pointer-events-none ${st === 'partial' ? PARTIAL_DOT : STATUS_META[st]?.dot || 'bg-blue-500'}`,
-              style: {
-                left: `${(wn - task.start) / spanWeeks * 100}%`,
-                width: `${100 / spanWeeks}%`,
-                height: isCur ? '5px' : '4px',
-                opacity: isCur ? 0.95 : 0.75
-              }
-            });
-          }), /*#__PURE__*/React.createElement("span", {
-            className: `relative z-10 truncate whitespace-nowrap ${isOverview ? 'text-[9px] leading-none px-1' : isCompact ? 'text-[10px] px-1.5' : 'text-[12px] px-1.5'} ${textClass}`,
-            style: {
-              textShadow: '0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.75)'
-            }
-          }, isPending && '❗', deadlineSoon && '⏰', task.name)));
-        }))), subExpanded && subEntries.map(({
-          task,
-          sub
-        }, subIdx) => {
-          // 總覽子列 18(不是 16):條內要放 9px 的名稱＋3px 色點,16 扣掉上下 2px 只剩 12px 會疊在一起。
-          const subRowH = isOverview ? 18 : isCompact ? 22 : 26;
-          const isLastSub = subIdx === subEntries.length - 1;
-          // 往下拖到子列展開的專案:藍線畫在最後一條子列底緣(專案會落在整個區塊之後,畫在父列底緣會像「插進子列中間」)
-          const subRowBorder = `${isLastSub ? 'border-slate-300' : 'border-slate-200'} ${dropBelow && isLastSub ? 'border-b-2 border-b-blue-500' : ''}`;
-          // 名稱欄的樹狀導引線(2026-09-13,取代每列一個 └):10 筆子區間時每列都是 └ 會像每列都是最後一筆,
-          // 父列捲出畫面後也不知道這幾列屬於誰、到哪結束。改成一條貫穿的直線,最後一列只畫到一半自然收成 └,
-          // 群組結尾再把底線加粗一階(slate-300),與下一個專案列分開。純 CSS、不進 state。
-          // ⚠ 縮排兩種檢視都是 40(2026-09-14 修):總覽原本 16,但總覽的父列名稱欄一樣有 px-2＋類型晶片(B)＋mr-2,
-          //   專案名從 36px 起,子區間名稱 16px 反而跑到專案名**左邊**,讀起來像另一層、不像底下的子項。
-          const subIndent = 40;
-          const guideX = subIndent - 10;
-          const phase = sub.end < todayWeek ? 'done' : sub.start > todayWeek ? 'future' : 'active';
-          const phaseLabel = phase === 'done' ? '已結束' : phase === 'future' ? '未開始' : '進行中';
-          // 條色與父條一樣走行內固定色(淺底深字,不受深色模式覆寫),投影高對比。
-          // ⚠ 子條用 **teal(青綠)色系**、與父條的琥珀色明確分開(2026-09-13 使用者決定,推翻同日稍早的「沿用父條琥珀色」):
-          //   同色系版實測「一眼望去看不出來是什麼」——子條與父條、奶油底帶全是黃的,只差深淺根本分不出層級。
-          //   色相挑 teal 是因為圖上其他顏色都已有語意:琥珀＝計畫區間、藍＝看板高亮/按鈕、綠/天藍＝回報狀態色點、
-          //   紅＝待回報/當週線、紫＝主管回覆;teal 沒人用,且與看板高亮的 #DBEAFE 藍分得開(點看板時只有那條變藍)。
-          //   ⚠ **一種樣式、不分階段**(2026-09-13 使用者兩次回報後定案):斜紋 #CCFBF1/#BDF7EC＋1px rgba(15,118,110,.75) 框,
-          //   與父條**完全同一種構造**(同紋距、同框粗細、同透明度)只換色相。之前依「今天」分三階段
-          //   (未開始虛線／進行中實心→斜紋深框／已結束淡斜紋淡框),使用者看到上下兩個專案的子條顏色不同,
-          //   直覺是「顏色不一致＝壞掉」而不是「一個進行中一個已結束」——父條本來就不分階段(W01 的區間到年底
-          //   照樣奶油斜紋),子條單獨分只會多一套要學的語彙。階段資訊留在 tooltip 的 phaseLabel。
-          //   ⚠ 也不用實心(更早一版是 #99F6E4 實心):全圖唯一一條實心飽和色會被讀成「進度填色/做完了」。
-          //   ⚠ **暗條用 #BDF7EC 不用 #99F6E4**(2026-09-13 使用者:子條看起來比父條重、主從層次反了):兩條斜紋的亮度差
-          //   父條只有 0.03(#FFF6D6/#FDEDB8)、子條原本 0.10(#CCFBF1/#99F6E4)＝3 倍,紋路太吵才顯得搶眼;
-          //   亮條與邊框的深度本來就跟父條一樣。改 #BDF7EC 後 ΔL=0.05 與父條同量級。**不要整條調淺**:
-          //   亮條 #CCFBF1(L .88)跟底下的奶油底帶(L≈.92)只差 .04,再淺就融進底帶;子條是打卡入口,變淡會像不能點。
-          //   主從層次由 └ 縮排、子列位置、父區間底帶表達,顏色只要「不搶」就夠。
-          //   對比:#0f172a 字在 #BDF7EC/#CCFBF1 上≈14+、teal-700 框對白底 5.5,投影 OK。
-          const subHighlighted = sub.id === highlightedSubId; // 看板點「這條子區間」的卡才亮這條(父條與其他子條不亮)
-          const subBarStyle = subHighlighted ? {
-            backgroundColor: '#DBEAFE',
-            borderColor: '#2563EB',
-            borderStyle: 'solid',
-            borderWidth: 1.5
-          } : {
-            backgroundImage: 'repeating-linear-gradient(45deg, #CCFBF1, #CCFBF1 6px, #BDF7EC 6px, #BDF7EC 12px)',
-            borderColor: 'rgba(15,118,110,0.75)',
-            borderStyle: 'solid'
-          };
-          // 子區間自遷移 20 起是回報單位:該週落在範圍內、父層那週沒有舊紀錄 → 這條子區間本週要打卡
-          const subActiveThisWeek = sub.start <= currentWeek && sub.end >= currentWeek;
-          const parentWu = weekUnits(task, currentWeek, taskLogs, subLogs);
-          const subLog = subLogs[sub.id]?.[currentWeek];
-          const subIsUnit = subActiveThisWeek && parentWu.mode === 'sub';
-          const subPending = role === 'member' && proj.owner === currentUser && subIsUnit && !subLog;
-          const rangeText = `W${String(sub.start).padStart(2, '0')}–W${String(sub.end).padStart(2, '0')}`;
-          const subWeekLabel = subIsUnit ? subLog ? STATUS_META[subLog.status]?.label || '已回報' : '尚未回報' : phaseLabel;
-          const subTitle = `${task.name} › ${sub.name}（${rangeText}・${phaseLabel}）${subIsUnit ? `｜W${String(currentWeek).padStart(2, '0')} ${subWeekLabel}` : ''}`;
-          const openSub = () => {
-            clearHighlight();
-            setSelectedTaskInfo({
-              proj,
-              task,
-              sub,
-              origin: 'gantt'
-            });
-          };
-          // 總開關關著時不畫子區間的色點(那時回報單位是父區間,色點畫在父條上;舊的子區間回報留在 DB 不顯示)
-          const subDots = !SUB_CHECKIN ? [] : Object.entries(subLogs[sub.id] || {}).map(([w, l]) => ({
-            wn: Number(w),
-            st: l.status
-          })).filter(d => d.wn >= sub.start && d.wn <= sub.end);
-          const subSpan = sub.end - sub.start + 1;
-          const subRovingId = `s${sub.id}`;
-          return /*#__PURE__*/React.createElement("tr", {
-            key: `sub-${sub.id}`,
-            "data-sub-row": sub.id,
+            key: isSummary ? 'sum' : meta.key != null ? `lane-${meta.key}` : `lane-${li}`
+          }, /*#__PURE__*/React.createElement("tr", _extends({}, isFirstLane ? {
+            'data-proj-row': proj.id
+          } : {}, {
             onDragOver: rowDragOver,
             onDrop: rowDrop,
-            className: `group/row ${isDragSource ? 'opacity-40' : ''}`
-          }, !isOverview && /*#__PURE__*/React.createElement("td", {
-            className: `sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 border-b ${subRowBorder}`,
+            className: `group/row transition-colors ${isDragSource ? 'opacity-40' : ''}`
+          }), !isOverview && /*#__PURE__*/React.createElement("td", {
+            className: `text-center sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r ${rowBorder} text-slate-500 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
             style: {
               width: 28,
               minWidth: 28,
               maxWidth: 28,
               boxShadow: '2px 0 0 0 var(--frozen-bg)'
             }
-          }), !isOverview && /*#__PURE__*/React.createElement("td", {
-            className: `sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 border-b ${subRowBorder}`,
+          }, isFirstLane ? idx + 1 : ''), !isOverview && /*#__PURE__*/React.createElement("td", {
+            className: `text-center sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r ${rowBorder} text-slate-800 font-medium ${isCompact ? 'py-1' : 'py-2'}`,
             style: {
               width: 42,
               minWidth: 42,
@@ -4000,50 +4523,80 @@ function App() {
               left: 28,
               boxShadow: '2px 0 0 0 var(--frozen-bg)'
             }
-          }), /*#__PURE__*/React.createElement("td", {
-            className: `sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 border-b ${subRowBorder} p-0`,
+          }, isFirstLane ? proj.category : ''), /*#__PURE__*/React.createElement("td", {
+            className: `sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r ${rowBorder} p-0 frz-name`,
             style: {
               width: nameW,
               minWidth: nameW,
               maxWidth: nameW,
-              left: isOverview ? 0 : STICKY_LEAD_W,
-              boxShadow: '2px 0 0 0 var(--frozen-bg), 4px 0 8px rgba(0,0,0,0.08)'
+              left: isOverview ? 0 : STICKY_LEAD_W
             }
-          }, /*#__PURE__*/React.createElement("div", {
-            className: "relative w-full h-full flex items-center overflow-hidden pr-2",
+          }, laneRail, !isFirstLane ? /*#__PURE__*/React.createElement("div", {
+            className: "relative w-full h-full flex items-center px-2 overflow-hidden",
             style: {
-              paddingLeft: subIndent
+              paddingLeft: lanePadL
             }
-          }, /*#__PURE__*/React.createElement("div", {
+          }, /*#__PURE__*/React.createElement("span", {
             "aria-hidden": "true",
-            className: "absolute border-l border-slate-400 pointer-events-none",
-            style: {
-              left: guideX,
-              top: 0,
-              bottom: isLastSub ? '50%' : 0
-            }
-          }), /*#__PURE__*/React.createElement("div", {
-            "aria-hidden": "true",
-            className: "absolute border-t border-slate-400 pointer-events-none",
-            style: {
-              left: guideX,
-              width: 7,
-              top: '50%'
-            }
-          }), tasksWithSubs > 1 && /*#__PURE__*/React.createElement("span", {
-            className: "flex-shrink-0 mr-1.5 px-1 rounded text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-300 truncate",
-            style: {
-              maxWidth: 88
+            className: "flex-shrink-0 mr-1.5 text-slate-500 font-bold text-[12px] leading-none"
+          }, "\u21B3"), /*#__PURE__*/React.createElement("span", {
+            className: `flex-1 min-w-0 truncate text-slate-600 ${isOverview ? 'text-[11.5px]' : isCompact ? 'text-[12px]' : 'text-[12.5px]'}`,
+            title: `${proj.name}｜${lane.map(t => `${t.name}（W${String(t.start).padStart(2, '0')}–W${String(t.end).padStart(2, '0')}）`).join('、')}`
+          }, lane.map(t => t.name).join('、')), meta.subs.length > 0 && /*#__PURE__*/React.createElement("button", {
+            onClick: e => {
+              e.stopPropagation();
+              toggleLaneExpanded(meta.key);
             },
-            title: `所屬計畫區間：${task.name}`
-          }, task.name), /*#__PURE__*/React.createElement("span", {
-            className: `flex-1 min-w-0 truncate text-slate-700 ${isOverview ? 'text-[11px]' : isCompact ? 'text-[11px]' : 'text-[12px]'}`,
-            title: subTitle
-          }, sub.name))), /*#__PURE__*/React.createElement("td", {
+            "aria-expanded": meta.expanded,
+            "aria-label": `${meta.expanded ? '收合' : '展開'}子區間（${meta.subs.length} 個）`,
+            disabled: subSearchHits.has(meta.key),
+            title: subSearchHits.has(meta.key) ? `搜尋命中此區間的子區間，已自動展開（清除搜尋後可收合）` : `${meta.subs.length} 個子區間，點擊${meta.expanded ? '收合' : '展開'}`,
+            className: laneChipCls(isOverview)
+          }, /*#__PURE__*/React.createElement("span", {
+            "aria-hidden": "true"
+          }, meta.expanded ? '▾' : '▸'), " ", meta.subs.length), (() => {
+            const soon = lane.filter(isTaskDeadlineSoon);
+            if (soon.length === 0) return null;
+            const remain = Math.min(...soon.map(t => t.end - todayWeek + 1));
+            return /*#__PURE__*/React.createElement("span", {
+              className: "flex-shrink-0 ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-orange-100 text-orange-800 border border-orange-300 whitespace-nowrap",
+              title: `${soon.length} 個計畫區間即將到期(最近的剩 ${remain} 週)`
+            }, "\u23F0 \u5269", remain, "\u9031");
+          })()) : isSummary ? projNameInner(
+          /*#__PURE__*/
+          /* 重疊的專案:晶片展開的是「計畫區間」(n＝區間數)。位置與子區間的 ▸ n 相同。
+             ⚠ 原本這裡寫「使用者不必分辨」並與子區間共用同一個藍色,**已被 2026-09-26 的實際回報否證**
+             (「左半部下拉都是藍色很混亂」);現在顏色分兩種,kind='proj' ＝ sky,見 laneChipCls。 */
+          React.createElement("button", {
+            onClick: e => {
+              e.stopPropagation();
+              toggleProjOpen(proj.id);
+            },
+            "aria-expanded": projOpen,
+            "aria-label": `${projOpen ? '收合' : '展開'}計畫區間（${proj.tasks.length} 條）`,
+            disabled: projSearchHits.has(proj.id),
+            title: projSearchHits.has(proj.id) ? `搜尋命中此專案，已自動展開（清除搜尋後可收合）` : `${proj.tasks.length} 條計畫區間（週次互相重疊），點擊${projOpen ? '收合' : '展開'}`,
+            className: laneChipCls(isOverview, 'proj')
+          }, /*#__PURE__*/React.createElement("span", {
+            "aria-hidden": "true"
+          }, projOpen ? '▾' : '▸'), " ", proj.tasks.length, " \u689D\u5340\u9593"), /* ⏰ 只在收合時彙總在這一列;展開後每條區間自己那列會標,免得同一件事講兩遍 */
+          projOpen ? [] : proj.tasks) : projNameInner(meta.subs.length > 0 ? /*#__PURE__*/React.createElement("button", {
+            onClick: e => {
+              e.stopPropagation();
+              toggleLaneExpanded(meta.key);
+            },
+            "aria-expanded": meta.expanded,
+            "aria-label": `${meta.expanded ? '收合' : '展開'}子區間（${meta.subs.length} 個）`,
+            disabled: subSearchHits.has(meta.key),
+            title: subSearchHits.has(meta.key) ? `搜尋命中此專案的子區間，已自動展開（清除搜尋後可收合）` : `${meta.subs.length} 個子區間，點擊${meta.expanded ? '收合' : '展開'}`,
+            className: laneChipCls(isOverview)
+          }, /*#__PURE__*/React.createElement("span", {
+            "aria-hidden": "true"
+          }, meta.expanded ? '▾' : '▸'), " ", meta.subs.length) : null, lane)), /*#__PURE__*/React.createElement("td", {
             colSpan: weeksTotal,
-            className: `p-0 relative border-b ${subRowBorder}`,
+            className: `p-0 relative ${rowBorder}`,
             style: {
-              height: subRowH
+              height: isOverview ? 24 : isCompact ? 28 : 40
             }
           }, /*#__PURE__*/React.createElement("div", {
             className: "absolute inset-0 flex pointer-events-none z-0"
@@ -4053,57 +4606,378 @@ function App() {
             key: i,
             className: `flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-50/70' : ''}`
           }))), /*#__PURE__*/React.createElement("div", {
-            className: "absolute top-0 bottom-0 z-0 pointer-events-none",
-            style: {
-              left: `${(task.start - 1) * (100 / weeksTotal)}%`,
-              width: `${(task.end - task.start + 1) * (100 / weeksTotal)}%`,
-              backgroundColor: 'var(--gantt-sub-band)'
-            }
-          }), /*#__PURE__*/React.createElement("div", {
             className: "absolute top-0 bottom-0 z-10 pointer-events-none",
             style: {
               left: `${(currentWeek - 0.5) * (100 / weeksTotal)}%`,
               borderLeft: '2px solid rgba(220,38,38,0.55)'
             }
-          }), /*#__PURE__*/React.createElement("div", _extends({}, clickable(openSub, `${proj.owner} ${proj.name}｜${subTitle}`, {
-            roving: {
-              active: String(subRovingId) === String(activeRovingTaskId),
-              group: 'gantt-bar',
-              id: subRovingId,
-              onRove: setRovingTaskId
+          }), isSummary && summary.spans.map((span, si) => {
+            const spanWeeks = span.end - span.start + 1;
+            const sDots = summary.dotsOf(span);
+            const label = `${proj.owner} ${proj.name}｜${proj.tasks.length} 條計畫區間（週次重疊）｜W${String(span.start).padStart(2, '0')}–W${String(span.end).padStart(2, '0')}｜點擊展開`;
+            const common = {
+              onClick: () => toggleProjOpen(proj.id),
+              title: `${proj.name}\n${proj.tasks.length} 條計畫區間（週次互相重疊）・W${String(span.start).padStart(2, '0')}–W${String(span.end).padStart(2, '0')}\n點擊展開逐條檢視`,
+              // 待回報時條本身不掛 ring,改由下方的 <PendingMark> 框當週那一格(見它的說明)
+              className: `absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 border rounded-sm shadow-sm text-[#0f172a] ${summary.pending ? 'z-10' : summary.deadlineSoon ? 'ring-2 ring-orange-400 ring-offset-1 z-10' : 'z-10'}`,
+              style: {
+                left: `${(span.start - 1) * (100 / weeksTotal)}%`,
+                width: `${spanWeeks * (100 / weeksTotal)}%`,
+                top: 4,
+                bottom: isOverview ? 4 : isCompact ? 6 : 10,
+                // ⚠ 斜紋是 **135deg**(計畫區間條是 45deg),其餘色值／邊框／高度／色點完全相同(2026-09-26)。
+                //   原本兩者是同一組像素,展開時整體條＝底下各條的聯集、畫在正上方一列,同一種語言講兩遍,
+                //   使用者回報「畫面太雜亂、顏色重複性太高」。人眼對**紋理方向**極敏感,一眼分得出兩列不同,
+                //   但它仍是「同一種東西的變體」＝語意正確(兩者都屬計畫區間家族)。
+                //   ⚠ **不要改成空心／換色相／換圖形**:①空心版做過又拆掉——收合實心、展開空心＝同一個元素
+                //     因狀態換一套樣貌,與「子條不依階段變樣式」「父條不因過去了就變灰」同一條規則牴觸,
+                //     使用者原話「我不想收合起來,有的是淺黃有的是空的,這樣超奇怪」;②換色相／發明摘要圖形
+                //     是 2026-09-25 連退三版的那條路(深板岩細條／灰底線／只留狀態色)。整體條一律淺黃實心斜紋。
+                backgroundImage: 'repeating-linear-gradient(135deg, #FFF6D6, #FFF6D6 6px, #FDEDB8 6px, #FDEDB8 12px)',
+                borderColor: 'rgba(180,83,9,0.75)'
+              }
+            };
+            const dotsNode = sDots.map(({
+              wn,
+              st
+            }) => /*#__PURE__*/React.createElement("div", {
+              key: wn,
+              className: `absolute bottom-0 pointer-events-none ${STATUS_META[st]?.dot || 'bg-blue-500'}`,
+              style: {
+                left: `${(wn - span.start) / spanWeeks * 100}%`,
+                width: `${100 / spanWeeks}%`,
+                height: wn === currentWeek ? '5px' : '4px',
+                opacity: wn === currentWeek ? 0.95 : 0.75
+              }
+            }));
+            // 聯集可能有好幾段,待回報標記只畫在**涵蓋當週的那一段**上(其餘段不含當週,畫了沒有意義)
+            const spanHasNow = span.start <= currentWeek && span.end >= currentWeek;
+            const mark = summary.pending && spanHasNow ? /*#__PURE__*/React.createElement(PendingMark, {
+              weeksTotal: weeksTotal,
+              week: currentWeek,
+              top: 4,
+              bottom: isOverview ? 4 : isCompact ? 6 : 10
+            }) : null;
+            // 只有第一段進 roving(整列一個目標就夠,Enter＝展開);其餘段是滑鼠入口,不重複佔鍵盤停留點
+            return /*#__PURE__*/React.createElement(React.Fragment, {
+              key: `sp${span.start}`
+            }, si === 0 ? /*#__PURE__*/React.createElement("div", _extends({}, clickable(() => toggleProjOpen(proj.id), label, {
+              roving: {
+                active: String(`p${proj.id}`) === String(activeRovingTaskId),
+                group: 'gantt-bar',
+                id: `p${proj.id}`,
+                onRove: setRovingTaskId
+              }
+            }), {
+              onFocus: () => setRovingTaskId(`p${proj.id}`),
+              title: common.title,
+              className: common.className,
+              style: common.style
+            }), dotsNode) : /*#__PURE__*/React.createElement("div", _extends({}, common, {
+              tabIndex: -1,
+              "aria-hidden": "true"
+            }), dotsNode), mark);
+          }), !isSummary && lane.map(task => {
+            const isActiveThisWeek = task.start <= currentWeek && task.end >= currentWeek;
+            const weekLog = taskLogs[task.id]?.[currentWeek];
+            // 回報單位(遷移 20):該週有進行中的子區間就以子區間為單位,父條只做彙總顯示
+            const wu = weekUnits(task, currentWeek, taskLogs, subLogs);
+            // 紅框畫在「回報單位」上(2026-09-13 使用者決定;❗ 已於 2026-09-28 移除):子區間模式且子列展開時,待回報的是子區間、
+            // 紅框只框子條(各自 subPending),父條不框——否則父條與子條同時亮紅,分不出到底哪條要打卡。
+            // 子列收合時子條看不到,父條就得代為承接(維持彙總判斷),否則收合狀態下待回報訊號整個消失。
+            const isPending = role === 'member' && proj.owner === currentUser && isActiveThisWeek && wu.reported < wu.total && !(wu.mode === 'sub' && meta.expanded);
+            const deadlineSoon = isTaskDeadlineSoon(task); // 剩 ≤2 週或已過 70% 時程 → 橘框 + ⏰(未回報紅框優先)
+
+            const isHighlighted = task.id === highlightedTaskId && highlightedSubId == null; // 團隊看板點回報格時的暫時提示(點的是子區間的卡就只亮子條)
+            const barClass = 'text-[#0f172a]'; // 計畫條底永遠是淺奶油色,文字固定深色(不受深色模式覆寫),投影高對比
+            const barStyle = isHighlighted ? {
+              backgroundImage: 'repeating-linear-gradient(45deg, #DBEAFE, #DBEAFE 6px, #BFDBFE 6px, #BFDBFE 12px)',
+              // 淺藍高亮(僅提示用)
+              borderColor: '#2563EB'
+            } : {
+              backgroundImage: 'repeating-linear-gradient(45deg, #FFF6D6, #FFF6D6 6px, #FDEDB8 6px, #FDEDB8 12px)',
+              borderColor: 'rgba(180,83,9,0.75)' // 加深(範本 B):淡黃條在白底上需要更明確的輪廓
+            };
+            const textClass = weekLog ? 'font-bold' : 'font-medium opacity-90';
+            const spanWeeks = task.end - task.start + 1;
+            const leftPercent = (task.start - 1) * (100 / weeksTotal);
+            const widthPercent = (task.end - task.start + 1) * (100 / weeksTotal);
+            // 父條上每週的色點:父層自己的紀錄照舊;子區間模式的週改畫彙總(取最積極的狀態,沒交的子區間略過)
+            const dots = [];
+            for (let wn = task.start; wn <= task.end; wn++) {
+              const st = unitsDotStatus(weekUnits(task, wn, taskLogs, subLogs));
+              if (st) dots.push({
+                wn,
+                st
+              });
             }
-          }), {
-            onFocus: () => setRovingTaskId(subRovingId)
-            // hover 回饋與 tooltip 都比照父條(2026-09-13):子條是打卡入口,原本滑過去毫無反應、只有原生 title
-            // (延遲 1 秒、不顯示回報內容),使用者會覺得「父條會動、子條不會動＝不能點」。
-            // 原生 title 拿掉:自訂 tooltip 已涵蓋,兩個同時出現會疊在一起。
-            ,
-            onMouseEnter: e => showTooltip(e, proj, task, sub),
-            onMouseMove: moveTooltip,
-            onMouseLeave: hideTooltip,
-            className: `absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 border rounded-sm shadow-sm text-[#0f172a] ${subHighlighted ? 'ring-2 ring-blue-500 ring-offset-1 z-20' : subPending ? 'ring-2 ring-red-400 ring-offset-1 z-20' : 'z-10'}`,
-            style: {
-              left: `${(sub.start - 1) * (100 / weeksTotal)}%`,
-              width: `${(sub.end - sub.start + 1) * (100 / weeksTotal)}%`,
+            const weekLabel = !isActiveThisWeek ? '非本週區間' : wu.mode === 'sub' ? `子區間 ${wu.reported}/${wu.total} 已回報` : weekLog ? STATUS_META[weekLog.status]?.label || '已回報' : '尚未回報';
+            return /*#__PURE__*/React.createElement(React.Fragment, {
+              key: task.id
+            }, /*#__PURE__*/React.createElement("div", _extends({}, clickable(() => {
+              clearHighlight();
+              setPanelReturn(null);
+              setSelectedTaskInfo({
+                proj,
+                task,
+                sub: null,
+                origin: 'gantt'
+              });
+            }, `${proj.owner} ${proj.name}｜${task.name}｜W${String(task.start).padStart(2, '0')}–W${String(task.end).padStart(2, '0')}｜W${String(currentWeek).padStart(2, '0')} ${weekLabel}`, {
+              roving: {
+                active: String(task.id) === String(activeRovingTaskId),
+                group: 'gantt-bar',
+                id: task.id,
+                onRove: setRovingTaskId
+              }
+            }), {
+              onFocus: () => setRovingTaskId(task.id),
+              onMouseEnter: e => showTooltip(e, proj, task),
+              onMouseMove: moveTooltip,
+              onMouseLeave: hideTooltip
+              // 待回報時條本身不掛 ring,改由條後面的 <PendingMark> 框當週那一格(見它的說明)
+              ,
+              className: `absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 border rounded-sm shadow-sm ${barClass} ${isHighlighted ? 'ring-2 ring-blue-500 ring-offset-1 z-20' : isPending ? 'z-10' : deadlineSoon ? 'ring-2 ring-orange-400 ring-offset-1 z-10' : 'z-10'}`,
+              style: {
+                left: `${leftPercent}%`,
+                width: `${widthPercent}%`,
+                top: isOverview ? 4 : 4,
+                bottom: isOverview ? 4 : isCompact ? 6 : 10,
+                ...barStyle
+              }
+            }), dots.map(({
+              wn,
+              st
+            }) => {
+              const isCur = wn === currentWeek;
+              return /*#__PURE__*/React.createElement("div", {
+                key: wn,
+                className: `absolute bottom-0 pointer-events-none ${STATUS_META[st]?.dot || 'bg-blue-500'}`,
+                style: {
+                  left: `${(wn - task.start) / spanWeeks * 100}%`,
+                  width: `${100 / spanWeeks}%`,
+                  height: isCur ? '5px' : '4px',
+                  opacity: isCur ? 0.95 : 0.75
+                }
+              });
+            }), /*#__PURE__*/React.createElement("span", {
+              className: `relative z-10 truncate whitespace-nowrap ${isOverview ? 'text-[9px] leading-none px-1' : isCompact ? 'text-[10px] px-1.5' : 'text-[12px] px-1.5'} ${textClass}`,
+              style: {
+                textShadow: '0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.75)'
+              }
+            }, deadlineSoon && '⏰', task.name)), isPending && /*#__PURE__*/React.createElement(PendingMark, {
+              weeksTotal: weeksTotal,
+              week: currentWeek,
+              top: 4,
+              bottom: isOverview ? 4 : isCompact ? 6 : 10
+            }));
+          }))), meta && meta.expanded && meta.subs.map(({
+            task,
+            sub
+          }, subIdx) => {
+            // 總覽子列 18(不是 16):條內要放 9px 的名稱＋3px 色點,16 扣掉上下 2px 只剩 12px 會疊在一起。
+            const subRowH = isOverview ? 18 : isCompact ? 22 : 26;
+            const isLastSub = subIdx === meta.subs.length - 1;
+            // 往下拖到子列展開的專案:藍線畫在**整個專案區塊**的最後一列底緣(含後面幾層),
+            // 畫在中間任何一列都會像「插進這個專案裡面」。
+            const isBlockLastRow = isLastSub && ri === lastLaneIdx;
+            const subRowBorder = `${isLastSub ? 'border-slate-300' : 'border-slate-200'} ${dropBelow && isBlockLastRow ? 'border-b-2 border-b-blue-500' : ''}`;
+            // 名稱欄的樹狀導引線(2026-09-13,取代每列一個 └):10 筆子區間時每列都是 └ 會像每列都是最後一筆,
+            // 父列捲出畫面後也不知道這幾列屬於誰、到哪結束。改成一條貫穿的直線,最後一列只畫到一半自然收成 └,
+            // 群組結尾再把底線加粗一階(slate-300),與下一個專案列分開。純 CSS、不進 state。
+            // ⚠ 縮排兩種檢視共用同一份(2026-09-14 修:總覽原本 16,子區間名稱反而跑到專案名左邊),
+            //   2026-09-26 起改由 App 層的 subIndent 統一算出三層左緣階梯,見 nameW 附近的說明。
+            const guideX = subIndent - 10;
+            const phase = sub.end < todayWeek ? 'done' : sub.start > todayWeek ? 'future' : 'active';
+            const phaseLabel = phase === 'done' ? '已結束' : phase === 'future' ? '未開始' : '進行中';
+            // 條色與父條一樣走行內固定色(淺底深字,不受深色模式覆寫),投影高對比。
+            // ⚠ 子條用 **teal(青綠)色系**、與父條的琥珀色明確分開(2026-09-13 使用者決定,推翻同日稍早的「沿用父條琥珀色」):
+            //   同色系版實測「一眼望去看不出來是什麼」——子條與父條、奶油底帶全是黃的,只差深淺根本分不出層級。
+            //   色相挑 teal 是因為圖上其他顏色都已有語意:琥珀＝計畫區間、藍＝看板高亮/按鈕、綠/天藍＝回報狀態色點、
+            //   紅＝待回報/當週線、紫＝主管回覆;teal 沒人用,且與看板高亮的 #DBEAFE 藍分得開(點看板時只有那條變藍)。
+            //   ⚠ **一種樣式、不分階段**(2026-09-13 使用者兩次回報後定案):斜紋 #CCFBF1/#BDF7EC＋1px rgba(15,118,110,.75) 框,
+            //   與父條**完全同一種構造**(同紋距、同框粗細、同透明度)只換色相。之前依「今天」分三階段
+            //   (未開始虛線／進行中實心→斜紋深框／已結束淡斜紋淡框),使用者看到上下兩個專案的子條顏色不同,
+            //   直覺是「顏色不一致＝壞掉」而不是「一個進行中一個已結束」——父條本來就不分階段(W01 的區間到年底
+            //   照樣奶油斜紋),子條單獨分只會多一套要學的語彙。階段資訊留在 tooltip 的 phaseLabel。
+            //   ⚠ 也不用實心(更早一版是 #99F6E4 實心):全圖唯一一條實心飽和色會被讀成「進度填色/做完了」。
+            //   ⚠ **暗條用 #BDF7EC 不用 #99F6E4**(2026-09-13 使用者:子條看起來比父條重、主從層次反了):兩條斜紋的亮度差
+            //   父條只有 0.03(#FFF6D6/#FDEDB8)、子條原本 0.10(#CCFBF1/#99F6E4)＝3 倍,紋路太吵才顯得搶眼;
+            //   亮條與邊框的深度本來就跟父條一樣。改 #BDF7EC 後 ΔL=0.05 與父條同量級。**不要整條調淺**:
+            //   亮條 #CCFBF1(L .88)跟底下的奶油底帶(L≈.92)只差 .04,再淺就融進底帶;子條是打卡入口,變淡會像不能點。
+            //   主從層次由 └ 縮排、子列位置、父區間底帶表達,顏色只要「不搶」就夠。
+            //   對比:#0f172a 字在 #BDF7EC/#CCFBF1 上≈14+、teal-700 框對白底 5.5,投影 OK。
+            const subHighlighted = sub.id === highlightedSubId; // 看板點「這條子區間」的卡才亮這條(父條與其他子條不亮)
+            const subBarStyle = subHighlighted ? {
+              backgroundColor: '#DBEAFE',
+              borderColor: '#2563EB',
+              borderStyle: 'solid',
+              borderWidth: 1.5
+            } : {
+              backgroundImage: 'repeating-linear-gradient(45deg, #CCFBF1, #CCFBF1 6px, #BDF7EC 6px, #BDF7EC 12px)',
+              borderColor: 'rgba(15,118,110,0.75)',
+              borderStyle: 'solid'
+            };
+            // 子區間自遷移 20 起是回報單位:該週落在範圍內、父層那週沒有舊紀錄 → 這條子區間本週要打卡
+            const subActiveThisWeek = sub.start <= currentWeek && sub.end >= currentWeek;
+            const parentWu = weekUnits(task, currentWeek, taskLogs, subLogs);
+            const subLog = subLogs[sub.id]?.[currentWeek];
+            const subIsUnit = subActiveThisWeek && parentWu.mode === 'sub';
+            const subPending = role === 'member' && proj.owner === currentUser && subIsUnit && !subLog;
+            const rangeText = `W${String(sub.start).padStart(2, '0')}–W${String(sub.end).padStart(2, '0')}`;
+            const subWeekLabel = subIsUnit ? subLog ? STATUS_META[subLog.status]?.label || '已回報' : '尚未回報' : phaseLabel;
+            const subTitle = `${task.name} › ${sub.name}（${rangeText}・${phaseLabel}）${subIsUnit ? `｜W${String(currentWeek).padStart(2, '0')} ${subWeekLabel}` : ''}`;
+            const openSub = () => {
+              clearHighlight();
+              setPanelReturn(null);
+              setSelectedTaskInfo({
+                proj,
+                task,
+                sub,
+                origin: 'gantt'
+              });
+            };
+            // 總開關關著時不畫子區間的色點(那時回報單位是父區間,色點畫在父條上;舊的子區間回報留在 DB 不顯示)
+            const subDots = !SUB_CHECKIN ? [] : Object.entries(subLogs[sub.id] || {}).map(([w, l]) => ({
+              wn: Number(w),
+              st: l.status
+            })).filter(d => d.wn >= sub.start && d.wn <= sub.end);
+            const subSpan = sub.end - sub.start + 1;
+            const subRovingId = `s${sub.id}`;
+            return /*#__PURE__*/React.createElement("tr", {
+              key: `sub-${sub.id}`,
+              "data-sub-row": sub.id,
+              onDragOver: rowDragOver,
+              onDrop: rowDrop,
+              className: `group/row ${isDragSource ? 'opacity-40' : ''}`
+            }, !isOverview && /*#__PURE__*/React.createElement("td", {
+              className: `sticky left-0 bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 border-b ${subRowBorder}`,
+              style: {
+                width: 28,
+                minWidth: 28,
+                maxWidth: 28,
+                boxShadow: '2px 0 0 0 var(--frozen-bg)'
+              }
+            }), !isOverview && /*#__PURE__*/React.createElement("td", {
+              className: `sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 border-b ${subRowBorder}`,
+              style: {
+                width: 42,
+                minWidth: 42,
+                maxWidth: 42,
+                left: 28,
+                boxShadow: '2px 0 0 0 var(--frozen-bg)'
+              }
+            }), /*#__PURE__*/React.createElement("td", {
+              className: `sticky bg-white group-hover/row:bg-[var(--gantt-row-hover)] z-30 border-r border-slate-300 border-b ${subRowBorder} p-0 frz-name`,
+              style: {
+                width: nameW,
+                minWidth: nameW,
+                maxWidth: nameW,
+                left: isOverview ? 0 : STICKY_LEAD_W
+              }
+            }, laneRail, /*#__PURE__*/React.createElement("div", {
+              className: "relative w-full h-full flex items-center overflow-hidden pr-2",
+              style: {
+                paddingLeft: subIndent
+              }
+            }, /*#__PURE__*/React.createElement("div", {
+              "aria-hidden": "true",
+              className: "absolute border-l border-slate-400 pointer-events-none",
+              style: {
+                left: guideX,
+                top: 0,
+                bottom: isLastSub ? '50%' : 0
+              }
+            }), /*#__PURE__*/React.createElement("div", {
+              "aria-hidden": "true",
+              className: "absolute border-t border-slate-400 pointer-events-none",
+              style: {
+                left: guideX,
+                width: 7,
+                top: '50%'
+              }
+            }), meta.tasksWithSubs > 1 && /*#__PURE__*/React.createElement("span", {
+              className: "flex-shrink-0 mr-1.5 px-1 rounded text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-300 truncate",
+              style: {
+                maxWidth: subParentChipW
+              },
+              title: `所屬計畫區間：${task.name}`
+            }, task.name), /*#__PURE__*/React.createElement("span", {
+              className: `flex-1 min-w-0 truncate text-slate-700 ${isOverview ? 'text-[11px]' : isCompact ? 'text-[11px]' : 'text-[12px]'}`,
+              title: subTitle
+            }, sub.name))), /*#__PURE__*/React.createElement("td", {
+              colSpan: weeksTotal,
+              className: `p-0 relative border-b ${subRowBorder}`,
+              style: {
+                height: subRowH
+              }
+            }, /*#__PURE__*/React.createElement("div", {
+              className: "absolute inset-0 flex pointer-events-none z-0"
+            }, Array.from({
+              length: weeksTotal
+            }).map((_, i) => /*#__PURE__*/React.createElement("div", {
+              key: i,
+              className: `flex-1 border-r border-slate-300 ${i + 1 === currentWeek ? 'bg-red-50/70' : ''}`
+            }))), /*#__PURE__*/React.createElement("div", {
+              className: "absolute top-0 bottom-0 z-0 pointer-events-none",
+              style: {
+                left: `${(task.start - 1) * (100 / weeksTotal)}%`,
+                width: `${(task.end - task.start + 1) * (100 / weeksTotal)}%`,
+                backgroundColor: 'var(--gantt-sub-band)'
+              }
+            }), /*#__PURE__*/React.createElement("div", {
+              className: "absolute top-0 bottom-0 z-10 pointer-events-none",
+              style: {
+                left: `${(currentWeek - 0.5) * (100 / weeksTotal)}%`,
+                borderLeft: '2px solid rgba(220,38,38,0.55)'
+              }
+            }), /*#__PURE__*/React.createElement("div", _extends({}, clickable(openSub, `${proj.owner} ${proj.name}｜${subTitle}`, {
+              roving: {
+                active: String(subRovingId) === String(activeRovingTaskId),
+                group: 'gantt-bar',
+                id: subRovingId,
+                onRove: setRovingTaskId
+              }
+            }), {
+              onFocus: () => setRovingTaskId(subRovingId)
+              // hover 回饋與 tooltip 都比照父條(2026-09-13):子條是打卡入口,原本滑過去毫無反應、只有原生 title
+              // (延遲 1 秒、不顯示回報內容),使用者會覺得「父條會動、子條不會動＝不能點」。
+              // 原生 title 拿掉:自訂 tooltip 已涵蓋,兩個同時出現會疊在一起。
+              ,
+              onMouseEnter: e => showTooltip(e, proj, task, sub),
+              onMouseMove: moveTooltip,
+              onMouseLeave: hideTooltip
+              // 待回報時條本身不掛 ring,改由條後面的 <PendingMark> 框當週那一格(見它的說明)
+              ,
+              className: `absolute flex items-center overflow-hidden cursor-pointer transition-transform hover:scale-y-110 hover:z-20 border rounded-sm shadow-sm text-[#0f172a] ${subHighlighted ? 'ring-2 ring-blue-500 ring-offset-1 z-20' : 'z-10'}`,
+              style: {
+                left: `${(sub.start - 1) * (100 / weeksTotal)}%`,
+                width: `${(sub.end - sub.start + 1) * (100 / weeksTotal)}%`,
+                top: isOverview ? 2 : 4,
+                bottom: isOverview ? 2 : 4,
+                ...subBarStyle
+              }
+            }), subDots.map(({
+              wn,
+              st
+            }) => /*#__PURE__*/React.createElement("div", {
+              key: wn,
+              className: `absolute bottom-0 pointer-events-none ${STATUS_META[st]?.dot || 'bg-blue-500'}`,
+              style: {
+                left: `${(wn - sub.start) / subSpan * 100}%`,
+                width: `${100 / subSpan}%`,
+                height: wn === currentWeek ? '4px' : '3px',
+                opacity: wn === currentWeek ? 0.95 : 0.75
+              }
+            })), /*#__PURE__*/React.createElement("span", {
+              className: `relative z-10 truncate whitespace-nowrap font-medium ${isOverview ? 'text-[9px] leading-none px-1' : isCompact ? 'text-[10px] px-1.5' : 'text-[11px] px-1.5'}`
+            }, sub.name)), subPending && /*#__PURE__*/React.createElement(PendingMark, {
+              weeksTotal: weeksTotal,
+              week: currentWeek,
               top: isOverview ? 2 : 4,
-              bottom: isOverview ? 2 : 4,
-              ...subBarStyle
-            }
-          }), subDots.map(({
-            wn,
-            st
-          }) => /*#__PURE__*/React.createElement("div", {
-            key: wn,
-            className: `absolute bottom-0 pointer-events-none ${STATUS_META[st]?.dot || 'bg-blue-500'}`,
-            style: {
-              left: `${(wn - sub.start) / subSpan * 100}%`,
-              width: `${100 / subSpan}%`,
-              height: wn === currentWeek ? '4px' : '3px',
-              opacity: wn === currentWeek ? 0.95 : 0.75
-            }
-          })), /*#__PURE__*/React.createElement("span", {
-            className: `relative z-10 truncate whitespace-nowrap font-medium ${isOverview ? 'text-[9px] leading-none px-1' : isCompact ? 'text-[10px] px-1.5' : 'text-[11px] px-1.5'}`
-          }, subPending && '❗', sub.name))));
+              bottom: isOverview ? 2 : 4
+            })));
+          }));
         }));
       }));
     })))))), showWeeklyReport && /*#__PURE__*/React.createElement(WeeklyReportDashboard, {
@@ -4121,15 +4995,24 @@ function App() {
       weeklyCommentMeta: weeklyCommentMeta,
       currentUser: currentUser,
       role: role,
+      siteName: siteName,
       panelWidth: reportPanelW,
       todayWeek: todayWeek,
       isFutureWeek: isFutureWeek,
       highlightedTaskId: highlightedTaskId,
       highlightedSubId: highlightedSubId,
       onHighlightTask: handleHighlightTask,
-      onEditComment: !isFutureWeek ? userName => setCommentTarget(userName) : undefined,
+      onEditComment: !isFutureWeek ? userName => {
+        setPanelReturn(null);
+        setCommentTarget(userName);
+      } : undefined,
       onClose: closeWeeklyReport
-    })), tooltip && /*#__PURE__*/React.createElement("div", {
+    })), /*#__PURE__*/React.createElement("div", {
+      ref: resizeGuideRef,
+      hidden: true,
+      "aria-hidden": "true",
+      className: "fixed top-0 bottom-0 w-0.5 bg-blue-500 z-[200] pointer-events-none"
+    }), tooltip && /*#__PURE__*/React.createElement("div", {
       ref: tooltipRefCb,
       className: "fixed z-[200] pointer-events-none"
     }, /*#__PURE__*/React.createElement("div", {
@@ -4225,7 +5108,7 @@ function App() {
       allowRetroCheckin: allowRetroCheckin,
       logs: taskLogs[selectedTaskInfo.task.id] || {},
       subLogs: subLogs,
-      onClose: () => setSelectedTaskInfo(null),
+      onClose: closeTaskModal,
       onSaveLog: handleSaveLog,
       onUpdateTaskDetails: handleUpdateTaskDetails,
       onDeleteTask: handleDeleteTask,
@@ -4242,6 +5125,7 @@ function App() {
       onClose: () => {
         setShowExtraNoteModal(false);
         setNoteTargetUser(null);
+        backToPanel();
       },
       onSave: handleSaveExtraNote
     }), showWeeklyPlanModal && /*#__PURE__*/React.createElement(WeeklyPlanModal, {
@@ -4255,20 +5139,21 @@ function App() {
       onClose: () => {
         setShowWeeklyPlanModal(false);
         setNoteTargetUser(null);
+        backToPanel();
       },
       onSave: handleSaveWeeklyPlan
     }), showDeadlinePanel && /*#__PURE__*/React.createElement(DeadlinePanel, {
       items: deadlineTasks,
-      onClose: () => setShowDeadlinePanel(false),
-      onSelect: item => {
-        setShowDeadlinePanel(false);
+      restore: restoreFor('deadline'),
+      onClose: () => closeListPanel(setShowDeadlinePanel),
+      onSelect: (item, pos) => openFromPanel('deadline', pos, () => {
         setScrollTargetWeek(Math.min(item.task.end, weeksTotal)); // 捲動定位到該任務結束週
         setSelectedTaskInfo({
           proj: item.proj,
           task: item.task,
           sub: null
         });
-      }
+      })
     }), showPendingPanel && isCurrentYear && /*#__PURE__*/React.createElement(PendingPanel, {
       pending: myPendingTasks,
       completed: myCompletedTasks,
@@ -4279,26 +5164,24 @@ function App() {
       extraFilled: !!extraNotes[currentUser]?.[todayWeek],
       planMeta: weeklyPlanMeta[currentUser]?.[todayWeek],
       extraMeta: extraNoteMeta[currentUser]?.[todayWeek],
-      onFillPlan: () => {
-        setShowPendingPanel(false);
+      restore: restoreFor('pending'),
+      onFillPlan: pos => openFromPanel('pending', pos, () => {
         setCurrentWeek(todayWeek);
         setShowWeeklyPlanModal(true);
-      },
-      onFillExtra: () => {
-        setShowPendingPanel(false);
+      }),
+      onFillExtra: pos => openFromPanel('pending', pos, () => {
         setCurrentWeek(todayWeek);
         setShowExtraNoteModal(true);
-      },
-      onClose: () => setShowPendingPanel(false),
-      onSelect: item => {
-        setShowPendingPanel(false);
+      }),
+      onClose: () => closeListPanel(setShowPendingPanel),
+      onSelect: (item, pos) => openFromPanel('pending', pos, () => {
         setCurrentWeek(todayWeek);
         setSelectedTaskInfo({
           proj: item.proj,
           task: item.task,
           sub: item.sub || null
         });
-      }
+      })
     }), showRetroPanel && role === 'member' && /*#__PURE__*/React.createElement(PendingPanel, {
       retro: true,
       pending: myRetroPendingTasks,
@@ -4310,23 +5193,17 @@ function App() {
       extraFilled: !!extraNotes[currentUser]?.[currentWeek],
       planMeta: weeklyPlanMeta[currentUser]?.[currentWeek],
       extraMeta: extraNoteMeta[currentUser]?.[currentWeek],
-      onFillPlan: () => {
-        setShowRetroPanel(false);
-        setShowWeeklyPlanModal(true);
-      },
-      onFillExtra: () => {
-        setShowRetroPanel(false);
-        setShowExtraNoteModal(true);
-      },
-      onClose: () => setShowRetroPanel(false),
-      onSelect: item => {
-        setShowRetroPanel(false);
+      restore: restoreFor('retro'),
+      onFillPlan: pos => openFromPanel('retro', pos, () => setShowWeeklyPlanModal(true)),
+      onFillExtra: pos => openFromPanel('retro', pos, () => setShowExtraNoteModal(true)),
+      onClose: () => closeListPanel(setShowRetroPanel),
+      onSelect: (item, pos) => openFromPanel('retro', pos, () => {
         setSelectedTaskInfo({
           proj: item.proj,
           task: item.task,
           sub: item.sub || null
         });
-      }
+      })
     }), showWeekEditPanel && role === 'manager' && !isFutureWeek && /*#__PURE__*/React.createElement(ManagerWeekPanel, {
       week: currentWeek,
       historical: !isReportingWeek,
@@ -4340,35 +5217,35 @@ function App() {
       extraNoteMeta: extraNoteMeta,
       weeklyPlanMeta: weeklyPlanMeta,
       weeklyCommentMeta: weeklyCommentMeta,
-      onClose: () => setShowWeekEditPanel(false),
-      onSelectTask: (proj, task, sub) => {
-        setShowWeekEditPanel(false);
+      restore: restoreFor('weekEdit'),
+      member: weekEditMember,
+      onChangeMember: setWeekEditMember,
+      onClose: () => closeListPanel(setShowWeekEditPanel),
+      onSelectTask: (proj, task, sub, pos) => openFromPanel('weekEdit', pos, () => {
         setSelectedTaskInfo({
           proj,
           task,
           sub: sub || null
         });
-      },
-      onEditExtra: u => {
-        setShowWeekEditPanel(false);
+      }),
+      onEditExtra: (u, pos) => openFromPanel('weekEdit', pos, () => {
         setNoteTargetUser(u);
         setShowExtraNoteModal(true);
-      },
-      onEditPlan: u => {
-        setShowWeekEditPanel(false);
+      }),
+      onEditPlan: (u, pos) => openFromPanel('weekEdit', pos, () => {
         setNoteTargetUser(u);
         setShowWeeklyPlanModal(true);
-      },
-      onEditComment: u => {
-        setShowWeekEditPanel(false);
-        setCommentTarget(u);
-      }
+      }),
+      onEditComment: (u, pos) => openFromPanel('weekEdit', pos, () => setCommentTarget(u))
     }), commentTarget && /*#__PURE__*/React.createElement(CommentModal, {
       member: commentTarget,
       currentWeek: currentWeek,
       initialComment: weeklyComments[commentTarget]?.[currentWeek] || '',
       meta: weeklyCommentMeta[commentTarget]?.[currentWeek],
-      onClose: () => setCommentTarget(null),
+      onClose: () => {
+        setCommentTarget(null);
+        backToPanel();
+      },
       onSave: c => handleSaveComment(commentTarget, c)
     }), editingProject && /*#__PURE__*/React.createElement(ProjectEditModal, {
       info: editingProject,
@@ -5829,10 +6706,12 @@ function WeeklyPlanModal({
 // 即將到期清單面板:列出剩餘 ≤2 週或已過 70% 時程的任務,依剩餘週數排序,點擊可定位並開啟任務視窗
 function DeadlinePanel({
   items,
+  restore = null,
   onClose,
   onSelect
 }) {
   const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
+  const list = useListRestore(restore); // 從彈窗關閉回到這裡時,還原捲動位置與焦點列(P1)
   return /*#__PURE__*/React.createElement("div", _extends({}, focus, {
     className: "fixed inset-0 bg-slate-900/40 backdrop-blur-sm modal-scrim z-[105] flex justify-end"
   }), /*#__PURE__*/React.createElement("div", {
@@ -5858,6 +6737,7 @@ function DeadlinePanel({
     help: "h-deadline",
     className: "text-white/70 hover:text-white p-1"
   })), /*#__PURE__*/React.createElement("div", {
+    ref: list.scrollerRef,
     className: "flex-1 overflow-y-auto p-4 space-y-2.5"
   }, items.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "text-center text-slate-500 py-16"
@@ -5872,10 +6752,11 @@ function DeadlinePanel({
     elapsed
   }) => /*#__PURE__*/React.createElement("button", {
     key: task.id,
+    "data-row-key": task.id,
     onClick: () => onSelect({
       proj,
       task
-    }),
+    }, list.capture(task.id)),
     className: "w-full text-left bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-xl p-3 transition group"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between"
@@ -5913,12 +6794,14 @@ function PendingPanel({
   retro = false,
   planMeta,
   extraMeta,
+  restore = null,
   onFillPlan,
   onFillExtra,
   onClose,
   onSelect
 }) {
   const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
+  const list = useListRestore(restore); // 從彈窗關閉回到這裡時,還原捲動位置與焦點列(P1)
   const totalRequired = pending.length + completed.length + 1; // 任務總數 + 1項下週預計
   const completedCount = completed.length + (planPending ? 0 : 1);
   const percent = totalRequired > 0 ? Math.round(completedCount / totalRequired * 100) : 100;
@@ -5959,6 +6842,7 @@ function PendingPanel({
       width: `${percent}%`
     }
   })))), /*#__PURE__*/React.createElement("div", {
+    ref: list.scrollerRef,
     className: "flex-1 overflow-y-auto p-5 space-y-5"
   }, retro && /*#__PURE__*/React.createElement("div", {
     className: "bg-amber-50 border border-amber-400 text-amber-900 rounded-xl px-3.5 py-2.5 text-xs font-bold flex items-center"
@@ -5976,11 +6860,12 @@ function PendingPanel({
     sub
   }) => /*#__PURE__*/React.createElement("button", {
     key: `${task.id}-${sub?.id ?? ''}`,
+    "data-row-key": `${task.id}-${sub?.id ?? ''}`,
     onClick: () => onSelect({
       proj,
       task,
       sub
-    }),
+    }, list.capture(`${task.id}-${sub?.id ?? ''}`)),
     className: "w-full text-left bg-yellow-50 hover:bg-yellow-100 border border-yellow-300 rounded-xl p-3.5 transition group shadow-sm"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between"
@@ -5997,7 +6882,8 @@ function PendingPanel({
   }, "\u6253\u5361\u56DE\u5831 \u203A")))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
   }, "\uD83D\uDCC5 \u4E0B\u9031\u9810\u8A08\u57F7\u884C\u5DE5\u4F5C\uFF08\u5FC5\u586B\uFF09"), /*#__PURE__*/React.createElement("button", {
-    onClick: onFillPlan,
+    "data-row-key": "__plan",
+    onClick: () => onFillPlan(list.capture('__plan')),
     className: `w-full text-left border rounded-xl p-3.5 transition group border-l-4 ${planPending ? 'bg-pink-50 hover:bg-pink-100 border-pink-200 border-l-red-500 shadow-sm' : 'bg-emerald-50/70 hover:bg-emerald-100/70 border-emerald-200 border-l-emerald-500'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between"
@@ -6021,7 +6907,8 @@ function PendingPanel({
   }, planPending ? '立即填寫 ›' : '檢閱修改 ›')))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
   }, "\uD83D\uDCDD \u975E\u5C08\u6848\u4E8B\u9805\uFF08\u9078\u586B\uFF09"), /*#__PURE__*/React.createElement("button", {
-    onClick: onFillExtra,
+    "data-row-key": "__extra",
+    onClick: () => onFillExtra(list.capture('__extra')),
     className: `w-full text-left border rounded-xl p-3.5 transition group border-l-4 ${extraFilled ? 'bg-emerald-50/70 hover:bg-emerald-100/70 border-emerald-200 border-l-emerald-500' : 'bg-orange-50 hover:bg-orange-100 border-orange-200 border-l-orange-400'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between"
@@ -6053,11 +6940,12 @@ function PendingPanel({
     log
   }) => /*#__PURE__*/React.createElement("button", {
     key: `${task.id}-${sub?.id ?? ''}`,
+    "data-row-key": `${task.id}-${sub?.id ?? ''}`,
     onClick: () => onSelect({
       proj,
       task,
       sub
-    }),
+    }, list.capture(`${task.id}-${sub?.id ?? ''}`)),
     className: "w-full text-left bg-slate-100 hover:bg-slate-100 border border-slate-300 rounded-xl p-3 transition group opacity-90"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between"
@@ -6089,6 +6977,9 @@ function PendingPanel({
 // 主管:週次回報編輯面板 — 選成員後可代為補登/修正該週任務打卡、非專案事項、下週預計工作,
 // 並可編輯主管回覆;所有代修異動由 SP 記錄操作者(ReportedBy/UpdatedBy=主管)並留稽核紀錄
 // historical:檢視中週次不是「本週」(含非本年度)→ 標「歷史週次」晶片
+// ⚠ `member` 由 App 保管(`weekEditMember`),不放在這裡的 useState(2026-09-27 P1):
+//   面板在開彈窗時會被卸載,state 跟著消失 → 主管處理玉婷的第 2 項時會被重置回 `users[0]`(裕隆),
+//   每存一次就要重選一次成員。
 function ManagerWeekPanel({
   week,
   historical = false,
@@ -6102,6 +6993,9 @@ function ManagerWeekPanel({
   extraNoteMeta = {},
   weeklyPlanMeta = {},
   weeklyCommentMeta = {},
+  restore = null,
+  member: memberProp = null,
+  onChangeMember,
   onClose,
   onSelectTask,
   onEditExtra,
@@ -6109,7 +7003,10 @@ function ManagerWeekPanel({
   onEditComment
 }) {
   const focus = useModalFocus(); // 開啟時焦點移入、Tab 鎖在視窗內、關閉時還原
-  const [member, setMember] = useState(users[0] || '');
+  const list = useListRestore(restore); // 從彈窗關閉回到這裡時,還原捲動位置與焦點列(P1)
+  // 成員名單載入前／該成員已被移除時退回第一位,面板不會空白
+  const member = memberProp && users.includes(memberProp) ? memberProp : users[0] || '';
+  const setMember = onChangeMember;
   const wk = String(week).padStart(2, '0');
 
   // 一列＝一個回報單位(遷移 20:該週有進行中的子區間就逐子區間列)
@@ -6133,8 +7030,9 @@ function ManagerWeekPanel({
   const commentMeta = weeklyCommentMeta[member]?.[week];
 
   // 三張可編輯卡片共用的列版型(meta=最後編輯資訊;主管回覆傳 showManagerTag=false)
-  const editRow = (icon, label, value, emptyText, colorCls, onEdit, meta, showManagerTag = true) => /*#__PURE__*/React.createElement("button", {
-    onClick: onEdit,
+  const editRow = (icon, label, value, emptyText, colorCls, onEdit, meta, showManagerTag = true, rowKey = null) => /*#__PURE__*/React.createElement("button", {
+    "data-row-key": rowKey,
+    onClick: () => onEdit(list.capture(rowKey)),
     className: `w-full text-left border rounded-xl p-3.5 transition group shadow-sm ${colorCls}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between"
@@ -6196,6 +7094,7 @@ function ManagerWeekPanel({
   }, u))), historical && /*#__PURE__*/React.createElement("span", {
     className: "text-[10px] font-bold bg-amber-300 text-amber-950 px-2 py-1 rounded-full whitespace-nowrap"
   }, "\u6B77\u53F2\u9031\u6B21"))), /*#__PURE__*/React.createElement("div", {
+    ref: list.scrollerRef,
     className: "flex-1 overflow-y-auto p-5 space-y-5"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
@@ -6210,7 +7109,8 @@ function ManagerWeekPanel({
     log
   }) => /*#__PURE__*/React.createElement("button", {
     key: `${task.id}-${sub?.id ?? ''}`,
-    onClick: () => onSelectTask(proj, task, sub),
+    "data-row-key": `${task.id}-${sub?.id ?? ''}`,
+    onClick: () => onSelectTask(proj, task, sub, list.capture(`${task.id}-${sub?.id ?? ''}`)),
     className: `w-full text-left border rounded-xl p-3 transition group shadow-sm ${log ? 'bg-slate-100 hover:bg-slate-100 border-slate-300' : 'bg-yellow-50 hover:bg-yellow-100 border-yellow-300'}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between"
@@ -6237,9 +7137,9 @@ function ManagerWeekPanel({
     className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
   }, "\uD83D\uDCDD \u6BCF\u9031\u56DE\u5831\u5167\u5BB9\uFF08\u4EE3 ", member, " \u4FEE\u6B63\uFF09"), /*#__PURE__*/React.createElement("div", {
     className: "space-y-2.5"
-  }, editRow('📝', '非專案事項', extra, '未填寫（可代為補登）', 'bg-orange-50/70 hover:bg-orange-100/70 border-orange-200', () => onEditExtra(member), extraMeta), editRow('📅', '下週預計執行工作', plan, '未填寫（可代為補登）', 'bg-indigo-50/70 hover:bg-indigo-100/70 border-indigo-200', () => onEditPlan(member), planMeta))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, editRow('📝', '非專案事項', extra, '未填寫（可代為補登）', 'bg-orange-50/70 hover:bg-orange-100/70 border-orange-200', pos => onEditExtra(member, pos), extraMeta, true, '__extra'), editRow('📅', '下週預計執行工作', plan, '未填寫（可代為補登）', 'bg-indigo-50/70 hover:bg-indigo-100/70 border-indigo-200', pos => onEditPlan(member, pos), planMeta, true, '__plan'))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "text-xs font-black text-slate-500 uppercase tracking-wider mb-2"
-  }, "\uD83D\uDC51 \u4E3B\u7BA1\u56DE\u8986\uFF08\u6210\u54E1\u4E0D\u53EF\u7570\u52D5\uFF09"), editRow('💬', `對 ${member} 的 W${wk} 週報回覆`, comment, '尚未回覆（選填）', 'bg-violet-50/70 hover:bg-violet-100/70 border-violet-200', () => onEditComment(member), commentMeta, false))), /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDC51 \u4E3B\u7BA1\u56DE\u8986\uFF08\u6210\u54E1\u4E0D\u53EF\u7570\u52D5\uFF09"), editRow('💬', `對 ${member} 的 W${wk} 週報回覆`, comment, '尚未回覆（選填）', 'bg-violet-50/70 hover:bg-violet-100/70 border-violet-200', pos => onEditComment(member, pos), commentMeta, false, '__comment'))), /*#__PURE__*/React.createElement("div", {
     className: "p-4 bg-slate-100 border-t border-slate-300"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
@@ -6349,6 +7249,11 @@ function MetaLine({
     title: "\u6B64\u7B46\u7531\u4E3B\u7BA1\u4EE3\u70BA\u4FEE\u6B63/\u88DC\u767B"
   }, "\u270F\uFE0F \u4E3B\u7BA1\u4FEE\u6B63"));
 }
+
+// ⚠ `siteName` 一定要從 App 傳進來(2026-09-27 修):三支組字串函式的抬頭原本寫死「【MSD W○○ 週報】」,
+//   但四個 IIS application 跑的是**同一份程式**(見 CLAUDE.md「多站台部署」) → IMD／EMS1／EMS2 的主管
+//   複製出去貼到通訊軟體的週報與催報名單,抬頭全部會印成 MSD。這是**會流出系統外**的錯誤內容,
+//   畫面上的標題早就吃 siteName 了,只有這三串漏掉。取不到站名時退回不帶群組的抬頭(與 siteTitle 同一種寫法)。
 function WeeklyReportDashboard({
   currentWeek,
   year,
@@ -6364,6 +7269,7 @@ function WeeklyReportDashboard({
   weeklyCommentMeta = {},
   currentUser,
   role,
+  siteName = '',
   panelWidth = 672,
   todayWeek = currentWeek,
   isFutureWeek = currentWeek > todayWeek,
@@ -6376,7 +7282,15 @@ function WeeklyReportDashboard({
   const isManager = role === 'manager';
   // isFutureWeek 由 App 判斷(含「未來年度」):未來週全員本來就「未回報」,催報名單沒有意義(主管回覆入口由父層以 onEditComment=undefined 收掉)
   // 看板變窄(投影機/筆電)時卡片內容改單欄:md: 斷點看的是「視窗寬」不是「面板寬」,不改會在窄面板裡擠成兩欄
-  const narrowPanel = panelWidth < 560;
+  // 🚨 **門檻是量出來的,不是取整數**(2026-09-28 由 560 調到 620):`reportPanelWidth(1600) = 1600×0.35 = 560`
+  //    ——剛好**差一格**不進窄版分支,於是 1600×900(常見辦公螢幕)用了全長標籤卻放不下:成員列可用寬只有
+  //    `panelW − 51`(padding＋捲軸)＝509,而列的自然寬是 537(一般)／549(回報數兩位數那位成員),
+  //    列又是 `overflow-hidden` → **「主管回覆」鈕(58px)被裁掉 10.6~23.5px、六列全中**,標題也被截 52px。
+  //    1680(panelW 588)時可用寬 537＝自然寬 537,**餘裕正好 0**,那位成員的列仍溢出 12px。
+  //    所以門檻＝最寬的列 549 ＋ 51 ＋ 餘裕 ≈ 620;1366(478)本來就走窄版、1920(672)本來就夠寬,兩者行為不變。
+  // ⚠ 這個值會隨「成員列上有什麼」而變,**動到那一列的元件就要重量一次**(量法:取該列 scrollWidth 的最大值＋51)。
+  //    壓線設計在這裡特別危險——回報數從個位變兩位數就會再破一次。
+  const narrowPanel = panelWidth < 620;
   // 更窄(≈1024 螢幕→面板 358)時成員列連晶片文字也放不下(實測溢出 26px),只留圖示＋title
   const tightRow = panelWidth < 440;
   const [copied, setCopied] = useState(false); // 全團隊複製回饋
@@ -6470,6 +7384,9 @@ function WeeklyReportDashboard({
   }, [summary, onlyMine, isManager, currentUser]);
   const showTeamView = isManager || !onlyMine; // 是否為團隊瀏覽模式（多人＋折疊）
 
+  // 複製出去的文字抬頭前綴：有站名就帶群組（「MSD 」「IMD 」…），取不到就不帶。三支組字串函式共用一份。
+  const sitePrefix = siteName ? `${siteName} ` : '';
+
   // 週報文字裡的一列回報。「階段」= 該計畫區間底下、本週(currentWeek,不是今天)落在範圍內的子區間;沒有就不加括號。
   // 兩份週報文字(單人/全隊)共用這一行,格式才不會漂掉。
   // 一列＝一個回報單位:子區間回報寫成「區間 › 子區間」;父層舊紀錄(legacy)才在括號列出當週階段
@@ -6487,7 +7404,7 @@ function WeeklyReportDashboard({
 
   // 產生單一成員的週報文字
   const buildSingleUserReport = s => {
-    const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} 週報 — ${s.user}】`, ''];
+    const lines = [`【${sitePrefix}W${String(currentWeek).padStart(2, '0')} 週報 — ${s.user}】`, ''];
     lines.push(`■ ${s.user}（回報 ${s.activeTasks.length}/${s.total}・得分 ${s.weekScore}/${s.taskTotal}）`);
     s.activeTasks.forEach(t => lines.push(reportTaskLine(t)));
     if (s.extraNote) lines.push(`  (非專案) ${s.extraNote.replace(/\n/g, ' / ')}`);
@@ -6501,7 +7418,7 @@ function WeeklyReportDashboard({
 
   // 產生可見範圍的週報文字
   const buildReportText = () => {
-    const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} ${showTeamView ? '團隊週報' : '週報 — ' + currentUser}】`, ''];
+    const lines = [`【${sitePrefix}W${String(currentWeek).padStart(2, '0')} ${showTeamView ? '團隊週報' : '週報 — ' + currentUser}】`, ''];
     visibleSummary.forEach(s => {
       // 只附了文件、沒打字的人也要出現(否則他的連結不會進週報文字)
       if (s.activeTasks.length === 0 && !s.extraNote && !s.weekPlan && !s.extraMeta?.docUrl && !s.planMeta?.docUrl) return;
@@ -6535,7 +7452,7 @@ function WeeklyReportDashboard({
   // 只列「真的有缺」的人:未回報任務 >0 或下週預計未填;全員都交了就不給空名單,直接回報好消息。
   const pendingSummary = useMemo(() => visibleSummary.filter(s => s.pendingTasks.length > 0 || !s.weekPlan), [visibleSummary]);
   const buildPendingText = () => {
-    const lines = [`【MSD W${String(currentWeek).padStart(2, '0')} 待回報提醒】`, ''];
+    const lines = [`【${sitePrefix}W${String(currentWeek).padStart(2, '0')} 待回報提醒】`, ''];
     pendingSummary.forEach(s => {
       const miss = [];
       if (s.pendingTasks.length > 0) miss.push(`專案回報 ${s.pendingTasks.length} 項未填`);
@@ -7227,6 +8144,16 @@ const AUDIT_ACTION_META = {
   SETTING: {
     label: '設定',
     cls: 'bg-slate-200 text-slate-700'
+  },
+  // ⚠ 這兩個原本漏了,晶片就掉到 fallback＝顯示**英文動作代碼**(UPDATE_STAR／RESTORE),
+  //   在一排中文晶片裡特別刺眼。新增動作時記得一起補。
+  UPDATE_STAR: {
+    label: '重點關注',
+    cls: 'bg-amber-100 text-amber-800'
+  },
+  RESTORE: {
+    label: '復原',
+    cls: 'bg-emerald-100 text-emerald-800'
   }
 };
 const AUDIT_ENTITY_LABELS = {
@@ -7241,6 +8168,14 @@ const AUDIT_ENTITY_LABELS = {
   AccessRule: '瀏覽權限',
   AppSettings: '系統設定'
 };
+// EntityType 的別名 → 正規名稱。目前只有一個:usp_ToggleProjectStar 寫的是 **'Projects'(複數)**,
+// 與其餘 SP 的單數命名不一致(歷史資料已經是這個值,不為它開一支遷移)。
+// ⚠ 只用在「顯示哪個中文標籤」;**不可以直接加進 AUDIT_ENTITY_LABELS**,否則下拉會出現兩個「專案」選項。
+// 篩選端的合併在後端(EntityType IN ('Project','Projects')),三處是一組。
+const AUDIT_ENTITY_ALIASES = {
+  Projects: 'Project'
+};
+const auditEntityLabel = t => AUDIT_ENTITY_LABELS[AUDIT_ENTITY_ALIASES[t] || t] || t;
 
 // 主管:使用統計面板 — 登入次數(LoginLogs,遷移 13)評估網頁使用率;
 // 每次登入寫一筆(manual=登入畫面點選/auto=重整自動還原,兩者都代表一次開啟使用)
@@ -8115,7 +9050,7 @@ function AuditPanel({
         className: `flex-shrink-0 px-1.5 py-0.5 rounded font-bold ${meta.cls}`
       }, meta.label), /*#__PURE__*/React.createElement("span", {
         className: "font-bold text-slate-700"
-      }, AUDIT_ENTITY_LABELS[l.entityType] || l.entityType), /*#__PURE__*/React.createElement("span", {
+      }, auditEntityLabel(l.entityType)), /*#__PURE__*/React.createElement("span", {
         className: "flex-shrink-0 text-slate-500 font-medium ml-1"
       }, l.actor, l.role === 'manager' ? '（主管）' : '', l.empId && /*#__PURE__*/React.createElement("span", {
         className: "ml-1 px-1 py-px rounded bg-slate-100 text-slate-500 font-mono text-[10px]",
