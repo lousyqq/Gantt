@@ -22,14 +22,17 @@
   --danger:#B91C1C; --danger-bg:#FEE2E2;
   --code-bg:#EEF2F9; --code-ink:#1E3A6E;
   --shadow:0 1px 2px rgba(14,23,38,.06),0 8px 24px -12px rgba(14,23,38,.18);
-  --rail-w:264px;
+  --rail-w:264px; --oth-w:210px;
+  /* 右側「本章小節」目前所在那一項的強調色。**必須與主題一起翻面**：
+     --navy 在深色是 #0B2A6B 的深藍，當深底上的線條只有 1.28 對比（看不見），所以另開一個變數。 */
+  --oth-accent:#1E3A6E;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
     --navy:#0B2A6B; --navy-2:#12377F; --gold:#FDD075; --gold-ink:#FCD34D;
     --ground:#131B2B; --surface:#1E293B; --surface-2:#334155;
     --ink:#E8EEF8; --ink-2:#CBD5E1; --muted:#A3AEC0;
-    --rule:#3E4C61; --rule-strong:#5A6B84;
+    --rule:#3E4C61; --rule-strong:#5A6B84; --oth-accent:#9DC0FF;
     --member:#7DD3FC; --member-bg:#0C3B54;
     --manager:#FCD34D; --manager-bg:#4A2F09;
     --exec:#86EFAC; --exec-bg:#0F3D24;
@@ -42,7 +45,7 @@
   --navy:#0B2A6B; --navy-2:#12377F; --gold:#FDD075; --gold-ink:#FCD34D;
   --ground:#131B2B; --surface:#1E293B; --surface-2:#334155;
   --ink:#E8EEF8; --ink-2:#CBD5E1; --muted:#A3AEC0;
-  --rule:#3E4C61; --rule-strong:#5A6B84;
+  --rule:#3E4C61; --rule-strong:#5A6B84; --oth-accent:#9DC0FF;
   --member:#7DD3FC; --member-bg:#0C3B54;
   --manager:#FCD34D; --manager-bg:#4A2F09;
   --exec:#86EFAC; --exec-bg:#0F3D24;
@@ -86,7 +89,46 @@ code,kbd,.mono{font-family:"Cascadia Mono",Consolas,"SF Mono",ui-monospace,"Cour
 .rail a.sub::before{content:"› ";color:rgba(255,255,255,.4)}
 .rail .rail-group.hidden{display:none}
 
-main{max-width:900px;padding:0 clamp(20px,4vw,56px) 96px;width:100%}
+/* ── 內容欄＋右側「本章小節」（2026-10-11）──
+   ⚠ **右欄放的是本來就空著的那一塊，不跟正文搶寬度**：main 原本就是 max-width:900 且靠左，
+     右邊一直有一條沒用到的空白（實測右側閒置 1920→756px／1440→276／1366→202）。
+   ⚠ 內容欄用 `minmax(0,900px)` 讓 grid 自己算，**不要寫死一個窄值**——fixed max 的軌道
+     本來就只會長到「剩多少」為止；寫死的數字會過期，minmax 不會。 */
+.colwrap{display:grid;grid-template-columns:minmax(0,900px) var(--oth-w);gap:40px;align-items:start;min-width:0}
+main{max-width:900px;padding:0 clamp(20px,4vw,56px) 96px;width:100%;min-width:0}
+
+.onthis{position:sticky;top:28px;align-self:start;max-height:calc(100vh - 56px);overflow-y:auto;
+  padding:0 0 24px;font-size:12.5px}
+/* ⚠ 變數名要用**這份手冊有定義的**（--muted／--rule／--rule-strong／--code-bg／--oth-accent）。
+   初版直接沿用參考手冊的 --ink-3／--brand-line／--brand-soft——這裡**根本沒有這些變數**，
+   color 整個失效而繼承本文色 → 「目前這一項」與其他項顏色一模一樣，等於沒有高亮（實測兩者皆 16.6）。 */
+.onthis .oth{font-size:10px;letter-spacing:.16em;color:var(--muted);font-weight:700;margin:0 0 8px;padding-left:11px}
+/* 🚨 選擇器要寫成 `:root .onthis nav a`（特異性 0,2,2）才蓋得過全域的
+   `:root[data-theme="dark"] a{color:#9DC0FF}`（0,2,1，而且在樣式表更後面）。
+   只寫 `.onthis a`（0,1,1）的話**深色下整欄都是同一個藍**，「目前這一項」與其他項一模一樣
+   ＝高亮等於沒做（實測一般與選中都是 9.36）。
+   ⚠ 選中色用 --ink（對比最高的墨色：淺 #0E1726／深 #E8EEF8），不要用藍：深色的一般色本來就是藍，
+     再用藍就分不出來。彩色只留給左側那條 2px 的 --oth-accent。 */
+:root .onthis nav a{display:block;padding:4px 10px;color:var(--muted);text-decoration:none;line-height:1.45;
+  border-left:2px solid var(--rule);margin-left:-1px}
+:root .onthis nav a:hover{color:var(--ink);border-left-color:var(--rule-strong);background:var(--code-bg)}
+:root .onthis nav a.on{color:var(--ink);border-left-color:var(--oth-accent);font-weight:700}
+.onthis .empty{padding:4px 10px;color:var(--muted);border-left:2px solid var(--rule)}
+
+/* 放不下時的兩段退讓。
+   ⚠⚠ **斷點不可以設在 1500 就直接 display:none**：1366／1440 的筆電與投影機是本專案的主要環境,
+      那樣右欄在那裡永遠不會出現＝等於沒做（參考專案踩過這個坑，使用者回報「可以在右邊加小節嗎」時
+      功能其實早就寫好了）。1281~1500 收的是**內容欄的左右留白**，不是右欄。
+   ⚠ 收 padding 不影響段落：`p{max-width:70ch}` 實測 649px 早就是上限，文字區 1366 下 791→738 仍遠高於它。
+   ⚠ 下界取 1280：再窄下去右欄就是在**跟正文搶寬度**，那不划算，整個收掉回到單欄。 */
+@media (max-width:1500px) and (min-width:1281px){
+  .colwrap{gap:32px}
+  main{padding-left:28px;padding-right:28px}
+}
+@media (max-width:1280px){
+  .colwrap{grid-template-columns:minmax(0,900px)}
+  .onthis{display:none}
+}
 
 /* ── 頁首 ── */
 .hero{padding:56px 0 34px;border-bottom:2px solid var(--navy)}
@@ -233,13 +275,6 @@ details.adv>*:not(summary){font-size:14.5px}
 details.adv[open]>summary{border-bottom:1px solid var(--rule);margin-bottom:6px}
 details.adv>:last-child{margin-bottom:12px}
 
-/* ── 更新紀錄 ── */
-.changelog{list-style:none;padding:0;margin:12px 0;max-width:none}
-.changelog>li{display:grid;grid-template-columns:96px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid var(--rule);font-size:14.5px}
-.changelog>li:last-child{border-bottom:0}
-.changelog .d{font-family:"Cascadia Mono",Consolas,ui-monospace,monospace;font-size:12.5px;color:var(--muted);padding-top:2px}
-.changelog b{color:var(--ink)}
-
 /* ── UI 元件名稱（畫面上真的看得到的字，用這個樣式標出來） ── */
 .ui{
   display:inline-block;font-size:.86em;font-weight:800;padding:0 7px;border-radius:6px;
@@ -306,8 +341,8 @@ footer{
 
 /* ── 列印 ── */
 @media print{
-  .rail,.rolebar{display:none}
-  .wrap{display:block}
+  .rail,.rolebar,.onthis{display:none}
+  .wrap,.colwrap{display:block}
   main{max-width:none;padding:0}
   body{background:#fff;color:#000;font-size:11.5pt}
   section{page-break-inside:auto;border-top:1px solid #999}
@@ -331,6 +366,7 @@ footer{
   <nav id="toc" aria-label="章節目錄"></nav>
 </aside>
 
+<div class="colwrap">
 <main>
 
 <header class="hero">
@@ -1163,49 +1199,21 @@ footer{
   </div>
 </section>
 
-<!-- ══════════ 更新紀錄 ══════════ -->
-<section id="s-changelog" data-role="common" data-group="附錄" data-title="更新紀錄">
-  <h2><span class="n">16</span>更新紀錄<span class="tags"><span class="tag all">全體</span></span></h2>
-  <p>已經在用的人看這裡就好：每一條是一個「操作上會感覺到」的變化，點連結到對應章節。</p>
-  <ul class="changelog">
-    <li><span class="d">2026-09-29</span><span><b>子區間的展開／收合、搜尋、看板高亮在「一列有好幾條計畫區間」時會失效，已修好</b>。一個專案若有<b>週次沒有重疊的多條計畫區間</b>（例如「SPEC 提供 W14–W17」接著「測試C機台 W20–W30」），它們會畫在同一列上；當子區間掛在<b>後面</b>那一條時，以下三件事會對那一列沒有作用：①工具列 <span class="ui">顯示 ▾</span> 的「收合／展開全部子區間」跳過它 ②搜尋子區間名稱時它不會自動展開（<b>年度總覽</b>預設收合，等於整個搜不到）③從<a href="#s-dash">團隊總結看板</a>點該子區間的卡片時那一列不會展開，高亮的子區間看不到。三者都不會有任何錯誤訊息，所以會像「這個功能時好時壞」。<b>現在一律以「那一列」為單位，全部正常。</b></span></li>
-    <li><span class="d">2026-09-29</span><span><b>鍵盤：用 Alt＋↑↓ 走到「收合起來的專案整體條」之後，Tab 離開再回來不會再跳回甘特區第一條</b>（會停在你剛才所在的那一條）。見<a href="#s-shortcuts">鍵盤快捷鍵</a>。</span></li>
-    <li><span class="d">2026-09-28</span><span><b>甘特條上的 ❗ 拿掉了，待回報只看當週那一格的紅框</b>。❗ 是畫在<b>條的最前端</b>，而一條區間常常橫跨大半年——真正在畫面上的那一段看不到它，得先一路往左捲到起點才找得到，等於一個看不到的提醒。紅框則永遠落在<b>當週那一欄</b>，也就是你本來就在看的位置。<b>什麼情況算待回報完全沒變</b>，只是不再多一個記號；條上的 <span class="ui">⏰</span>（即將到期）照舊。見<a href="#s-ui">畫面導覽</a>。</span></li>
-    <li><span class="d">2026-09-28</span><span><b>異動紀錄裡兩種原本看不懂的紀錄補好了</b>（主管）。<b>★ 重點關注</b>的變更以前整列只顯示一個「1」或「0」、對象欄還寫成英文，現在會寫成「標記／取消重點關注專案「○○○」（負責人：△△）」；而且用<b>「對象類型 → 專案」也篩得到了</b>（以前這一批不管怎麼篩都出不來）。<b>刪除瀏覽權限規則</b>那一筆以前整行是空白的，現在會寫出刪掉的是哪一條規則。見<a href="#h-audit">異動紀錄</a>。</span></li>
-    <li><span class="d">2026-09-28</span><span><b>1600 寬的螢幕上，團隊總結看板的「主管回覆」鈕不會再被切掉</b>。面板寬度剛好卡在臨界值時會用全長版面、但其實放不下，六位成員的<span class="ui">主管回覆</span>都被裁掉一角、標題也被截斷。現在這個寬度改用窄版（標題顯示「團隊總結」、卡片內容改成單欄，反而比原本兩欄更好讀），按鈕完整。<b>1366 與 1920 的畫面沒有任何變化。</b>見<a href="#s-dash">團隊總結看板</a>。</span></li>
-    <li><span class="d">2026-09-28</span><span><b>文件連結的安全檢查變嚴格了</b>。極少數用特殊寫法偽裝成網址、實際上會在瀏覽器裡執行程式的連結，以前檢查不出來，現在填寫時與送出時都會擋下並提示重填。<b>一般網址、網路磁碟與本機路徑（檔名含空白也沒問題）、Notes 連結都照常可用</b>，既有已填的連結不受影響。見<a href="#h-doclink">文件連結</a>。</span></li>
-    <li><span class="d">2026-09-28</span><span><b>待回報的紅框看得清楚了</b>。紅框所在的那一格本來就是當週欄（粉紅底＋正中央一條紅色的當週線），原本的框顏色太淡、又比格子寬了一點，三樣紅疊在一起會被看成「格線變粗」而不是標記。現在框改成<b>深紅色、加上一層很淡的紅底，而且剛好貼齊當週那一欄</b>，年度總覽這種條很細的地方也看得出來。<b>什麼情況會亮紅框、框在哪一格都沒有變</b>；概況列右邊的圖例同步換色。見<a href="#s-ui">畫面導覽</a>。</span></li>
-    <li><span class="d">2026-09-28</span><span><b>「專案名稱」欄的寬度可以自己拖了</b>。名稱旁邊擠著類型、展開、<span class="ui">⏰ 剩N週</span>、<span class="ui">🎯</span> 這些晶片，名字長一點就被截成「…」（最糟的情況只剩七個字左右）。現在<b>把滑鼠移到表頭「專案名稱」的右邊框線上，按住就能拖寬</b>，<b>雙擊還原</b>預設；寬度會記在這台電腦上。純鍵盤可用 <kbd>Tab</kbd> 走到那根分隔線後用 <kbd>←</kbd> <kbd>→</kbd> 調整。見<a href="#h-namecol">專案名稱欄太窄看不到全名</a>。</span></li>
-    <li><span class="d">2026-09-28</span><span><b>從清單點進去填完，會自動回到清單</b>。<a href="#s-report">本週回報中心</a>、歷史補登、主管的 <span class="ui">🛠 編輯回報</span>、<span class="ui">⏰ 即將到期</span>四個清單，以前點一項進去、存完就被丟回甘特圖，要處理下一項得重開清單、再從頭往下捲（一週十幾項就是十幾趟）。現在<b>存檔、取消、按 Esc 都會回到原來的清單，捲動位置停在原地，剛填好的那一列會立刻變成「已回報」</b>。主管的 <span class="ui">🛠</span> 面板還會<b>記住你正在編輯哪位成員</b>，不會每次跳回第一個人。</span></li>
-    <li><span class="d">2026-09-27</span><span><b>複製出去的週報、待回報名單會顯示自己的群組名稱</b>。四個群組（MSD／IMD／EMS1／EMS2）用的是同一套系統，但以前複製出來的抬頭一律寫成「【MSD W○○ 週報】」；現在會跟著畫面標題顯示自己的群組，貼到通訊軟體不會再標錯單位。見<a href="#s-dash">團隊總結看板</a>。</span></li>
-    <li><span class="d">2026-09-27</span><span><b>不用滑鼠也能新增／編輯／刪除專案了</b>（主管）。名稱欄的 <span class="ui">＋</span>／<span class="ui">✎</span>／<span class="ui">🗑</span> 原本只有滑鼠移過去才出現，純鍵盤操作完全按不到；現在<b>焦點停在那一列（例如用 Tab 進到甘特條或 🎯 產出鈕）時它們也會現形</b>，按 <kbd>Shift</kbd>＋<kbd>Tab</kbd> 往回就能選到。同批修好<b>關閉視窗後焦點會回到原本按下的那顆按鈕</b>（以前會掉回頁面最前面，鍵盤使用者每關一次就要重新 Tab 一遍）。見<a href="#s-shortcuts">鍵盤快捷鍵</a>。</span></li>
-    <li><span class="d">2026-09-27</span><span>各成員的<b>群組列多了「🎯 產出 x/y」</b>，一眼看得出那個人有幾案已填具體產出（全部填完會轉綠；螢幕較窄時會收起來）。見<a href="#h-deliverable">具體產出與 MP Saving</a>。</span></li>
-    <li><span class="d">2026-09-26</span><span><b>兩種展開晶片改用不同顏色</b>。名稱欄的展開鈕原本都是藍色，但它們其實展開的是不同東西：<b><span class="ui">▸ n 條區間</span>（藍）</b>展開的是計畫區間、<b><span class="ui">▾ n</span>（青綠）</b>展開的是子區間。現在晶片的顏色就是展開後會出現的那種條的顏色（青綠＝子區間條），不必記。見<a href="#s-ui">畫面導覽</a>。</span></li>
-    <li><span class="d">2026-09-26</span><span><b>待回報的紅框改成只框「當週那一格」</b>，不再把整條區間框起來。原本排一整年的專案，紅框就是一條橫跨整個畫面的長方形——看得到「這案沒交」，卻看不出是哪一週要交，而且整排紅色反而讓人分不出輕重。現在所有待回報的紅框都落在當週紅線上、排成一直行，一眼就知道這週有幾件沒交。<b>什麼情況會亮紅框完全沒變</b>，只是框的位置變了。（當時條上還留著一個 ❗ 前綴，已於 09-28 一併拿掉，見上方那一條。）見<a href="#s-ui">畫面導覽</a>。</span></li>
-    <li><span class="d">2026-09-26</span><span><b>甘特條上的色點只剩三種顏色</b>（綠＝有執行、藍＝Monitor、灰＝未執行）。一條甘特條有時代表好幾個回報單位（收合的專案整體條、或底下有子區間的計畫區間條），<b>那一週只要有任一個單位回「有執行」，條上就是綠色</b>（優先序 有執行 › Monitor › 未執行，還沒交的單位不影響顏色）。原本「有人還沒交」會畫成第四種琥珀色，容易被當成畫面壞掉、又會把已經交的綠色蓋掉，已經移除；<b>要找誰還沒交請看紅框與 <a href="#s-dash">團隊總結看板</a>的「回報 x/y」</b>。見<a href="#s-ui">畫面導覽</a>。</span></li>
-    <li><span class="d">2026-09-26</span><span><b>搜尋框不會再跟著類型晶片一起消失了</b>。畫面變窄或開著團隊總結看板時，現在只先收 <b>a~e 類型晶片</b>，搜尋框留到真的很窄（例如 1024 又開著看板）才收——1920 開看板、1280 筆電都看得到它。順帶把幾個比較小的按鈕點擊區放大到手指／滑鼠好按的尺寸（名稱欄的 <b>▾ n</b>／<b>▸ n 條區間</b>、群組列的 <b>＋ 新增專案</b>、類型晶片、header 的週次輸入框），<b>列高與版面完全沒變</b>。見<a href="#s-ui">畫面導覽</a>。</span></li>
-    <li><span class="d">2026-09-26</span><span><b>展開後的三層比較好認了</b>。名稱欄的縮排改成<b>逐層往右</b>（專案 → 計畫區間 <span class="ui">↳</span> → 子區間），原本第二層的區間名稱反而比專案名稱更靠左，一整塊看起來會糊在一起。另外收合狀態的那條「涵蓋整個專案」的黃條，斜紋方向與底下的計畫區間條相反，方便分辨兩者。<b>條的顏色、位置、操作方式都沒有變。</b>見<a href="#s-ui">畫面導覽</a>。</span></li>
-    <li><span class="d">2026-09-26</span><span><b>有重疊計畫區間的專案，收起來就是一列一條</b>。專案列改畫一條涵蓋整個專案的黃條，名稱右邊多一顆 <b>▸ n 條區間</b>；點它（或點那條黃條）才把每條區間展開成各自一列，子區間仍接在自己那條下面。<b>沒有重疊的專案畫面完全沒變。</b>收起來時色點與待回報紅框由那條黃條代為顯示，所以不展開也看得出這週交了沒。見<a href="#s-ui">畫面導覽</a>。</span></li>
-    <li><span class="d">2026-09-26</span><span><b>鍵盤 ↑↓ 可以上下捲動甘特圖了</b>（一次 4 列，按住 Shift 為 1 列），與 <b>←→ 平移</b>成對；<b>H 回本週</b>不變。用 Tab 進到甘特條之後，改用 <b>Alt＋↑↓</b> 在條與條之間切換、Enter 開啟該條的視窗。</span></li>
-    <li><span class="d">2026-09-26</span><span>甘特圖捲到最左邊時，<b>從 W01 開始的區間條會完整顯示左端</b>（原本左側欄位的陰影會蓋掉條的左緣，看起來像被切掉一截）。捲動後陰影才出現，也順便提示「左邊還有內容」。</span></li>
-    <li><span class="d">2026-09-22</span><span><b>同一個專案裡週次重疊的計畫區間會自動分成上下兩列</b>（以前會疊在一起互相蓋住，重疊那幾週的狀態點看不到也點不開）。重疊＝兩件平行的事，<b>本來就要各打一次卡</b>，這點沒有改變。</span></li>
-    <li><span class="d">2026-09-21</span><span><b>每個視窗右上角多了「?」</b>，直接開到手冊講那個畫面的段落；header 的書本圖示改成直接停在你身分的<a href="#s-quick">快速上手</a>。新成員名下還沒有專案時，甘特圖會說明該找誰。</span></li>
-    <li><span class="d">2026-09-16</span><span>⚙️ 管理選單不再被甘特表頭蓋住；🎯 產出圖示固定在專案列最右邊；拖曳排序的藍色目標線與實際落點一致。</span></li>
-    <li><span class="d">2026-09-15</span><span><b>緊湊模式</b>在寬螢幕會自動把週欄放寬填滿（1920 可整年一頁不橫向捲動）；表頭固定時不再透出底下的甘特條。</span></li>
-    <li><span class="d">2026-09-14</span><span><b>週次改為公司週</b>（週日起始、含 1/1 那週為 W01，等同 Excel WEEKNUM），header 週數旁顯示日期區間；概況列四個狀態數字改為純統計、不再是篩選鈕；成員的 📋 本週回報中心改為較沉的琥珀色；成果清單欄寬重分（NID 一行 6 顆）。見<a href="#s-what">系統在做什麼</a>。</span></li>
-    <li><span class="d">2026-09-13</span><span>header 新增<b>使用手冊</b>入口；工具列的展開／收合四顆鈕收成「<b>顯示 ▾</b>」；<b>歷史補登</b>開關移進 ⚙️ 管理選單（全站統一叫「歷史補登」）；「回到本週」已在本週時變白底；子區間改<b>青綠色</b>、只有一種樣式；打卡視窗依開啟來源排版面（回報置頂或排程置頂）、標題列固定；年度總覽的計畫條也寫區間名稱；多群組部署（MSD／IMD／EMS1／EMS2 各自網址與資料）。</span></li>
-    <li><span class="d">2026-09-12</span><span><b>子區間可以打卡</b>（伺服器總開關，預設關閉）；<b>未來週次一律不可回報</b>（主管也不行）；⏰ 即將到期改為「剩 ≤2 週，或已過 70% 且剩 ≤4 週」；切到別的年度時所有回報入口收起並提示。見<a href="#s-subs">子區間</a>。</span></li>
-    <li><span class="d">2026-09-11</span><span>新增<b>子區間</b>：計畫區間底下可再切階段，甘特圖以縮排子列顯示，負責人可自己編。</span></li>
-    <li><span class="d">2026-08-26</span><span>任務打卡、非專案事項、下週預計<b>三處都能附文件連結</b>，主管在看板一點就開。見<a href="#h-doclink">文件連結</a>。</span></li>
-    <li><span class="d">2026-08-10</span><span>系統週數可直接輸入數字；篩到 0 筆會列出生效中的條件並各給清除鈕；連線中斷時 header 會顯示「畫面為 HH:mm 的快照」；看板新增「複製待回報名單」；打卡視窗新增「↩ 沿用上次回報」。</span></li>
-  </ul>
-</section>
-
 <footer>
   <p><span class="site-name">專案追蹤總表</span> · 使用者手冊 — 對應 2026-09-29 版功能。卡住時先按該視窗右上角的「?」，會直接開到相關說明。系統操作問題請洽管理部主管；連線、權限與部署問題請洽 IT。</p>
 </footer>
 
 </main>
+
+<!-- 右側「本章小節」：內容由 JS 依目前看到的章節重建（見頁尾 renderOnThis）。
+     ⚠ 只列**目前這一章**的小節——15 章的 h3 全部列出來是 40 條，那就不是導覽了。
+     ⚠ 1280 以下與列印時整個收掉（見 .onthis 的樣式說明）。 -->
+<aside class="onthis" aria-label="本章小節">
+  <p class="oth">本章小節</p>
+  <nav id="onthis"></nav>
+</aside>
+
+</div>
 </div>
 
 <script>
@@ -1266,6 +1274,19 @@ footer{
     });
   });
 
+  /* ── 右側「本章小節」的資料：每章底下的 h3 ──
+     ⚠ 沒有 id 的 h3 **自動補一個**（實測 40 個 h3 裡有 27 個沒有）。用 `章節id-sN` 這種
+       index 形式而不是中文 slug：純 ASCII、不必處理 CSS.escape，也不會因為標題改字就換掉錨點。
+       ⚠ 既有的 id（h-checkin／h-namecol…）是系統彈窗「?」的目標，**一個都不能動**。 */
+  var chapSubs = sections.map(function (sec) {
+    var out = [];
+    Array.prototype.forEach.call(sec.querySelectorAll('h3'), function (h3, i) {
+      if (!h3.id) h3.id = sec.id + '-s' + (i + 1);
+      out.push({ id: h3.id, el: h3, text: (h3.textContent || '').replace(/\s+/g, ' ').trim() });
+    });
+    return out;
+  });
+
   /* ── 角色篩選：章節、快速上手的角色卡、速查表的列，三層都依角色濾掉不適用的 ── */
   var roleBtns = Array.prototype.slice.call(document.querySelectorAll('.rolebtn[data-role]'));
   var roleBlocks = Array.prototype.slice.call(document.querySelectorAll('[data-role-block]'));
@@ -1294,8 +1315,80 @@ footer{
     groupEls.forEach(function (g) {
       g.el.classList.toggle('hidden', !g.links.some(function (a) { return a.style.display !== 'none'; }));
     });
+    /* 🚨 角色一換有**兩件事**同時變：①被濾掉的 h3 不一樣了 ②章節被隱藏／顯示後版面重排，
+       捲動位置沒動、讀者底下卻換成另一章了——而**重排不會派送 scroll 事件**，
+       所以一定要在這裡主動重算一次（實測：切身分後左欄高亮整個消失、右欄停在第一章的小節）。
+       force=true 是給「章沒變、但可見的 h3 變了」那一半用的。 */
+    if (typeof othNav !== 'undefined' && othNav) pickActive(true);
     try { localStorage.setItem('msd_manual_role', role); } catch (e) {}
   }
+  /* ── 右側「本章小節」的渲染 ──
+     ⚠ 被角色濾掉的 h3 要排除：快速上手的四個 h3 全在 [data-role-block] 裡（成員身分看不到主管那張卡），
+       列出來會點到一塊看不見的東西。靠 `.hidden` 判斷（角色篩選就是用它），**不要用 offsetParent**
+       ——收合的 <details> 裡的 h3 offsetParent 也是 null，但那些要留著（點了會由 revealHash 展開）。
+     ⚠ 整章沒有小節時要寫一句話，不可以留白：本手冊有 4 章 0 個 h3（登入與身分／三種檢視／疑難排解／名詞對照），
+       空面板會被讀成壞掉。 */
+  var othNav = document.getElementById('onthis');
+  var othCur = null, othLinks = [];
+  function renderOnThis(secId, force) {
+    if (secId === othCur && !force) return;      // 同一章不重畫（捲動時會一直被呼叫）
+    othCur = secId;
+    othNav.textContent = '';
+    othLinks = [];
+    var i = -1;
+    sections.forEach(function (s, k) { if (s.id === secId) i = k; });
+    var subs = i < 0 ? [] : chapSubs[i].filter(function (s) { return !s.el.closest('.hidden'); });
+    if (!subs.length) {
+      var e = document.createElement('div');
+      e.className = 'empty';
+      e.textContent = '（這一章沒有分節）';
+      othNav.appendChild(e);
+      return;
+    }
+    subs.forEach(function (s) {
+      var a = document.createElement('a');
+      a.href = '#' + s.id;
+      a.textContent = s.text;
+      othNav.appendChild(a);
+      othLinks.push({ a: a, el: s.el });
+    });
+  }
+  /* 目前看的是哪一章：直接用位置算一次。
+     ⚠ 這是下方 IntersectionObserver 的**備援與起手式**，不是取代它——
+       ①IO 的第一次回呼之前右欄會是空的（載入當下就看到一塊空白面板）
+       ②實測 document.hidden 為真時 IO 完全不派送（與本專案對 CSS transition／smooth scroll
+         在嵌入式／背景分頁不推進所做的保底是同一個理由）。
+     判定範圍與 IO 的 rootMargin 一致＝視窗高度的 10%~30% 那一帶。 */
+  function pickActive(force) {
+    var top = innerHeight * 0.10, bottom = innerHeight * 0.30, first = null, i;
+    for (i = 0; i < sections.length; i++) {
+      if (sections[i].classList.contains('hidden')) continue;
+      var r = sections[i].getBoundingClientRect();
+      if (r.bottom > top && r.top < bottom) { first = sections[i].id; break; }
+    }
+    if (!first) {                                  /* 落在兩章之間 → 取最後一個已捲過去的 */
+      for (i = sections.length - 1; i >= 0; i--) {
+        if (sections[i].classList.contains('hidden')) continue;
+        if (sections[i].getBoundingClientRect().top <= bottom) { first = sections[i].id; break; }
+      }
+    }
+    if (!first) {                                  /* 還停在最頂端（抬頭＋身分列佔滿那一帶）→ 退回第一章，
+                                                      不可以 return：那正是最多人看到的一刻 */
+      for (i = 0; i < sections.length; i++) {
+        if (!sections[i].classList.contains('hidden')) { first = sections[i].id; break; }
+      }
+    }
+    if (first) setActiveChapter(first, force);
+    else links.forEach(function (a) { a.classList.remove('on'); });
+  }
+  /* 「目前是哪一章」只由這一支決定，左欄高亮與右欄小節一起更新。
+     ⚠ 兩邊**一定要同一個來源**：之前左欄走 IO、右欄走 pickActive，兩者在切換身分後會各自停在不同章，
+       畫面上就是「左邊沒有高亮、右邊列的是別章的小節」。 */
+  function setActiveChapter(id, force) {
+    links.forEach(function (a) { a.classList.toggle('on', a.getAttribute('href') === '#' + id); });
+    renderOnThis(id, force);
+  }
+
   /* 情境式連結：系統各視窗的「?」帶著 #錨點 開過來。錨點若落在目前身分被濾掉的章節裡（例：主管從打卡視窗開到成員章），
      切回「全部內容」再捲到位——否則會停在一片空白。 */
   function revealHash() {
@@ -1363,20 +1456,54 @@ footer{
     else if (mq.addListener) mq.addListener(onMq);
   }
 
-  /* ── 目錄跟隨捲動 ── */
+  /* ── 目錄跟隨捲動 ──
+     IntersectionObserver 在這裡只當「有東西變了，去重算」的**觸發器**，答案一律由 pickActive() 的
+     幾何判定給（判定範圍與下面的 rootMargin 是同一帶）。
+     🚨 **不要回去用「維護一個 visible Set、取文件順序最前者」那種寫法**（2026-10-11 修）：
+        那個 Set 會殘留——章節被角色篩選 display:none、或瞬間跳很遠時，早期章節的舊項目留在集合裡，
+        而它在文件順序上永遠排第一 → 高亮就卡在第 1 章拿不下來（實測切換身分後左欄高亮整個消失／停在第 01 章，
+        而 IO 又跑在 scroll 之後，連帶把右欄正確的小節也覆蓋掉）。
+        幾何判定沒有狀態，不會殘留。 */
   if ('IntersectionObserver' in window) {
-    var visible = new Set();
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (e.isIntersecting) visible.add(e.target.id); else visible.delete(e.target.id);
-      });
-      var first = sections.filter(function (s) { return visible.has(s.id); })[0];
-      links.forEach(function (a) {
-        a.classList.toggle('on', !!first && a.getAttribute('href') === '#' + first.id);
-      });
-    }, { rootMargin: '-10% 0px -70% 0px' });
+    var io = new IntersectionObserver(function () { pickActive(); },
+      { rootMargin: '-10% 0px -70% 0px' });
     sections.forEach(function (s) { io.observe(s); });
   }
+  /* 右欄的起手式與備援（見 pickActive 的說明）：載入先算一次，捲動時低頻補算。
+     這一頁有 23,000px 高、每次重算要走 15 個章節的 rect，所以 handler 掛 passive 並節流。
+     🚨 **節流不可以用 requestAnimationFrame**（2026-10-11 實測）：頁面沒有在算繪製時
+        （`document.hidden` 為真——嵌入式檢視、背景分頁）rAF **永遠不會推進**，
+        於是 othTick 卡在 true，之後每一次捲動都被 early-return 擋掉 → 右欄從此不再更新。
+        這與本專案在 CSS transition、smooth scroll、IntersectionObserver 上踩到的是同一類坑，
+        一律改用 setTimeout 這種「與繪製無關」的計時器。 */
+  pickActive();
+  var othTick = false, othPending = false;
+  function othThrottled(fn) {
+    return function () {
+      if (othTick) { othPending = true; return; }     /* 冷卻中：記下來，收尾再補跑一次 */
+      othTick = true;
+      setTimeout(function () {
+        othTick = false;
+        fn();
+        /* 🚨 **trailing 呼叫不可以省**：只有 leading 的話，冷卻期間送達的最後一個 scroll 事件
+           會被整個丟掉——捲動停下來的那一刻剛好落在冷卻期內時，畫面就停在**上一章**，
+           要等下一次捲動才會修正（實測瞬間跳一大段時，高亮會慢 600~800ms 才跟上）。 */
+        if (othPending) { othPending = false; setTimeout(fn, 80); }
+      }, 80);
+    };
+  }
+  /* 小節層的高亮：目前捲到哪一個 h3。與上面同一個 handler，少掛一個監聽器也少一次 rect 掃描。 */
+  function syncOnThis() {
+    pickActive();
+    if (!othLinks.length) return;
+    var cur = null;
+    othLinks.forEach(function (o) {
+      if (o.el.getBoundingClientRect().top <= innerHeight * 0.32) cur = o.a;
+    });
+    othLinks.forEach(function (o) { o.a.classList.toggle('on', o.a === cur); });
+  }
+  addEventListener('scroll', othThrottled(syncOnThis), { passive: true });
+  addEventListener('resize', othThrottled(syncOnThis), { passive: true });
 })();
 </script>
 </body>
